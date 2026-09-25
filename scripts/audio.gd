@@ -38,6 +38,8 @@ func _ready() -> void:
 	gen.buffer_length = 0.12
 	player.stream = gen
 	player.volume_db = -4.0
+	# Web exports default to sample playback, which cannot play a generator stream.
+	player.playback_type = AudioServer.PLAYBACK_TYPE_STREAM
 	add_child(player)
 	player.play()
 	playback = player.get_stream_playback()

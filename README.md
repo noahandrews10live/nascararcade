@@ -37,6 +37,15 @@ low-poly geometry, per-vertex lighting, distance fog and optional CRT scanlines.
    godot --path .
    ```
 
+### Web build
+
+`export_presets.cfg` has a **Web** preset. It is single-threaded, so it runs on ordinary
+static hosting without cross-origin isolation headers. Install the Godot 4.3 export
+templates, then run:
+```sh
+godot --headless --path . --export-release Web build/web/index.html
+```
+
 ## Controls
 
 | Action | Keyboard | Gamepad |
