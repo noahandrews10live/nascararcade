@@ -1,0 +1,183 @@
+extends Control
+## In-race HUD: time, lap, position, speedo/tach, draft meter, minimap and big messages.
+
+var race: Node3D
+var track: Node3D
+var time_left := 0.0
+var show_timer := true
+
+var l_time_cap: Label
+var l_time: Label
+var l_lap_cap: Label
+var l_lap: Label
+var l_laptime: Label
+var l_pos_cap: Label
+var l_pos: Label
+var l_pos_of: Label
+var l_speed: Label
+var l_mph: Label
+var l_gear: Label
+var l_draft: Label
+var l_msg: Label
+var l_sub: Label
+var l_board: Label
+
+var msg_time := 0.0
+var msg_scale_t := 0.0
+var sub_time := 0.0
+var blink := 0.0
+
+
+func _ready() -> void:
+	set_anchors_preset(Control.PRESET_FULL_RECT)
+	mouse_filter = Control.MOUSE_FILTER_IGNORE
+	l_time_cap = _add(Game.make_label("TIME", 16, Color(1, 0.9, 0.2), 5), Vector2(0, 6), 1)
+	l_time = _add(Game.make_label("60", 52, Color(1, 0.9, 0.2), 8), Vector2(0, 20), 1)
+	l_lap_cap = _add(Game.make_label("LAP", 16, Color(0.4, 0.9, 1.0), 5), Vector2(14, 8), 0)
+	l_lap = _add(Game.make_label("1/3", 34, Color.WHITE, 7), Vector2(14, 22), 0)
+	l_laptime = _add(Game.make_label("", 14, Color(0.8, 1.0, 0.8), 4), Vector2(14, 64), 0)
+	l_pos_cap = _add(Game.make_label("POSITION", 16, Color(0.4, 0.9, 1.0), 5), Vector2(-14, 8), 2)
+	l_pos = _add(Game.make_label("12TH", 40, Color(1.0, 0.35, 0.2), 8), Vector2(-14, 22), 2)
+	l_pos_of = _add(Game.make_label("OF 12", 14, Color.WHITE, 4), Vector2(-14, 70), 2)
+	l_speed = _add(Game.make_label("0", 44, Color.WHITE, 8), Vector2(-70, -64), 3)
+	l_mph = _add(Game.make_label("MPH", 16, Color(1, 0.9, 0.2), 5), Vector2(-20, -40), 3)
+	l_gear = _add(Game.make_label("1", 26, Color(0.4, 1.0, 0.4), 6), Vector2(-122, -104), 3)
+	l_draft = _add(Game.make_label("DRAFT", 18, Color(0.3, 1.0, 1.0), 5), Vector2(-150, -130), 3)
+	l_board = _add(Game.make_label("", 11, Color.WHITE, 3), Vector2(10, 108), 0)
+	l_msg = Game.make_label("", 48, Color(1, 0.9, 0.2), 8)
+	l_msg.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	l_msg.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	l_msg.size = Vector2(640, 80)
+	l_msg.position = Vector2(0, 150)
+	l_msg.pivot_offset = Vector2(320, 40)
+	add_child(l_msg)
+	l_sub = Game.make_label("", 22, Color.WHITE, 6)
+	l_sub.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	l_sub.size = Vector2(640, 30)
+	l_sub.position = Vector2(0, 222)
+	add_child(l_sub)
+
+
+## corner: 0 top-left, 1 top-centre, 2 top-right, 3 bottom-right
+func _add(l: Label, p: Vector2, corner: int) -> Label:
+	add_child(l)
+	match corner:
+		0:
+			l.position = p
+		1:
+			l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+			l.size = Vector2(640, 0)
+			l.position = Vector2(0, p.y)
+		2:
+			l.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+			l.size = Vector2(200, 0)
+			l.position = Vector2(640 - 200 + p.x, p.y)
+		3:
+			l.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+			l.size = Vector2(120, 0)
+			l.position = Vector2(640 - 120 + p.x, 480 + p.y)
+	return l
+
+
+func message(text: String, seconds := 2.0, color := Color(1, 0.9, 0.2)) -> void:
+	l_msg.text = text
+	l_msg.label_settings.font_color = color
+	msg_time = seconds
+	msg_scale_t = 0.0
+
+
+func sub_message(text: String, seconds := 2.0) -> void:
+	l_sub.text = text
+	sub_time = seconds
+
+
+func clear_messages() -> void:
+	msg_time = 0.0
+	sub_time = 0.0
+	l_msg.text = ""
+	l_sub.text = ""
+
+
+func _process(delta: float) -> void:
+	blink += delta
+	if msg_time > 0.0:
+		msg_time -= delta
+		msg_scale_t = min(msg_scale_t + delta * 6.0, 1.0)
+		var sc: float = 1.0 + (1.0 - msg_scale_t) * 1.5
+		l_msg.scale = Vector2(sc, sc)
+		l_msg.visible = true
+	else:
+		l_msg.visible = false
+	if sub_time > 0.0:
+		sub_time -= delta
+		l_sub.visible = int(blink * 4.0) % 2 == 0 or sub_time > 1.0
+	else:
+		l_sub.visible = false
+	if race == null or race.player == null:
+		return
+	var p: Node3D = race.player
+	l_time.text = "%d" % ceil(max(time_left, 0.0))
+	var low := time_left < 10.0
+	l_time.label_settings.font_color = Color(1, 0.2, 0.15) if low else Color(1, 0.9, 0.2)
+	l_time.visible = show_timer and (not low or int(blink * 4.0) % 2 == 0)
+	l_time_cap.visible = show_timer
+	var lap_now: int = clamp(p.lap() + 1, 1, race.laps)
+	l_lap.text = "%d/%d" % [lap_now, race.laps]
+	var cur: float = race.time - p.lap_start_time if p.lap() >= 0 else 0.0
+	l_laptime.text = "LAP  %s\nBEST %s" % [Game.format_time(cur), Game.format_time(p.best_lap)]
+	var pos: int = race.position_of(p)
+	l_pos.text = Game.ordinal(pos)
+	l_pos_of.text = "OF %d" % race.cars.size()
+	l_speed.text = "%d" % int(abs(p.v) * Game.MPS_TO_MPH)
+	l_gear.text = "R" if p.v < -0.1 else str(p.gear())
+	l_draft.visible = p.draft > 0.35 and int(blink * 6.0) % 2 == 0
+	# mini leaderboard of the top 5
+	var lines := PackedStringArray()
+	for i in min(5, race.order.size()):
+		var c: Node3D = race.order[i]
+		lines.append("%d  #%-3s %s" % [i + 1, c.team.num, "YOU" if c.is_player else c.team.driver.get_slice(" ", 1)])
+	l_board.text = "\n".join(lines)
+	queue_redraw()
+
+
+func _draw() -> void:
+	if race == null or race.player == null or track == null:
+		return
+	var p: Node3D = race.player
+	# Tachometer arc (LED segments)
+	var center := Vector2(575, 425)
+	var radius := 58.0
+	var segs := 24
+	var frac: float = clamp((p.rpm() - 2000.0) / 7600.0, 0.0, 1.0)
+	for i in segs:
+		var t := float(i) / segs
+		var a0: float = lerp(PI * 0.95, PI * 1.95, t)
+		var a1: float = lerp(PI * 0.95, PI * 1.95, t + 0.8 / segs)
+		var col := Color(0.2, 1.0, 0.3) if t < 0.6 else (Color(1.0, 0.9, 0.2) if t < 0.85 else Color(1.0, 0.2, 0.2))
+		if t > frac:
+			col = Color(0.15, 0.15, 0.2, 0.7)
+		draw_arc(center, radius, a0, a1, 3, col, 9.0)
+	# Draft meter
+	var dm := Rect2(Vector2(478, 468), Vector2(150, 6))
+	draw_rect(dm, Color(0, 0, 0, 0.6))
+	draw_rect(Rect2(dm.position, Vector2(dm.size.x * p.draft, dm.size.y)), Color(0.3, 1.0, 1.0))
+	# Minimap
+	var mm_pos := Vector2(12, 360)
+	var mm_size := 110.0
+	draw_rect(Rect2(mm_pos - Vector2(4, 4), Vector2(mm_size + 8, mm_size + 8)), Color(0, 0, 0, 0.35))
+	var pts: PackedVector2Array = track.minimap
+	var poly := PackedVector2Array()
+	for q in pts:
+		poly.append(mm_pos + q * mm_size)
+	poly.append(poly[0])
+	draw_polyline(poly, Color(0, 0, 0, 0.8), 5.0)
+	draw_polyline(poly, Color(0.85, 0.85, 0.9), 2.5)
+	var sf: Vector2 = mm_pos + track.to_minimap(track.pos[0]) * mm_size
+	draw_circle(sf, 3.0, Color.WHITE)
+	for c in race.cars:
+		if c == p:
+			continue
+		draw_circle(mm_pos + track.to_minimap(c.global_position) * mm_size, 3.0, c.team.c1)
+	var pp: Vector2 = mm_pos + track.to_minimap(p.global_position) * mm_size
+	draw_circle(pp, 5.0, Color(0, 0, 0))
+	draw_circle(pp, 4.0, Color(1, 0.9, 0.1) if int(blink * 5.0) % 2 == 0 else Color(1, 0.3, 0.1))
