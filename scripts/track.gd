@@ -1022,7 +1022,6 @@ func _build_probes() -> void:
 		probe.intensity = 0.9
 		probe.max_distance = 400.0
 		probe.ambient_mode = ReflectionProbe.AMBIENT_DISABLED
-		probe.blend_distance = 20.0
 		add_child(probe)
 		probe.position = pos[i] + Vector3.UP * 2.5
 		probe.rotation.y = atan2(right[i].x, right[i].z)

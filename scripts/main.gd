@@ -360,7 +360,7 @@ func _apply_quality(night: bool) -> void:
 ## shaders/motion_blur.gdshader. Off in menus, split screen and the 1999 look.
 var _blur: MeshInstance3D
 var _blur_mat: ShaderMaterial
-var _prev_vp := Projection()
+var _prev_view := Projection()
 var _prev_cam := Transform3D()
 
 
@@ -388,15 +388,15 @@ func _update_motion_blur() -> void:
 	var on: bool = Game.modern and Game.motion_blur > 0 and split_cams.is_empty() and not paused \
 		and state in [State.COUNTDOWN, State.RACE, State.FINISHED, State.REPLAY]
 	var xf := cam.global_transform
-	var vp := cam.get_camera_projection() * Projection(xf.affine_inverse())
+	var view := Projection(xf.affine_inverse())
 	# A camera cut would smear the whole frame: start fresh instead.
 	var cut: bool = xf.origin.distance_to(_prev_cam.origin) > 25.0 or xf.basis.z.dot(_prev_cam.basis.z) < 0.9
 	_blur.visible = on and not cut
 	if on:
-		_blur_mat.set_shader_parameter("prev_view_proj", _prev_vp)
+		_blur_mat.set_shader_parameter("prev_view", _prev_view)
 		_blur_mat.set_shader_parameter("amount", 0.35 if Game.motion_blur == 1 else 0.7)
 		_blur_mat.set_shader_parameter("samples", 6 if Game.quality_level() <= 2 else 10)
-	_prev_vp = vp
+	_prev_view = view
 	_prev_cam = xf
 
 

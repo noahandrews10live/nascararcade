@@ -723,14 +723,17 @@ func _build_model() -> void:
 	sparks.initial_velocity_min = 6.0
 	sparks.initial_velocity_max = 14.0
 	sparks.gravity = Vector3(0, -12, 0)
-	sparks.scale_amount_min = 0.08
-	sparks.scale_amount_max = 0.15
+	sparks.scale_amount_min = 0.6
+	sparks.scale_amount_max = 1.2
+	# The spark size lives in the quad itself: particle scale doesn't reliably
+	# survive billboarding, and a 1 m "spark" fills the screen.
 	var qm := QuadMesh.new()
-	qm.size = Vector2(1, 1)
+	qm.size = Vector2(0.1, 0.1)
 	var spm := StandardMaterial3D.new()
 	spm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	spm.albedo_color = Color(1.0, 0.75, 0.2)
-	spm.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
+	# Slightly over-bright so sparks catch the bloom in the Modern look.
+	spm.albedo_color = Color(2.2, 1.4, 0.4) if Game.modern else Color(1.0, 0.75, 0.2)
+	spm.billboard_mode = BaseMaterial3D.BILLBOARD_PARTICLES
 	qm.material = spm
 	sparks.mesh = qm
 	sparks.position = Vector3(HALF_W, 0.4, 0.5)
@@ -773,8 +776,8 @@ func _smoke_emitter(col: Color, size: float) -> GeometryInstance3D:
 	p.initial_velocity_min = 1.0
 	p.initial_velocity_max = 3.0
 	p.gravity = Vector3(0, 1.2, 0)
-	p.scale_amount_min = size * 0.6
-	p.scale_amount_max = size
+	p.scale_amount_min = 0.8
+	p.scale_amount_max = 1.3
 	var curve := Curve.new()
 	curve.add_point(Vector2(0, 0.4))
 	curve.add_point(Vector2(1, 1.0))
@@ -784,6 +787,7 @@ func _smoke_emitter(col: Color, size: float) -> GeometryInstance3D:
 	grad.set_color(1, Color(col.r, col.g, col.b, 0.0))
 	p.color_ramp = grad
 	var qm := QuadMesh.new()
+	qm.size = Vector2(size, size) * 0.6 # base puff size in the quad (see sparks)
 	var m := StandardMaterial3D.new()
 	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
@@ -814,8 +818,8 @@ func _gpu_smoke(col: Color, size: float) -> GPUParticles3D:
 	pm.damping_min = 1.5
 	pm.damping_max = 2.5
 	pm.inherit_velocity_ratio = 0.35
-	pm.scale_min = size * 0.6
-	pm.scale_max = size * 1.1
+	pm.scale_min = 0.8
+	pm.scale_max = 1.3
 	pm.emission_shape = ParticleProcessMaterial.EMISSION_SHAPE_BOX
 	pm.emission_box_extents = Vector3(0.9, 0.1, 0.6)
 	var curve := Curve.new()
@@ -834,6 +838,7 @@ func _gpu_smoke(col: Color, size: float) -> GPUParticles3D:
 	pm.angle_max = 180.0
 	p.process_material = pm
 	var qm := QuadMesh.new()
+	qm.size = Vector2(size, size) * 0.6
 	var m := StandardMaterial3D.new()
 	# Lit, so the smoke picks up sun and shadow instead of glowing.
 	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
