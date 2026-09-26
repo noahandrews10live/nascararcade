@@ -114,6 +114,8 @@ func tick(delta: float) -> void:
 			_green_tick(delta)
 		Flag.YELLOW:
 			caution_elapsed += delta
+			if caution_elapsed > 20.0 and not race.debris.is_empty():
+				race.clear_debris() # the safety crews sweep it up
 			_caution_tick(delta)
 	if flag != Flag.CHECKERED:
 		_spotter(delta)
@@ -482,22 +484,47 @@ func _start_service(c: Node3D) -> void:
 	c.r = 0.0
 	c.pitted_this_caution = true
 	var tyre_t := 0.0
+	var corners: Array = []
 	match c.pit_plan:
 		"4":
 			tyre_t = 10.0 + randf() * 1.6
-			c.tyre_wear = 0.0
+			corners = [0, 1, 2, 3]
 		"2":
 			tyre_t = 5.8 + randf() * 1.0
-			c.tyre_wear *= 0.5
+			corners = [1, 3] # right sides
+	# Any tyre that's down gets changed whatever the plan.
+	for i in 4:
+		if c.tyre_air[i] < 0.95 and not corners.has(i):
+			corners.append(i)
+			tyre_t = max(tyre_t, 5.8 if corners.size() <= 2 else 10.0)
+	c.change_tyres(corners)
+	c.grille_block = 0.0 # the crew pulls the debris off
 	var fuel_add: float = Car.FUEL_CAPACITY - c.fuel
 	var fuel_t: float = fuel_add / 7.5
 	c.fuel = Car.FUEL_CAPACITY
 	var repair := 0.0
 	if c.total_damage() > 0.05:
 		repair = 6.0 + c.total_damage() * 40.0
+		# Damaged vehicle policy: repairs come off a six-minute clock, and a car that
+		# can't be fixed well enough to make minimum speed is out.
+		if c.total_damage() > 0.12:
+			if c.dvp_clock < 0.0:
+				c.dvp_clock = 360.0
+			c.dvp_clock -= repair
 		for k in c.damage:
 			c.damage[k] *= 0.4
 		c._update_damage_visual()
+		if c.dvp_clock >= 0.0:
+			if c.dvp_clock <= 0.0:
+				c.out = true
+				c.out_reason = "DVP"
+				message_for(c, "DAMAGED VEHICLE POLICY: OUT OF TIME - YOUR RACE IS OVER", "pit")
+			elif c.total_damage() > 0.3:
+				c.out = true
+				c.out_reason = "DVP"
+				message_for(c, "TOO MUCH DAMAGE TO MAKE MINIMUM SPEED - PARKED", "pit")
+			else:
+				message_for(c, "DAMAGED VEHICLE POLICY: %d:%02d OF REPAIRS LEFT" % [int(c.dvp_clock) / 60, int(c.dvp_clock) % 60], "pit")
 	c.pit_timer = max(tyre_t, fuel_t) * c.pit_crew_mult + repair
 	message_for(c, "PIT STOP  %s  %.1fs" % [{"4": "4 TIRES + FUEL", "2": "2 TIRES + FUEL", "F": "FUEL ONLY"}.get(c.pit_plan, "FUEL"), c.pit_timer], "pit")
 

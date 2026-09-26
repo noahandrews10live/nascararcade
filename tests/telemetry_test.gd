@@ -93,6 +93,7 @@ func _run() -> void:
 		race.free()
 		t.free()
 	_wreck_tests(game)
+	_failure_tests(game)
 	print("FAILURES: ", failures)
 	quit(1 if failures > 0 else 0)
 
@@ -139,4 +140,52 @@ func _wreck_tests(game: Node) -> void:
 		else:
 			_check(not went, "%s: stays on its wheels" % case[0])
 		race.free()
+	t.free()
+
+
+## Engine temperature settles in its range, a blocked grille overheats it, and a
+## right-front blowout at speed puts the car in the wall.
+func _failure_tests(game: Node) -> void:
+	var t: Node3D = Track.new()
+	root.add_child(t)
+	t.setup(game.tracks[1])
+	print("== failures (", game.tracks[1].name, ")")
+	var race: Node3D = Race.new()
+	root.add_child(race)
+	race.setup(t, -1, 20, 1)
+	race.grid_up(0.0, 30.0)
+	race.go_green()
+	var c: Node3D = race.cars[0]
+	for i in 60 * 70:
+		race.tick(DT)
+	print("   water temp after 70 s: %.0f C" % c.engine_temp)
+	_check(c.engine_temp > 90.0 and c.engine_temp < 122.0, "water temp settles at 90-122 C")
+	c.grille_block = 0.6
+	var peak := 0.0
+	for i in 60 * 45:
+		race.tick(DT)
+		peak = max(peak, c.engine_temp)
+	print("   with the grille 60%% blocked: peak %.0f C" % peak)
+	_check(peak > 125.0, "a blocked grille overheats the engine")
+	c.grille_block = 0.0
+	c.engine_temp = 100.0
+	# Wait for turn entry at speed, then the right front lets go.
+	for i in 60 * 60:
+		race.tick(DT)
+		if abs(t.curvature_at(c.s() + 40.0)) > 0.003 and abs(t.curvature_at(c.s())) < 0.0015:
+			break
+	var hit := false
+	var d0: float = c.d
+	var d_max: float = c.d
+	c.fail_tyre(1, "blowout")
+	for i in 60 * 8:
+		race.tick(DT)
+		hit = hit or c.wall_hit > 2.0 or c.d > t.outer_edge() - 1.5
+		d_max = max(d_max, c.d)
+		if OS.get_environment("TRACE") != "" and i % 20 == 0:
+			print("     t=%.2f v=%.1f d=%.1f yaw=%.2f alpha_f=%.3f scrub=%.2f air=%.2f k=%.4f cap=%s" % [i / 60.0, c.v, c.d, c.yaw, c._alpha[1], c.scrub, c.tyre_air[1], t.curvature_at(c.s()), str(c._cap)])
+	print("   right-front blowout: air %.2f, pushed %.1f m up the track, hit the wall=%s" % [c.tyre_air[1], d_max - d0, hit])
+	_check(c.tyre_air[1] < 0.05, "a blown tyre goes flat")
+	_check(hit or d_max - d0 > 5.0, "a right-front blowout loses the front: the car pushes up the track")
+	race.free()
 	t.free()

@@ -212,6 +212,18 @@ var tyre_temp := PackedFloat32Array([60, 60, 60, 60])
 var tyre_psi := PackedFloat32Array([0, 0, 0, 0])
 var tyre_wear4 := PackedFloat32Array([0, 0, 0, 0])
 var cold_psi := 1.0 # garage pressure setting (1 = standard)
+# Tyre failures: air left in each tyre (1 = full), how fast it's leaking (per s),
+# and flat spots worn in by locking a wheel.
+var tyre_air := PackedFloat32Array([1, 1, 1, 1])
+var tyre_leak := PackedFloat32Array([0, 0, 0, 0])
+var flat_spot := PackedFloat32Array([0, 0, 0, 0])
+# Engine: water temperature (C) and how much of the grille is blocked (debris,
+# a torn-off sign, front damage). Running tucked up behind another car heats it too.
+var engine_temp := 90.0
+var grille_block := 0.0
+var _overheat_time := 0.0
+var dvp_clock := -1.0 # damaged vehicle policy: repair time left (s); -1 = not on the clock
+signal tyre_failed(car: Node3D, wheel: int, kind: String)
 var _wear_avg := 0.0
 var r_max_now := 1.0 # yaw rate the grip allows right now (for the AI)
 var _fy_f_prev := 0.0
@@ -290,6 +302,8 @@ func _update_tyres_before() -> void:
 		tyre_psi[i] = psi
 		var over: float = max(psi / (22.0 * 1.2) - 1.0, 0.0)
 		_tyre_factor[i] = temp_f * (1.0 - 0.14 * clamp(tyre_wear4[i], 0.0, 1.5)) * (1.0 - 2.0 * over * over)
+		# A tyre going down loses nearly everything; a flat spot costs a little.
+		_tyre_factor[i] *= (0.12 + 0.88 * tyre_air[i]) * (1.0 - 0.04 * flat_spot[i])
 
 
 func _update_tyres_after(delta: float, travelled: float) -> void:
@@ -307,8 +321,86 @@ func _update_tyres_after(delta: float, travelled: float) -> void:
 		tyre_wear4[i] += (travelled / 1000.0 * 0.004 + _slip_power[i] * 2.2e-8 * hot) * burn_scale * wear_mult
 		_slip_power[i] = 0.0
 		total += tyre_wear4[i]
+		# Locking a wheel at speed grinds a flat spot into it.
+		if locked_wheels & (1 << i) and abs(v) > 15.0:
+			flat_spot[i] = min(flat_spot[i] + delta * abs(v) / 60.0, 1.0)
+		# Blowouts: cooked or corded tyres let go (right front most often).
+		if tyre_air[i] > 0.0 and tyre_leak[i] == 0.0:
+			var risk: float = max(tyre_temp[i] - 170.0, 0.0) * 0.02 + max(tyre_wear4[i] - 1.0, 0.0) * 0.6
+			if risk > 0.0 and randf() < risk * delta:
+				fail_tyre(i, "blowout")
+		if tyre_leak[i] > 0.0:
+			tyre_air[i] = max(tyre_air[i] - tyre_leak[i] * delta, 0.0)
 	tyre_wear = total * 0.25
 	_wear_avg = tyre_wear
+	# Bent sheet metal rubbing a front tyre can cut it; a caved-in nose blocks the
+	# grille.
+	for i in 2:
+		var side_dmg: float = damage.left if i == 0 else damage.right
+		if side_dmg > 0.25 and abs(v) > 20.0 and randf() < (side_dmg - 0.25) * 0.015 * delta:
+			fail_tyre(i, "cut")
+	grille_block = max(grille_block, clamp((damage.front - 0.3) * 0.7, 0.0, 0.45))
+	flat_time = flat_time + delta if has_flat() else 0.0
+	_update_engine(delta)
+
+
+## A tyre starts losing air: "blowout" (gone in half a second) or "cut" (a slow
+## leak from debris or a fender rub; the driver has a lap or two to get it in).
+func fail_tyre(i: int, kind: String) -> void:
+	if tyre_air[i] <= 0.0 or tyre_leak[i] > 0.0:
+		return
+	tyre_leak[i] = 2.5 if kind == "blowout" else randf_range(0.02, 0.06)
+	tyre_failed.emit(self, i, kind)
+
+
+## New tyres on the given corners (0 FL, 1 FR, 2 RL, 3 RR): no wear, full air, no
+## flat spots, and cold.
+func change_tyres(corners: Array) -> void:
+	var amb: float = track.track_temp() if track else 30.0
+	for i in corners:
+		tyre_wear4[i] = 0.0
+		tyre_air[i] = 1.0
+		tyre_leak[i] = 0.0
+		flat_spot[i] = 0.0
+		tyre_temp[i] = amb + 12.0
+	tyre_wear = (tyre_wear4[0] + tyre_wear4[1] + tyre_wear4[2] + tyre_wear4[3]) * 0.25
+	_wear_avg = tyre_wear
+
+
+var flat_time := 0.0 # how long a tyre has been down (drivers take a moment to react)
+
+
+func has_flat() -> bool:
+	for i in 4:
+		if tyre_air[i] < 0.6:
+			return true
+	return false
+
+
+## Water temperature: heat from the engine working, cooled by air through the
+## grille. Tucked up behind another car (dirty air) or with the grille blocked it
+## climbs; past ~125 C the engine is protected (less power), past 145 C it fails.
+func _update_engine(delta: float) -> void:
+	var airflow: float = clamp(abs(v) / 80.0, 0.15, 1.2) * (1.0 - grille_block) * (1.0 - 0.12 * clamp(draft, 0.0, 1.0)) * (1.0 - 0.4 * clamp(damage.front - 0.2, 0.0, 1.0))
+	var heat: float = (0.25 + 0.75 * throttle) * 2.4
+	engine_temp += (heat - (engine_temp - 40.0) * airflow * 0.037) * delta
+	engine_temp = clamp(engine_temp, 40.0, 170.0)
+	# In clean air at speed, debris on the grille can blow off (drivers pull out of
+	# line to clear it).
+	if grille_block > 0.0 and grille_block < 0.4 and draft < 0.1 and abs(v) > 55.0:
+		grille_block = max(grille_block - 0.012 * delta, 0.0)
+	if engine_temp > 145.0:
+		_overheat_time += delta
+		if _overheat_time > 10.0 and not out:
+			out = true
+			out_reason = "ENGINE"
+	else:
+		_overheat_time = max(_overheat_time - delta, 0.0)
+
+
+## Engine protection when hot.
+func engine_derate() -> float:
+	return clamp(1.0 - (engine_temp - 125.0) / 60.0, 0.5, 1.0)
 
 
 func _engine_power(rpm_v: float) -> float:
@@ -363,6 +455,11 @@ func _sample_road(ss: float, h: float) -> void:
 	var sy := sin(yaw)
 	for i in 4:
 		var rh: float = track.road_height(ss + WX[i] * cy - WY[i] * sy, d + WY[i] * cy + WX[i] * sy)
+		if flat_spot[i] > 0.05:
+			# Once a wheel revolution the flat spot thumps the suspension.
+			rh += flat_spot[i] * 0.004 * sin(dist / 0.36 + i)
+		if tyre_air[i] < 1.0:
+			rh -= (1.0 - tyre_air[i]) * 0.09 # the car sits down on the flat
 		_road_rate[i] = clamp((rh - _road[i]) / h, -2.0, 2.0)
 		_road[i] = rh
 
@@ -474,7 +571,7 @@ func _integrate(h: float) -> void:
 	_auto_shift()
 	rpm_now = clamp(abs(u) * RPM_PER_MPS[gear - 1] * gear_scale * gear_track, 2800.0, REDLINE + 200.0)
 	var dmg_power: float = 1.0 - 0.45 * clamp(damage.front - 0.35, 0.0, 1.0)
-	var p_avail: float = _engine_power(rpm_now) * dmg_power
+	var p_avail: float = _engine_power(rpm_now) * dmg_power * engine_derate()
 	if rpm_now >= REDLINE or fuel <= 0.0:
 		p_avail = 0.0
 	var fx_drive: float = throttle * p_avail * 0.88 / max(abs(u), 4.0)
@@ -589,6 +686,10 @@ func _integrate(h: float) -> void:
 	fx[1] = -fx_brake * 0.29
 	fx[2] = fx_drive * 0.5 - fx_brake * 0.21
 	fx[3] = fx_drive * 0.5 - fx_brake * 0.21
+	# A flat tyre drags (rim and rubber on the ground), pulling the car that way.
+	for i in 4:
+		if tyre_air[i] < 0.9:
+			fx[i] -= (1.0 - tyre_air[i]) * 0.18 * _nw[i] * sign(u)
 	var spool_slip: float = (-2.0 * r * TW) / au - stagger
 	var f_sp: float = clamp(SPOOL_K * spool_slip * (_nw[2] + _nw[3]) * 0.5, -0.22 * cap_r, 0.22 * cap_r)
 	fx[2] += f_sp
@@ -1041,7 +1142,8 @@ func _update_visual(delta: float) -> void:
 	model.transform = Transform3D(bb, pivot + Vector3(0.0, chassis_z, 0.0) - bb * pivot)
 	for j in wheels.size():
 		var holder: Node3D = wheels[j].get_parent()
-		holder.position.y = 0.345 + clamp(_defl[WHEEL_OF_HOLDER[j]], -0.12, 0.14)
+		var wi: int = WHEEL_OF_HOLDER[j]
+		holder.position.y = 0.345 + clamp(_defl[wi], -0.12, 0.14) - (1.0 - tyre_air[wi]) * 0.09
 	_tr_prev = _tr_cur if _has_tr and _tr_cur.origin.distance_squared_to(tr.origin) < 400.0 else tr
 	_tr_cur = tr
 	_has_tr = true
@@ -1053,7 +1155,7 @@ func _update_visual(delta: float) -> void:
 		if i % 2 == 0: # front wheels
 			wheels[i].get_parent().rotation.y = -_delta_f * 2.0
 	if sparks:
-		sparks.emitting = scraping and speed() > 12.0
+		sparks.emitting = (scraping or (has_flat() and speed() > 8.0)) and speed() > 8.0
 		sparks.position.x = HALF_W * sign(d)
 	if _haze:
 		# Heat shimmer from the exhaust: strongest on the gas, fades at speed as the

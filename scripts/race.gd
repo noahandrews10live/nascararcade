@@ -42,12 +42,18 @@ var wear_scale := 1.0 # fuel burn / tyre wear multiplier so short races still ne
 
 ## `grid` (optional) is the starting order as team indices, e.g. from qualifying.
 var skids: MultiMeshInstance3D
+## Debris on the track from wrecks: [{s, d, age}]. Running over it can cut a tyre
+## or block the grille; a lot of it brings out the caution.
+var debris: Array = []
+var _debris_mm: MultiMeshInstance3D
+const MAX_DEBRIS := 48
 
 func setup(trk: Node3D, player_team: int, lap_count: int, size := 40, grid: Array = [], player2_team := -1) -> void:
 	track = trk
 	track.rubber_laps = 0.0
 	skids = SkidMarks.new()
 	add_child(skids)
+	_build_debris_mesh()
 	laps = lap_count
 	field_size = size
 	if Game.debug_seed != 0:
@@ -95,6 +101,7 @@ func setup(trk: Node3D, player_team: int, lap_count: int, size := 40, grid: Arra
 		c.ai_aggression = rng.randf_range(0.2, 0.9)
 		c.set_meta("grid", p)
 		c.set_meta("idx", cars.size())
+		c.tyre_failed.connect(_on_tyre_failed)
 		cars.append(c)
 		if p == grid_p2:
 			player2 = c
@@ -207,6 +214,11 @@ func tick(delta: float) -> void:
 		var was_spin: bool = c.spinning
 		c.step(delta)
 		skids.track_car(c)
+		if c.wall_hit > 9.0 or (c.tumbling and randf() < delta * 3.0):
+			spawn_debris(c.s(), c.d, 1 + int(c.wall_hit > 15.0))
+		if c.has_flat() and c.ai and not c.is_player and c.pit_state == 0 and control and control.enabled and not c.out:
+			c.want_pit = true
+			c.pit_plan = "4"
 		if c.pit_state == 3: # in the pit box
 			c.v = 0.0
 			c.vy = 0.0
@@ -216,6 +228,8 @@ func tick(delta: float) -> void:
 		elif c.spinning and not was_spin:
 			incident.emit(c, "spin")
 	_collide()
+	if not debris.is_empty():
+		_debris_tick(delta)
 	# Laps / finish
 	for c in cars:
 		var li: int = c.lap()
@@ -553,6 +567,8 @@ func _drive_ai(c: Node3D, delta: float) -> void:
 	var look: float = max(c.v, 0.0) * 0.7
 	var grip_scale: float = sqrt(c.mu * c.tyre_grip()) * lerp(0.92, 1.0, c.df_front_mult)
 	var target: float = track.profile_at(ss + look) * grip_scale * c.ai_skill * 0.95
+	if c.flat_time > 1.2:
+		target *= 0.55 # limp it back to pit road (after the moment it takes to react)
 	if controlled:
 		target = min(target, ctl_target)
 	# Traffic
@@ -761,6 +777,8 @@ func _contact(a: Node3D, b: Node3D, rel: Vector2) -> void:
 	var hit: float = vn
 	a.bump = max(a.bump, hit)
 	b.bump = max(b.bump, hit)
+	if vn > 7.0:
+		spawn_debris(a.s() + cp.x, a.d + cp.y, 1 + int(vn > 14.0))
 	# Big hits can climb one car over another: the struck car gets lifted and
 	# rolled (how cars get airborne in real wrecks).
 	if vn > 11.0:
@@ -769,3 +787,98 @@ func _contact(a: Node3D, b: Node3D, rel: Vector2) -> void:
 			var x: Node3D = pair[0]
 			var side: float = x.track_to_body(n * pair[1]).y
 			x.kick(lift * abs(side), side * lift * 0.9, 0.0)
+
+
+# --- debris ----------------------------------------------------------------------
+
+func _build_debris_mesh() -> void:
+	var bm := BoxMesh.new()
+	bm.size = Vector3(0.45, 0.06, 0.3)
+	var mm := MultiMesh.new()
+	mm.transform_format = MultiMesh.TRANSFORM_3D
+	mm.mesh = bm
+	mm.instance_count = MAX_DEBRIS
+	mm.visible_instance_count = 0
+	_debris_mm = MultiMeshInstance3D.new()
+	_debris_mm.name = "Debris"
+	_debris_mm.multimesh = mm
+	_debris_mm.material_override = Game.make_mat("carbon", Color(0.12, 0.12, 0.13))
+	add_child(_debris_mm)
+
+
+func spawn_debris(s_at: float, d_at: float, count: int) -> void:
+	for k in count:
+		if debris.size() >= MAX_DEBRIS:
+			debris.pop_front()
+		debris.append({"s": fposmod(s_at + rng.randf_range(-6.0, 10.0), track.length), "d": clamp(d_at + rng.randf_range(-3.0, 3.0), track.inner_edge(), track.outer_edge() - 0.5), "age": 0.0, "hit": {}})
+	_debris_visual()
+
+
+func clear_debris() -> void:
+	debris.clear()
+	_debris_visual()
+
+
+func _debris_visual() -> void:
+	var mm: MultiMesh = _debris_mm.multimesh
+	mm.visible_instance_count = debris.size()
+	for k in debris.size():
+		var dd: Dictionary = debris[k]
+		var tr: Transform3D = track.car_transform(dd.s, dd.d, float(k) * 1.7)
+		tr.origin += tr.basis.y * 0.04
+		mm.set_instance_transform(k, tr)
+
+
+## Cars running over debris: a chance of cutting the tyre that hits it, or of the
+## piece ending up on the grille. Pieces get knocked around or away.
+func _debris_tick(delta: float) -> void:
+	var L: float = track.length
+	var moved := false
+	for k in range(debris.size() - 1, -1, -1):
+		var dd: Dictionary = debris[k]
+		dd.age += delta
+		for c in cars:
+			if c.towed or c.tumbling or c.pit_state >= 2:
+				continue
+			var ds: float = fposmod(dd.s - c.s() + L * 0.5, L) - L * 0.5
+			if abs(ds) > 2.6 or abs(dd.d - c.d) > 1.3:
+				continue
+			if dd.hit.has(c):
+				continue
+			dd.hit[c] = true
+			var roll := rng.randf()
+			if roll < 0.18:
+				var wheel: int = (0 if ds > 0.0 else 2) + (1 if dd.d > c.d else 0)
+				c.fail_tyre(wheel, "cut")
+			elif roll < 0.3 and ds > 0.5:
+				c.grille_block = min(c.grille_block + rng.randf_range(0.25, 0.5), 0.8)
+				if control:
+					control.message_for(c, "DEBRIS ON THE GRILLE - WATCH THE WATER TEMP", "pit")
+			# Knocked aside, or away for good.
+			if rng.randf() < 0.5:
+				debris.remove_at(k)
+				moved = true
+				break
+			dd.d = clamp(dd.d + rng.randf_range(-2.0, 2.0), track.inner_edge(), track.outer_edge() - 0.5)
+			moved = true
+	if moved:
+		_debris_visual()
+	# A pile of it on the racing surface brings out the caution.
+	if control and control.enabled and control.cautions_enabled and control.flag == control.Flag.GREEN:
+		var on_track := 0
+		for dd in debris:
+			if dd.age > 12.0:
+				on_track += 1
+		if on_track >= 3:
+			control.throw_caution("DEBRIS", null)
+
+
+func _on_tyre_failed(c: Node3D, wheel: int, kind: String) -> void:
+	var names := ["LEFT FRONT", "RIGHT FRONT", "LEFT REAR", "RIGHT REAR"]
+	if control:
+		if kind == "blowout":
+			control.message_for(c, "TIRE DOWN!  %s BLEW" % names[wheel], "pit")
+		else:
+			control.message_for(c, "%s IS GOING DOWN - PIT THIS LAP" % names[wheel], "pit")
+	if kind == "blowout":
+		incident.emit(c, "tyre")

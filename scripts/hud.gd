@@ -230,11 +230,11 @@ func _draw() -> void:
 	draw_rect(dm, Color(0, 0, 0, 0.6))
 	draw_rect(Rect2(dm.position, Vector2(dm.size.x * p.draft, dm.size.y)), Color(0.3, 1.0, 1.0))
 	# Car condition: damage by corner, tyres and fuel.
-	var cc := Vector2(160, H - 80)
+	var cc := Vector2(160, H - 104)
 	var dmg: Dictionary = p.damage
 	var dc := func(x: float) -> Color:
 		return Color(0.3, 1.0, 0.4).lerp(Color(1.0, 0.85, 0.2), clamp(x * 2.0, 0.0, 1.0)).lerp(Color(1.0, 0.2, 0.15), clamp(x * 2.0 - 1.0, 0.0, 1.0))
-	draw_rect(Rect2(cc + Vector2(-4, -4), Vector2(78, 72)), Color(0, 0, 0, 0.35))
+	draw_rect(Rect2(cc + Vector2(-4, -4), Vector2(78, 102)), Color(0, 0, 0, 0.35))
 	draw_rect(Rect2(cc + Vector2(8, 0), Vector2(14, 6)), dc.call(dmg.front))
 	draw_rect(Rect2(cc + Vector2(8, 56), Vector2(14, 6)), dc.call(dmg.rear))
 	draw_rect(Rect2(cc + Vector2(0, 8), Vector2(6, 46)), dc.call(dmg.left))
@@ -246,12 +246,22 @@ func _draw() -> void:
 		var t: float = tt[i]
 		var tc := Color(0.3, 0.55, 1.0).lerp(Color(0.3, 1.0, 0.4), clamp((t - 55.0) / 35.0, 0.0, 1.0))
 		tc = tc.lerp(Color(1.0, 0.25, 0.15), clamp((t - 115.0) / 30.0, 0.0, 1.0))
+		if p.tyre_air[i] < 0.9 and int(blink * 6.0) % 2 == 0:
+			tc = Color(1, 1, 1) # tyre going down: flashing
 		draw_rect(Rect2(cc + corners[i], Vector2(6, 6)), tc)
 	var f := Game.arcade_font
 	draw_string(f, cc + Vector2(36, 14), "TIRE", HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color(0.8, 0.9, 1.0))
 	draw_string(f, cc + Vector2(36, 28), "%d%%" % int(p.tyre_grip() * 100.0), HORIZONTAL_ALIGNMENT_LEFT, -1, 12, dc.call(p.tyre_wear * 0.7))
 	draw_string(f, cc + Vector2(36, 44), "FUEL", HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color(0.8, 0.9, 1.0))
 	draw_string(f, cc + Vector2(36, 58), "%.1f" % (p.fuel / 3.785), HORIZONTAL_ALIGNMENT_LEFT, -1, 12, dc.call(1.0 - p.fuel / 75.0))
+	# Water temperature (F, like the real dash), and the DVP clock when it's running.
+	var wt: float = p.engine_temp
+	var wcol: Color = dc.call(clamp((wt - 105.0) / 40.0, 0.0, 1.0))
+	if wt > 125.0 and int(blink * 4.0) % 2 == 0:
+		wcol = Color(1, 1, 1)
+	draw_string(f, cc + Vector2(-2, 82), "H2O %d" % int(wt * 1.8 + 32.0), HORIZONTAL_ALIGNMENT_LEFT, -1, 10, wcol)
+	if p.dvp_clock >= 0.0:
+		draw_string(f, cc + Vector2(-2, 94), "DVP %d:%02d" % [int(p.dvp_clock) / 60, int(p.dvp_clock) % 60], HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color(1, 0.6, 0.2))
 	# Minimap
 	var mm_size: float = min(110.0, H * 0.3)
 	var mm_pos := Vector2(12, H - mm_size - 10)
