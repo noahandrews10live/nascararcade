@@ -2,7 +2,10 @@ extends Node
 ## Tiny software synth: engine drone, passing cars, tyre squeal, crunches and beeps.
 ## Everything is generated at runtime so the project needs no audio assets.
 
-const RATE := 22050.0
+const RATE := 11025.0
+## Per-sample filter constants were tuned at 22050 Hz; K rescales them.
+const K := 22050.0 / RATE
+const CRASH_DECAY := 0.9993 # 0.99965 per sample at 22050 Hz
 
 var player: AudioStreamPlayer
 var playback: AudioStreamGeneratorPlayback
@@ -63,7 +66,7 @@ func _process(_delta: float) -> void:
 	buf.resize(frames)
 	var target_rpm := engine_rpm if engine_on else 0.0
 	for i in frames:
-		_rpm_s += (target_rpm - _rpm_s) * 0.0015
+		_rpm_s += (target_rpm - _rpm_s) * 0.0015 * K
 		var s := 0.0
 		if _rpm_s > 200.0:
 			# V8 burble: pulse wave at firing frequency with a sub harmonic, low passed.
@@ -73,22 +76,22 @@ func _process(_delta: float) -> void:
 			_ph3 = fmod(_ph3 + f * 1.505 / RATE, 1.0)
 			var pulse := (1.0 if _ph1 < 0.32 else -0.6) + (0.7 if _ph2 < 0.5 else -0.7) * 0.6
 			pulse += (_ph3 * 2.0 - 1.0) * 0.25
-			var cut := 0.08 + engine_load * 0.25
+			var cut := minf(1.0, (0.08 + engine_load * 0.25) * K)
 			_lp += (pulse - _lp) * cut
 			s += _lp * (0.22 + engine_load * 0.12)
 		if pass_volume > 0.01:
 			var pf := 140.0 * pass_pitch
 			_pass_ph = fmod(_pass_ph + pf / RATE, 1.0)
 			var saw := _pass_ph * 2.0 - 1.0
-			_lp2 += (saw - _lp2) * 0.12
+			_lp2 += (saw - _lp2) * 0.12 * K
 			s += _lp2 * pass_volume * 0.3
 		if squeal > 0.02:
 			_sq_ph = fmod(_sq_ph + (820.0 + sin(_sq_ph * 40.0) * 20.0) / RATE, 1.0)
 			s += (sin(_sq_ph * TAU) * 0.6 + _rng.randf_range(-0.4, 0.4)) * squeal * 0.12
 		if _crash > 0.001:
-			_crash_lp += (_rng.randf_range(-1.0, 1.0) - _crash_lp) * 0.3
+			_crash_lp += (_rng.randf_range(-1.0, 1.0) - _crash_lp) * 0.3 * K
 			s += _crash_lp * _crash * 0.9
-			_crash *= 0.99965
+			_crash *= CRASH_DECAY
 		if _beeps.size() > 0:
 			var b: Array = _beeps[0]
 			var t := float(b[1])

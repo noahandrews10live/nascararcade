@@ -102,6 +102,8 @@ var challenge_result := ""
 
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
+	# Never let a slow frame snowball into several catch-up physics ticks (input lag).
+	Engine.max_physics_steps_per_frame = 2
 	rng.randomize()
 	env = Environment.new()
 	var we := WorldEnvironment.new()

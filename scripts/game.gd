@@ -451,7 +451,8 @@ const DIFFICULTIES := [["ROOKIE", 0.955], ["VETERAN", 0.985], ["LEGEND", 1.0]]
 const FIELDS := [20, 30, 40]
 const WEEKENDS := ["RACE ONLY", "QUALIFY + RACE", "PRACTICE + QUALIFY + RACE"]
 var settings := {
-	"length": 1, "difficulty": 1, "field": 2, "cautions": 1, "damage": 1, "wear": 1,
+	# Browsers get a 20-car field by default (GDScript runs slower there).
+	"length": 1, "difficulty": 1, "field": 0 if OS.has_feature("web") else 2, "cautions": 1, "damage": 1, "wear": 1,
 	"assists": 1, "manual": 0, "weekend": 1,
 }
 ## Garage setup (applied to the player's car): -3..3 balance (tight..loose),

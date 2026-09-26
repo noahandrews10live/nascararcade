@@ -26,7 +26,6 @@ const TYRE_C := 1.35 # shape: grip falls to ~85% when fully sliding, so slides a
 const RPM_PER_MPS := [260.0, 190.0, 150.0, 120.0, 100.0] # 5-speed sequential
 const REDLINE := 9300.0
 const FUEL_CAPACITY := 75.0 # litres (20 US gal)
-const SUBSTEPS := 4
 
 var team: Dictionary
 var is_player := false
@@ -131,6 +130,7 @@ var panels: Array[MeshInstance3D] = []
 var wheel_spin := 0.0
 var _delta_f := 0.0 # current front wheel angle
 var dbg := []
+var nb: Array = [] # neighbours [car, gap, ...] from race.gd
 var r_max_now := 1.0 # yaw rate the grip allows right now (for the AI)
 var _fy_f_prev := 0.0
 var _fy_r_prev := 0.0
@@ -248,8 +248,9 @@ func step(delta: float) -> void:
 		brake = 1.0
 		steer_in = 0.0
 
-	var h := delta / SUBSTEPS
-	for _i in SUBSTEPS:
+	var steps: int = 4 if is_player else 2 # AI cars integrate at 120 Hz, yours at 240 Hz
+	var h := delta / steps
+	for _i in steps:
 		_integrate(h)
 	_walls()
 	# Wear and fuel

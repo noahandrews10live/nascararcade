@@ -26,6 +26,7 @@ var arcade_setup := false # set before setup() for arcade races (ignores sim set
 var career := false # apply the career car's R&D level to the player
 var debug_no_lane_changes := false
 var control: Node = null # race_control.gd when the full rules are on
+var _tick_count := 0
 
 # Replay recording: per frame, for every car (and the pace car): dist, d, yaw, v, visible.
 const REC_HZ := 10.0
@@ -87,6 +88,7 @@ func setup(trk: Node3D, player_team: int, lap_count: int, size := 40, grid: Arra
 		c.damage_mult = 1.0 if (Game.settings.damage == 1 or arcade_setup) else 0.0
 		c.ai_aggression = rng.randf_range(0.2, 0.9)
 		c.set_meta("grid", p)
+		c.set_meta("idx", cars.size())
 		cars.append(c)
 		if p == grid_p2:
 			player2 = c
@@ -169,14 +171,20 @@ func go_green() -> void:
 func tick(delta: float) -> void:
 	time += delta if running else 0.0
 	_record(delta)
+	_build_neighbors()
 	if control:
 		control.tick(delta)
 	_aero(delta)
-	for c in cars:
+	_tick_count += 1
+	var ai_turn := _tick_count % 2
+	for ci in cars.size():
+		var c: Node3D = cars[ci]
 		if c.towed:
 			continue
-		if c.ai and running:
-			_drive_ai(c, delta)
+		# The AI thinks at 30 Hz (half the field each tick); cars in the pit box
+		# every tick so the stop timer runs at full speed.
+		if c.ai and running and (ci % 2 == ai_turn or c.pit_state == 3 or c.is_player):
+			_drive_ai(c, delta if (c.pit_state == 3 or c.is_player) else delta * 2.0)
 		if arcade and player and c != player and running and not player.finished:
 			var gap: float = c.dist - player.dist
 			var target := 1.0
@@ -283,6 +291,74 @@ func replay_apply(t: float) -> void:
 		c.sync_visual()
 
 
+## Neighbour index, rebuilt once per tick: every car gets a flat list
+## [other, gap, other, gap, ...] of the cars within 170 m ahead / 60 m behind (gap > 0 =
+## ahead). Everything that looks at nearby cars uses it instead of scanning the field.
+const NB_AHEAD := 170.0
+const NB_BEHIND := 60.0
+## At most this many cars ahead / behind go in a car's list, so a bunched-up
+## field (cautions, restarts) doesn't make every per-car loop long.
+const NB_MAX_AHEAD := 12
+const NB_MAX_BEHIND := 8
+
+var _nb_cars: Array = []
+var _nb_s := PackedFloat32Array()
+
+
+func _build_neighbors() -> void:
+	## Cars sorted by track position; the order barely changes between ticks, so
+	## an insertion sort over the previous order is close to linear.
+	var L: float = track.length
+	if _nb_cars.size() != cars.size():
+		_nb_cars = cars.duplicate()
+	var m := _nb_cars.size()
+	_nb_s.resize(m)
+	for i in m:
+		_nb_s[i] = _nb_cars[i].s()
+	for i in range(1, m):
+		var sv: float = _nb_s[i]
+		var cv = _nb_cars[i]
+		var j := i - 1
+		while j >= 0 and _nb_s[j] > sv:
+			_nb_s[j + 1] = _nb_s[j]
+			_nb_cars[j + 1] = _nb_cars[j]
+			j -= 1
+		_nb_s[j + 1] = sv
+		_nb_cars[j + 1] = cv
+	var idx: Array[int] = []
+	for i in m:
+		if not _nb_cars[i].towed:
+			idx.append(i)
+		else:
+			_nb_cars[i].nb = []
+	var n := idx.size()
+	for k in n:
+		var i: int = idx[k]
+		var s0: float = _nb_s[i]
+		var lst: Array = []
+		var used := 0
+		for step in range(1, mini(n, NB_MAX_AHEAD + 1)):
+			var e: int = idx[(k + step) % n]
+			var g: float = _nb_s[e] - s0
+			if g < 0.0:
+				g += L
+			if g > NB_AHEAD:
+				break
+			lst.append(_nb_cars[e])
+			lst.append(g)
+			used = step
+		for step in range(1, mini(n - used, NB_MAX_BEHIND + 1)):
+			var e: int = idx[(k - step + n) % n]
+			var g: float = _nb_s[e] - s0
+			if g > 0.0:
+				g -= L
+			if g < -NB_BEHIND:
+				break
+			lst.append(_nb_cars[e])
+			lst.append(g)
+		_nb_cars[i].nb = lst
+
+
 func _gap(from: Node3D, to: Node3D) -> float:
 	## Distance along track from `from` forward to `to` (-L/2 .. L/2).
 	var L: float = track.length
@@ -327,9 +403,7 @@ func _aero(delta: float) -> void:
 	# Process from the front of the pack back so the tow can stack.
 	var idx := range(n)
 	idx.sort_custom(func(a, b): return cars[a].dist > cars[b].dist)
-	var rank := {}
 	for i in n:
-		rank[cars[idx[i]]] = i
 		drag[i] = 1.0
 		front[i] = 1.0
 	for ii in n:
@@ -341,13 +415,11 @@ func _aero(delta: float) -> void:
 		var dirty := 0.0
 		var pushed := 0.0
 		var side_pen := 0.0
-		for j in n:
-			if j == i:
-				continue
-			var o: Node3D = cars[j]
-			if o.towed:
-				continue
-			var gap: float = _gap(c, o) # o ahead when > 0
+		var nbl: Array = c.nb
+		for q in range(0, nbl.size(), 2):
+			var o: Node3D = nbl[q]
+			var gap: float = nbl[q + 1] # o ahead when > 0
+			var j: int = o.get_meta("idx", 0)
 			var lat: float = abs(o.d - c.d)
 			if gap > 3.0 and gap < 45.0 and lat < 2.2:
 				# Tow from the car ahead, stronger when it is itself in a draft.
@@ -380,10 +452,10 @@ func _aero(delta: float) -> void:
 ## Is `lane` safe to move into? Looks for cars in (or heading into) that lane
 ## alongside, closing from behind, or too slow just ahead.
 func _lane_clear(c: Node3D, lane: float) -> bool:
-	for o in cars:
-		if o == c:
-			continue
-		var g := _gap(c, o)
+	var nbl: Array = c.nb
+	for q in range(0, nbl.size(), 2):
+		var o: Node3D = nbl[q]
+		var g: float = nbl[q + 1]
 		var in_lane: bool = abs(o.d - lane) < 2.6 or abs(o.ai_lane - lane) < 1.0
 		if not in_lane:
 			continue
@@ -451,10 +523,10 @@ func _drive_ai(c: Node3D, delta: float) -> void:
 	var ahead: Node3D = null
 	var ahead_gap := 1e9
 	var search: float = 160.0 if controlled else 70.0
-	for o in cars:
-		if o == c or o.towed:
-			continue
-		var gap: float = _gap(c, o)
+	var nbl: Array = c.nb
+	for q in range(0, nbl.size(), 2):
+		var o: Node3D = nbl[q]
+		var gap: float = nbl[q + 1]
 		var same_lane: bool = abs(o.d - c.d) < 2.2 or (controlled and abs(o.ai_lane - c.ai_lane) < 1.0 and abs(o.d - c.d) < 4.5)
 		if gap > 0.0 and gap < search and same_lane and gap < ahead_gap:
 			if c.pit_state >= 2 and o.pit_state < 2:
@@ -485,10 +557,11 @@ func _drive_ai(c: Node3D, delta: float) -> void:
 				c.ai_lane = lanes[idx - 1]
 	# Side awareness: never steer into a car that is alongside, and give it racing
 	# room through the corners (a touch less speed so we don't slide into it).
-	for o in cars:
-		if o == c or o.towed or c.pit_state != 0:
-			continue
-		var g := _gap(c, o)
+	for q in range(0, nbl.size(), 2):
+		var o: Node3D = nbl[q]
+		if c.pit_state != 0:
+			break
+		var g: float = nbl[q + 1]
 		var side: float = o.d - c.d
 		if abs(g) < 6.0 and not controlled and abs(side) < 3.6 and abs(k) > 0.001:
 			target = min(target, c.v - 0.3) if (side * sign(k) > 0.0) else target * 0.985
@@ -509,9 +582,10 @@ func _drive_ai(c: Node3D, delta: float) -> void:
 			match_v = ahead.v + 1.0
 		target = min(target, match_v)
 	# Avoid spinning cars ahead.
-	for o in cars:
-		if o != c and (o.spinning or o.out) and not o.towed:
-			var g := _gap(c, o)
+	for q in range(0, nbl.size(), 2):
+		var o: Node3D = nbl[q]
+		if o.spinning or o.out:
+			var g: float = nbl[q + 1]
 			if g > 0.0 and g < 90.0:
 				if abs(o.d - c.ai_lane) < 3.5:
 					var alt := lanes[2] if o.d < 0.0 else lanes[0]
@@ -580,17 +654,16 @@ func _axes(c: Node3D) -> Array[Vector2]:
 
 
 func _collide() -> void:
-	var n := cars.size()
-	for i in n:
-		var a: Node3D = cars[i]
-		if a.towed:
+	for a in cars:
+		if a.towed or a.pit_state >= 2:
 			continue
-		for j in range(i + 1, n):
-			var b: Node3D = cars[j]
-			if b.towed or a.pit_state >= 2 or b.pit_state >= 2:
-				continue # pit road is driven automatically, in single file
-			var gap: float = _gap(a, b)
-			if abs(gap) > 7.0 or abs(b.d - a.d) > 6.0:
+		var nbl: Array = a.nb
+		for q in range(0, nbl.size(), 2):
+			var gap: float = nbl[q + 1]
+			if gap < 0.0 or gap > 7.0:
+				continue
+			var b: Node3D = nbl[q]
+			if b.pit_state >= 2 or abs(b.d - a.d) > 6.0:
 				continue
 			_contact(a, b, Vector2(gap, b.d - a.d))
 

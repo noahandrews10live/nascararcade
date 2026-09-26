@@ -378,14 +378,14 @@ func caution_drive(c: Node3D) -> Array:
 		yielding = false
 	elif not yielding:
 		var my_rank: int = race.position_of(c)
-		for o in race.cars:
-			if o == c or o.towed or o.pit_state != Pit.NONE or o.out:
+		var nbl: Array = c.nb
+		for q in range(0, nbl.size(), 2):
+			var o: Node3D = nbl[q]
+			if o.pit_state != Pit.NONE or o.out:
 				continue
-			if race.position_of(o) < my_rank:
-				var g: float = race._gap(c, o)
-				if g < -2.0 and g > -L * 0.45:
-					yielding = true
-					break
+			if nbl[q + 1] < -2.0 and race.position_of(o) < my_rank:
+				yielding = true
+				break
 	# Everyone lifts and coasts down together rather than jumping on the brakes.
 	var coast: float = max(pv * 1.7, 95.0 - 2.5 * caution_elapsed)
 	if yielding:
@@ -401,10 +401,12 @@ func pit_drive(c: Node3D) -> Array:
 	var res := _pit_drive(c)
 	if c.pit_state >= Pit.LANE and c.pit_state != Pit.SERVICE:
 		# Queue behind the car ahead on pit road.
-		for o in race.cars:
-			if o == c or o.pit_state < Pit.LANE or o.pit_state == Pit.SERVICE:
+		var nbl: Array = c.nb
+		for q in range(0, nbl.size(), 2):
+			var o: Node3D = nbl[q]
+			if o.pit_state < Pit.LANE or o.pit_state == Pit.SERVICE:
 				continue
-			var g: float = race._gap(c, o)
+			var g: float = nbl[q + 1]
 			if g > 0.0 and g < 14.0 and abs(o.kin_d - res[1]) < 1.2:
 				res[0] = min(res[0], max(o.v - (14.0 - g) * 0.8, 0.0))
 	return res
@@ -521,10 +523,12 @@ func _spotter(delta: float) -> void:
 	_spot_timer -= delta
 	var low := false
 	var high := false
-	for o in race.cars:
-		if o == p or o.towed or o.pit_state != Pit.NONE:
+	var nbl: Array = p.nb
+	for q in range(0, nbl.size(), 2):
+		var o: Node3D = nbl[q]
+		if o.pit_state != Pit.NONE:
 			continue
-		var g: float = race._gap(p, o)
+		var g: float = nbl[q + 1]
 		var side: float = o.d - p.d
 		if abs(g) < 5.5 and abs(side) < 4.2 and abs(side) > 1.0:
 			if side < 0.0:
