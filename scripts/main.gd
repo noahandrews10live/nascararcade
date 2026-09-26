@@ -256,7 +256,8 @@ func _apply_graphics() -> void:
 	win.content_scale_mode = Window.CONTENT_SCALE_MODE_CANVAS_ITEMS if modern else Window.CONTENT_SCALE_MODE_VIEWPORT
 	var vp := get_viewport()
 	vp.msaa_3d = Viewport.MSAA_DISABLED
-	vp.screen_space_aa = Viewport.SCREEN_SPACE_AA_DISABLED
+	if Game.forward_plus:
+		vp.screen_space_aa = Viewport.SCREEN_SPACE_AA_DISABLED
 	vp.scaling_3d_mode = Viewport.SCALING_3D_MODE_BILINEAR
 	vp.scaling_3d_scale = 1.0
 	if not OS.has_feature("web"):
@@ -464,7 +465,8 @@ func _apply_quality(night: bool) -> void:
 		# Compatibility renderer (browser): plain upscaling and FXAA.
 		vp.scaling_3d_mode = Viewport.SCALING_3D_MODE_BILINEAR
 		vp.scaling_3d_scale = [0.7, 0.7, 0.85, 1.0, 1.0][q]
-		vp.screen_space_aa = Viewport.SCREEN_SPACE_AA_FXAA if q >= 2 else Viewport.SCREEN_SPACE_AA_DISABLED
+		# (Godot 4.7's Compatibility renderer has no FXAA; MSAA smooths the edges.)
+		vp.msaa_3d = Viewport.MSAA_2X if q >= 3 else Viewport.MSAA_DISABLED
 	RenderingServer.directional_shadow_atlas_set_size([2048, 2048, 4096, 4096, 8192][q], true)
 	sun.shadow_enabled = fp or q >= 2
 	sun.directional_shadow_mode = DirectionalLight3D.SHADOW_PARALLEL_4_SPLITS if q >= 3 and fp else DirectionalLight3D.SHADOW_PARALLEL_2_SPLITS
