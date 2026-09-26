@@ -325,6 +325,16 @@ func in_pit_roadway(s_pos: float) -> bool:
 	return ss >= pit_in_s() - PIT_LANE_EXT or ss <= pit_out_s() + PIT_LANE_EXT
 
 
+## Road courses (right-hand turns too) run no stagger.
+func turns_both_ways() -> bool:
+	var lo := 0.0
+	var hi := 0.0
+	for k in curv:
+		lo = min(lo, k)
+		hi = max(hi, k)
+	return lo < -0.004 and hi > 0.004
+
+
 ## Track temperature (C): hot in the day, cooler under the lights.
 func track_temp() -> float:
 	return 24.0 if cfg.get("night", false) else 38.0

@@ -38,11 +38,11 @@ const BUMP_GAP := 0.06 # travel to the bump stops (the car rides on them in the 
 const K_BUMP := 600000.0
 const ROLL_ARM := 0.40 # CG height above the roll centre
 const Y_CG := -0.035 # left-side weight (about 52%)
-const WX := [1.40, 1.40, -1.36, -1.36] # wheel positions: FL, FR, RL, RR
-const WY := [-0.80, 0.80, -0.80, 0.80]
+static var WX := PackedFloat32Array([1.40, 1.40, -1.36, -1.36]) # wheel positions: FL, FR, RL, RR
+static var WY := PackedFloat32Array([-0.80, 0.80, -0.80, 0.80])
 const WHEEL_OF_HOLDER := [0, 2, 1, 3] # model wheel order (FL, RL, FR, RR) -> physics order
 const NOMINAL_LOAD := 1600.0 * 9.81 * 0.25
-const SPOOL_K := 9.0 # longitudinal stiffness (per unit slip, per unit load)
+const SPOOL_K := 5.0 # how hard the locked rear resists the wheels turning at different speeds
 const AERO_SIDE := 3.2 # side force area (m^2)
 const AERO_LIFT_SIDE := 3.0 # lift area when sideways (the roof becomes a wing)
 const AERO_LIFT_BACK := 3.2 # lift area when backwards (enough to fly at ~200 mph)
@@ -190,6 +190,7 @@ var roof_flaps := false
 var steer_feel := 0.0 # aligning torque from the front tyres (for force feedback)
 var locked_wheels := 0 # bitmask of wheels locked under braking
 var assist_level := 1.0 # 0 off, 0.5 mild, 1 full
+var far_away := false # set by the race: well away from any player (cheaper physics)
 var stagger := 0.01 # right rear bigger than left rear (fraction of circumference)
 var k_arb_f := 35000.0
 var k_arb_r := 6000.0
@@ -231,6 +232,8 @@ func setup(t: Dictionary, trk: Node3D) -> void:
 	# Stagger sized for the track's turns (a touch under neutral: the car pushes a
 	# little on throttle, like a real oval setup).
 	stagger = clamp(2.0 * TW / float(pkg.get("radius", 250.0)) * 0.85, 0.003, 0.045)
+	if trk and trk.turns_both_ways():
+		stagger = 0.0 # road courses run equal tyres
 	_build_model()
 
 
@@ -280,7 +283,7 @@ func _update_tyres_before() -> void:
 	for i in 4:
 		var t: float = tyre_temp[i]
 		# Grip peaks around 100 C: cold tyres are slick, overheated ones go greasy.
-		var dt: float = (t - 100.0) / 60.0
+		var dt: float = (t - 100.0) / 70.0
 		var temp_f: float = 1.0 - 0.12 * min(dt * dt, 1.0)
 		# Hot air raises the pressure; past its sweet spot the contact patch shrinks.
 		var psi: float = 22.0 * cold_psi * (t + 273.0) / (track.track_temp() + 273.0 if track else 303.0)
@@ -355,6 +358,15 @@ func _update_static_loads() -> void:
 	_f_static[3] = rear + dr + wedge
 
 
+func _sample_road(ss: float, h: float) -> void:
+	var cy := cos(yaw)
+	var sy := sin(yaw)
+	for i in 4:
+		var rh: float = track.road_height(ss + WX[i] * cy - WY[i] * sy, d + WY[i] * cy + WX[i] * sy)
+		_road_rate[i] = clamp((rh - _road[i]) / h, -2.0, 2.0)
+		_road[i] = rh
+
+
 func reset_chassis() -> void:
 	chassis_z = 0.0
 	chassis_vz = 0.0
@@ -418,8 +430,11 @@ func step(delta: float) -> void:
 	_update_static_loads()
 	_update_tyres_before()
 	_track_grip = track.grip_at(ss, d)
-	var steps: int = 4 if is_player else 2 # AI cars integrate at 120 Hz, yours at 240 Hz
+	# Your car integrates at 240 Hz, cars around you at 120 Hz, distant ones at 60 Hz.
+	var steps: int = 4 if is_player else (1 if far_away and slide < 0.2 and bump < 1.0 else 2)
 	var h := delta / steps
+	if not is_player:
+		_sample_road(ss, delta)
 	for _i in steps:
 		_integrate(h)
 		if abs(chassis_roll) > 0.5 or abs(chassis_pitch) > 0.4 or (airborne and chassis_z > 0.3):
@@ -497,13 +512,10 @@ func _integrate(h: float) -> void:
 	var df_f: float = df * 0.45 * df_front_mult
 	var df_r: float = df * 0.55 * df_rear_mult
 
-	# --- road under each tyre (seams, bumps)
-	var cy := cos(yaw)
-	var sy := sin(yaw)
-	for i in 4:
-		var rh: float = track.road_height(ss + WX[i] * cy - WY[i] * sy, d + WY[i] * cy + WX[i] * sy)
-		_road_rate[i] = clamp((rh - _road[i]) / h, -2.0, 2.0)
-		_road[i] = rh
+	# --- road under each tyre (seams, bumps). Your car samples it every sub-step;
+	# the others once a frame (see step()), which is plenty for them.
+	if is_player:
+		_sample_road(ss, h)
 
 	# --- suspension: spring + damper + bump stop per corner, anti-roll bars
 	var n_eff: float = max(MASS * (G * cos(b) + u * u * k * sin(b)), MASS * 2.0)
@@ -578,7 +590,7 @@ func _integrate(h: float) -> void:
 	fx[2] = fx_drive * 0.5 - fx_brake * 0.21
 	fx[3] = fx_drive * 0.5 - fx_brake * 0.21
 	var spool_slip: float = (-2.0 * r * TW) / au - stagger
-	var f_sp: float = clamp(SPOOL_K * spool_slip * (_nw[2] + _nw[3]) * 0.5, -0.4 * cap_r, 0.4 * cap_r)
+	var f_sp: float = clamp(SPOOL_K * spool_slip * (_nw[2] + _nw[3]) * 0.5, -0.22 * cap_r, 0.22 * cap_r)
 	fx[2] += f_sp
 	fx[3] -= f_sp
 	var locked := 0
@@ -615,7 +627,12 @@ func _integrate(h: float) -> void:
 		fyi = -lat * _tyre(alpha, TYRE_B_F if i < 2 else TYRE_B_R)
 		_fy_prev[i] = fyi
 		_alpha[i] = alpha
-		_slip_power[i] += (abs(fyi * sin(alpha)) * au + (abs(fx[i]) * au * 0.08 if ((locked | spun) & (1 << i)) else 0.0)) * h
+		# Heat from the work the tyre does: cornering slip, plus braking and drive
+		# slip (what keeps road-course tyres hot); far more when locked or spinning.
+		var long_slip: float = abs(fx[i]) / (40.0 * max(_nw[i], 500.0))
+		if (locked | spun) & (1 << i):
+			long_slip = 0.3
+		_slip_power[i] += (abs(fyi * sin(alpha)) + abs(fx[i]) * long_slip) * au * h
 		var fxb: float = fx[i]
 		var fyb: float = fyi
 		if i < 2:
@@ -647,9 +664,10 @@ func _integrate(h: float) -> void:
 	var az: float = (fz - n_eff - df + lift_side + lift_back) / MASS
 	var pitch_acc: float = (mp + fx_tot * CG_H - df_f * CG_F + df_r * CG_R - lift_back * 1.6) / IY
 	var roll_acc: float = (mr + fy_tot * ROLL_ARM - n_eff * Y_CG + lift_side * 0.7 * sign(sb)) / IX
-	if on_grass and abs(vy) > 14.0:
-		# Sliding sideways in the grass the tyres dig in and can trip the car over.
-		roll_acc += -sign(vy) * clamp((abs(vy) - 14.0) / 10.0, 0.0, 1.0) * 40.0
+	if on_grass and abs(vy) > 20.0:
+		# Sliding sideways in the grass at big speed the tyres dig in and can trip
+		# the car over.
+		roll_acc += -sign(vy) * clamp((abs(vy) - 20.0) / 12.0, 0.0, 1.0) * 30.0
 	chassis_vz += az * h
 	pitch_rate += pitch_acc * h
 	roll_rate += roll_acc * h
@@ -947,6 +965,8 @@ func corners_track() -> Array[Vector2]:
 func _walls() -> void:
 	var outer: float = track.outer_edge()
 	var inner: float = track.inner_wall()
+	if d < outer - 2.8 and d > inner + 2.8:
+		return # nowhere near either wall
 	for side in [1.0, -1.0]:
 		var deepest := 0.0
 		var contact := Vector2.ZERO

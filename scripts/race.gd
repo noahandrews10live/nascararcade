@@ -180,6 +180,7 @@ func tick(delta: float) -> void:
 	time += delta if running else 0.0
 	_record(delta)
 	_build_neighbors()
+	_update_detail()
 	if control:
 		control.tick(delta)
 	_aero(delta)
@@ -321,6 +322,17 @@ const NB_MAX_BEHIND := 8
 
 var _nb_cars: Array = []
 var _nb_s := PackedFloat32Array()
+
+
+## Cars well away from a player run their physics at a lower rate.
+func _update_detail() -> void:
+	var L: float = track.length
+	for c in cars:
+		var far := true
+		for p in [player, player2]:
+			if p != null and abs(fposmod(c.dist - p.dist + L * 0.5, L) - L * 0.5) < 150.0:
+				far = false
+		c.far_away = far and not c.is_player
 
 
 func _build_neighbors() -> void:
