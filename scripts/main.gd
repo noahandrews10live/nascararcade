@@ -9,6 +9,7 @@ const Weather := preload("res://scripts/weather.gd")
 const TelemetryHud := preload("res://scripts/telemetry_hud.gd")
 const TrackEditor := preload("res://scripts/track_editor.gd")
 const Net := preload("res://scripts/net.gd")
+const Wheel := preload("res://scripts/wheel.gd")
 const Hud := preload("res://scripts/hud.gd")
 const Synth := preload("res://scripts/audio.gd")
 const Menu := preload("res://scripts/menu.gd")
@@ -130,6 +131,9 @@ func _ready() -> void:
 	net = Net.new()
 	net.name = "Net"
 	add_child(net)
+	wheel = Wheel.new()
+	add_child(wheel)
+	wheel.start_helper()
 	net.lobby_changed.connect(func():
 		if state == State.MENU and menu_kind == "lobby":
 			_enter_lobby())
@@ -1336,6 +1340,13 @@ func _player_input() -> void:
 	p.brake = Input.get_action_strength("brake")
 	_rumble(p, 0)
 	p.steer_in = Input.get_action_strength("steer_right") - Input.get_action_strength("steer_left")
+	# A steering wheel (when set up) takes over steering and pedals.
+	var wr: Dictionary = wheel.read()
+	if not wr.is_empty():
+		p.throttle = max(p.throttle, wr.throttle)
+		p.brake = max(p.brake, wr.brake)
+		p.steer_in = wr.steer
+		wheel.update(p, get_physics_process_delta_time())
 	if Input.is_action_just_pressed("shift_up"):
 		p.shift_request = 1
 	elif Input.is_action_just_pressed("shift_down"):
@@ -1400,6 +1411,8 @@ func _on_flag(flag: String) -> void:
 
 
 func _process(delta: float) -> void:
+	if wheel and wheel.poll_detect() and state == State.MENU and menu_kind == "wheel":
+		_enter_wheel_setup()
 	if race == null:
 		return
 	race.interpolate(Engine.get_physics_interpolation_fraction() if Game.smoothing else 1.0)
@@ -1734,6 +1747,7 @@ func _enter_options() -> void:
 		{"id": "quality", "label": "QUALITY (MODERN)", "values": Game.QUALITY_NAMES, "index": Game.quality, "hint": "AUTO LOWERS DETAIL WHEN FRAMES RUN LATE"},
 		{"id": "smooth", "label": "MOTION SMOOTHING", "values": ["OFF", "ON"], "index": 1 if Game.smoothing else 0, "hint": "SMOOTH MOTION ON 120/144 HZ SCREENS (ADDS UNDER 1 FRAME OF DELAY)"},
 		{"id": "blur", "label": "MOTION BLUR", "values": ["OFF", "LOW", "HIGH"], "index": Game.motion_blur, "hint": "DESKTOP MODERN LOOK ONLY"},
+		{"id": "wheel_setup", "label": "WHEEL SETUP", "hint": "STEERING WHEEL, PEDALS AND FORCE FEEDBACK"},
 		{"id": "radio", "label": "RADIO VOICE", "values": ["OFF", "ON"], "index": 1 if Game.radio_voice else 0, "hint": "SPOKEN SPOTTER AND CREW CHIEF CALLS"},
 		{"id": "vsync", "label": "VSYNC", "values": ["OFF", "ON"], "index": 1 if Game.vsync else 0, "hint": "OFF: LOWEST INPUT DELAY, MAY TEAR"},
 		{"id": "scan", "label": "SCANLINES (1999)", "values": ["OFF", "ON"], "index": 1 if Game.scanlines else 0},
@@ -1750,6 +1764,20 @@ func _on_menu_changed(id: String, idx: int) -> void:
 			if Game.settings.has(id):
 				Game.settings[id] = idx
 				Game.save_settings()
+		"wheel":
+			match id:
+				"wh_enabled":
+					Game.wheel.enabled = idx == 1
+					Game.save_settings()
+					if Game.wheel.enabled:
+						wheel.start_helper()
+					_enter_wheel_setup()
+				"invert":
+					Game.wheel.invert = idx == 1
+					Game.save_settings()
+				"rotation", "ffb":
+					Game.wheel[id] = idx
+					Game.save_settings()
 		"lobby":
 			match id:
 				"lobby_track":
@@ -1820,6 +1848,17 @@ func _on_menu_activated(id: String) -> void:
 	if id.begins_with("net_"):
 		_on_online_menu(id)
 		return
+	if id == "wheel_setup":
+		_enter_wheel_setup()
+		return
+	if id.begins_with("wh_"):
+		match id:
+			"wh_steer", "wh_throttle", "wh_brake":
+				wheel.begin_detect({"wh_steer": "steer_axis", "wh_throttle": "throttle_axis", "wh_brake": "brake_axis"}[id])
+				_enter_wheel_setup()
+			"wh_back":
+				_enter_options()
+		return
 	match id:
 		"go", "weekend":
 			_start_weekend()
@@ -1878,6 +1917,8 @@ func _on_menu_cancelled() -> void:
 			_enter_garage(menu_return)
 		"online":
 			_enter_mode_select()
+		"wheel":
+			_enter_options()
 		"lobby":
 			net.leave()
 			_enter_online()
@@ -2344,6 +2385,29 @@ func _net_start_race(config: Dictionary) -> void:
 	_use_track(int(config.track))
 	seed(int(config.seed))
 	_enter_countdown()
+
+
+# --- wheel setup -----------------------------------------------------------------
+
+var wheel: Node
+
+
+func _enter_wheel_setup() -> void:
+	var w: Dictionary = Game.wheel
+	var st: String = wheel.status if wheel.status != "" else ("HELPER NOT RUNNING" if w.enabled else "")
+	var axis_txt := func(key: String) -> String:
+		return ("MOVE IT NOW..." if wheel.detecting == key else "PAD %d AXIS %d" % [int(w.device), int(w[key])])
+	var rows := [
+		{"id": "wh_enabled", "label": "USE A WHEEL", "values": ["OFF", "ON"], "index": 1 if w.enabled else 0, "hint": st},
+		{"id": "wh_steer", "label": "STEERING", "values": [axis_txt.call("steer_axis")], "index": 0, "hint": "START, THEN TURN THE WHEEL"},
+		{"id": "wh_throttle", "label": "THROTTLE", "values": [axis_txt.call("throttle_axis")], "index": 0, "hint": "START, THEN PRESS THE THROTTLE"},
+		{"id": "wh_brake", "label": "BRAKE", "values": [axis_txt.call("brake_axis")], "index": 0, "hint": "START, THEN PRESS THE BRAKE"},
+		{"id": "invert", "label": "PEDALS", "values": ["NORMAL", "INVERTED"], "index": 1 if w.invert else 0, "hint": "IF THE CAR ACCELERATES WITH YOUR FOOT OFF, INVERT"},
+		{"id": "rotation", "label": "WHEEL ROTATION", "values": Wheel.ROTATIONS.map(func(x): return "%d DEG" % x), "index": int(w.rotation), "hint": "SET THE SAME IN YOUR WHEEL'S OWN SOFTWARE"},
+		{"id": "ffb", "label": "FORCE FEEDBACK", "values": ["OFF", "LIGHT", "MEDIUM", "STRONG", "MAX"], "index": int(w.ffb), "hint": "WINDOWS: NEEDS FFB_HELPER.EXE NEXT TO THE GAME"},
+		{"id": "wh_back", "label": "DONE"},
+	]
+	_open_menu("wheel", "WHEEL SETUP", rows, 0)
 
 
 # --- track editor ---------------------------------------------------------------------

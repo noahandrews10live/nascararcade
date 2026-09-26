@@ -451,6 +451,8 @@ var smoothing := true
 var vsync := true
 var motion_blur := 1 # 0 off, 1 low, 2 high (desktop Modern only)
 var radio_voice := true # spoken spotter and crew chief calls
+## Steering wheel: which pad and axes, pedal direction, wheel rotation, FFB strength.
+var wheel := {"enabled": false, "device": 0, "steer_axis": 0, "throttle_axis": 5, "brake_axis": 4, "invert": false, "rotation": 3, "ffb": 2}
 
 signal graphics_changed
 
@@ -591,6 +593,8 @@ func load_settings() -> void:
 		vsync = cf.get_value("video", "vsync", vsync)
 		motion_blur = cf.get_value("video", "motion_blur", motion_blur)
 		radio_voice = cf.get_value("audio", "radio_voice", radio_voice)
+		for k in wheel:
+			wheel[k] = cf.get_value("wheel", k, wheel[k])
 		# Assists used to be OFF / ON; ON is now FULL (OFF / MILD / FULL).
 		if not cf.get_value("settings", "assists_v2", false) and int(settings.assists) == 1:
 			settings.assists = 2
@@ -620,6 +624,8 @@ func save_settings() -> void:
 	cf.set_value("video", "vsync", vsync)
 	cf.set_value("video", "motion_blur", motion_blur)
 	cf.set_value("audio", "radio_voice", radio_voice)
+	for k in wheel:
+		cf.set_value("wheel", k, wheel[k])
 	cf.save(SETTINGS_PATH)
 
 
