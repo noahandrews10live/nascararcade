@@ -58,17 +58,17 @@ func configure(modern: bool, fp: bool, q: int, night: bool, hour: float, wet: fl
 	var haze: float = 1.0 - low_sun * 0.6 + wet * 0.8
 	env.fog_density = (0.00030 if not night else 0.0010) * haze
 	env.fog_height = 4.0
-	env.fog_height_density = 0.03 * haze if fp else 0.0
+	env.fog_height_density = 0.012 * haze if fp else 0.0
 	env.fog_aerial_perspective = 0.7
 	# Sun shafts: volumetric fog in daylight, faint enough to only show in light.
 	shafts = fp and q >= 3
 	if shafts and not night:
 		env.volumetric_fog_enabled = true
-		env.volumetric_fog_density = 0.0022 + 0.004 * wet
+		env.volumetric_fog_density = 0.0011 + 0.003 * wet
 		env.volumetric_fog_anisotropy = 0.7
 		env.volumetric_fog_length = 200.0
 		env.volumetric_fog_albedo = Color(0.95, 0.95, 0.97)
-		sun.light_volumetric_fog_energy = 1.4
+		sun.light_volumetric_fog_energy = 1.0
 	use_attrs = fp and q >= 2
 	if not use_attrs and cam.attributes == attrs:
 		cam.attributes = null

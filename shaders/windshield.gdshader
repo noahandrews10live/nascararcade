@@ -59,8 +59,12 @@ void fragment() {
 		off *= 1.0 - cleared * 0.95;
 	}
 	if (m < 0.01) discard;
-	vec3 col = texture(screen_tex, uv + off * 0.06).rgb;
-	col = mix(col, col * 1.15 + 0.03, m * 0.5); // beads catch a little light
+	// Each bead is a little lens: it shows a flipped, shifted view of what's
+	// behind it, with a darker rim and a bright glint.
+	vec3 col = texture(screen_tex, uv - off * 0.18).rgb;
+	float rim = m * (1.0 - m) * 4.0;
+	col = mix(col, col * 0.55, rim * 0.6);
+	col += vec3(0.08) * smoothstep(0.85, 1.0, m);
 	ALBEDO = col;
 	ALPHA = clamp(m * 1.2, 0.0, 1.0);
 }
