@@ -104,6 +104,8 @@ func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	# Never let a slow frame snowball into several catch-up physics ticks (input lag).
 	Engine.max_physics_steps_per_frame = 2
+	# GPU frame time feeds the AUTO quality setting.
+	RenderingServer.viewport_set_measure_render_time(get_viewport().get_viewport_rid(), true)
 	rng.randomize()
 	env = Environment.new()
 	var we := WorldEnvironment.new()
@@ -213,8 +215,13 @@ func _apply_graphics() -> void:
 	# 1999: render everything at 640x480 and upscale. Modern: native resolution 3D,
 	# with the 640x480 UI scaled up smoothly.
 	win.content_scale_mode = Window.CONTENT_SCALE_MODE_CANVAS_ITEMS if modern else Window.CONTENT_SCALE_MODE_VIEWPORT
-	get_viewport().msaa_3d = Viewport.MSAA_4X if modern else Viewport.MSAA_DISABLED
-	get_viewport().screen_space_aa = Viewport.SCREEN_SPACE_AA_DISABLED
+	var vp := get_viewport()
+	vp.msaa_3d = Viewport.MSAA_DISABLED
+	vp.screen_space_aa = Viewport.SCREEN_SPACE_AA_DISABLED
+	vp.scaling_3d_mode = Viewport.SCALING_3D_MODE_BILINEAR
+	vp.scaling_3d_scale = 1.0
+	if not OS.has_feature("web"):
+		DisplayServer.window_set_vsync_mode(DisplayServer.VSYNC_ENABLED if Game.vsync else DisplayServer.VSYNC_DISABLED)
 	scan_rect.visible = Game.scanlines and not modern
 	if track == null:
 		return
@@ -281,6 +288,7 @@ func _apply_graphics() -> void:
 		sun.directional_shadow_max_distance = 320.0
 		sun.shadow_blur = 1.2
 		sun.light_angular_distance = 0.6
+		_apply_quality(night)
 	else:
 		env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
 		env.ambient_light_color = Color(0.55, 0.55, 0.7) if night else (cfg.sky_horizon as Color)
@@ -300,6 +308,82 @@ func _apply_graphics() -> void:
 		sun.light_energy = 0.55 if night else 1.1
 		sun.light_color = Color(0.8, 0.85, 1.0) if night else Color(1.0, 0.97, 0.9)
 		sun.shadow_enabled = false
+
+
+## Modern-mode quality preset: what each level turns on, cheapest first.
+##   LOW     FSR 2 at 67%, 2 shadow splits (2K), no SSAO / SSR / volumetrics
+##   MEDIUM  FSR 2 at 77%, 2 splits (4K), half-res SSAO
+##   HIGH    FSR 2 at 87%, 4 splits (4K), SSAO, volumetric fog at night
+##   ULTRA   native res + FSR 2 anti-aliasing, 4 splits (8K), SSAO, SSR
+## FSR 2 includes temporal anti-aliasing, so MSAA stays off.
+func _apply_quality(night: bool) -> void:
+	var q := Game.quality_level()
+	var vp := get_viewport()
+	vp.scaling_3d_mode = Viewport.SCALING_3D_MODE_FSR2
+	vp.scaling_3d_scale = [0.67, 0.67, 0.77, 0.87, 1.0][q]
+	vp.fsr_sharpness = 0.35
+	RenderingServer.directional_shadow_atlas_set_size([2048, 2048, 4096, 4096, 8192][q], true)
+	sun.directional_shadow_mode = DirectionalLight3D.SHADOW_PARALLEL_4_SPLITS if q >= 3 else DirectionalLight3D.SHADOW_PARALLEL_2_SPLITS
+	sun.directional_shadow_max_distance = [150.0, 150.0, 220.0, 320.0, 420.0][q]
+	RenderingServer.directional_soft_shadow_filter_set_quality(
+		[RenderingServer.SHADOW_QUALITY_SOFT_VERY_LOW, RenderingServer.SHADOW_QUALITY_SOFT_VERY_LOW, RenderingServer.SHADOW_QUALITY_SOFT_LOW, RenderingServer.SHADOW_QUALITY_SOFT_MEDIUM, RenderingServer.SHADOW_QUALITY_SOFT_HIGH][q])
+	env.ssao_enabled = q >= 2
+	RenderingServer.environment_set_ssao_quality(
+		RenderingServer.ENV_SSAO_QUALITY_LOW if q <= 2 else RenderingServer.ENV_SSAO_QUALITY_MEDIUM, q <= 2, 0.5, 2, 50.0, 300.0)
+	env.ssr_enabled = q >= 4
+	env.volumetric_fog_enabled = night and q >= 3
+	env.glow_enabled = true
+
+
+## AUTO quality: watch frame times while racing and step the preset down when
+## frames are late, or back up (to HIGH at most) when there's plenty of headroom.
+var _aq_time := 0.0
+var _aq_frames := 0
+var _aq_late := 0
+var _aq_cool := 0.0
+var _aq_good := 0.0
+
+
+func _auto_quality(delta: float) -> void:
+	if not Game.modern or Game.quality != 0 or state != State.RACE or paused:
+		_aq_time = 0.0
+		_aq_frames = 0
+		_aq_late = 0
+		return
+	_aq_cool = max(_aq_cool - delta, 0.0)
+	var hz: float = max(DisplayServer.screen_get_refresh_rate(), 30.0)
+	var budget: float = 1.0 / min(hz, 60.0 if Game.vsync else 144.0)
+	_aq_time += delta
+	_aq_frames += 1
+	if delta > budget * 1.5:
+		_aq_late += 1
+	if _aq_time < 3.0:
+		return
+	var late_frac: float = float(_aq_late) / maxi(_aq_frames, 1)
+	var avg: float = _aq_time / maxi(_aq_frames, 1)
+	_aq_time = 0.0
+	_aq_frames = 0
+	_aq_late = 0
+	if _aq_cool > 0.0:
+		return
+	if (late_frac > 0.1 or avg > budget * 1.2) and Game.auto_quality > 1:
+		Game.auto_quality -= 1
+		_aq_good = 0.0
+		_aq_cool = 6.0
+		_apply_graphics()
+		Game.save_settings()
+	elif late_frac < 0.01 and avg < budget * 1.05:
+		var gpu_ms := RenderingServer.viewport_get_measured_render_time_gpu(get_viewport().get_viewport_rid())
+		if gpu_ms > 0.0 and gpu_ms < budget * 1000.0 * 0.45:
+			_aq_good += 3.0
+			if _aq_good >= 15.0 and Game.auto_quality < 3:
+				Game.auto_quality += 1
+				_aq_good = 0.0
+				_aq_cool = 6.0
+				_apply_graphics()
+				Game.save_settings()
+		else:
+			_aq_good = 0.0
 
 
 func _new_race(player_team: int) -> void:
@@ -1038,7 +1122,9 @@ func _on_flag(flag: String) -> void:
 func _process(delta: float) -> void:
 	if race == null:
 		return
+	race.interpolate(Engine.get_physics_interpolation_fraction() if Game.smoothing else 1.0)
 	_update_camera(delta)
+	_auto_quality(delta)
 	_update_audio()
 	if screen:
 		var blink := int(state_time * 3.0) % 2 == 0
@@ -1299,11 +1385,14 @@ func _enter_season_hub() -> void:
 func _enter_options() -> void:
 	var rows := [
 		{"id": "gfx", "label": "GRAPHICS", "values": ["1999", "MODERN"] if Game.modern_supported else ["1999"], "index": 1 if Game.modern else 0, "hint": "MODERN NEEDS A VULKAN GPU (NOT AVAILABLE IN THE BROWSER)"},
+		{"id": "quality", "label": "QUALITY (MODERN)", "values": Game.QUALITY_NAMES, "index": Game.quality, "hint": "AUTO LOWERS DETAIL WHEN FRAMES RUN LATE"},
+		{"id": "smooth", "label": "MOTION SMOOTHING", "values": ["OFF", "ON"], "index": 1 if Game.smoothing else 0, "hint": "SMOOTH MOTION ON 120/144 HZ SCREENS (ADDS UNDER 1 FRAME OF DELAY)"},
+		{"id": "vsync", "label": "VSYNC", "values": ["OFF", "ON"], "index": 1 if Game.vsync else 0, "hint": "OFF: LOWEST INPUT DELAY, MAY TEAR"},
 		{"id": "scan", "label": "SCANLINES (1999)", "values": ["OFF", "ON"], "index": 1 if Game.scanlines else 0},
 		{"id": "reset", "label": "RESET LAP RECORDS"},
 		{"id": "back", "label": "DONE"},
 	]
-	_open_menu("options", "OPTIONS", rows, 3)
+	_open_menu("options", "OPTIONS", rows, rows.size() - 1)
 
 
 func _on_menu_changed(id: String, idx: int) -> void:
@@ -1325,6 +1414,19 @@ func _on_menu_changed(id: String, idx: int) -> void:
 		"options":
 			if id == "gfx" and Game.modern_supported and (idx == 1) != Game.modern:
 				Game.toggle_graphics()
+				Game.save_settings()
+			elif id == "quality":
+				Game.quality = idx
+				if idx != 0:
+					Game.auto_quality = min(idx, 3)
+				_apply_graphics()
+				Game.save_settings()
+			elif id == "smooth":
+				Game.smoothing = idx == 1
+				Game.save_settings()
+			elif id == "vsync":
+				Game.vsync = idx == 1
+				_apply_graphics()
 				Game.save_settings()
 			elif id == "scan":
 				Game.scanlines = idx == 1

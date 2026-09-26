@@ -130,6 +130,10 @@ var panels: Array[MeshInstance3D] = []
 var wheel_spin := 0.0
 var _delta_f := 0.0 # current front wheel angle
 var dbg := []
+var _tr_prev := Transform3D()
+var _tr_cur := Transform3D()
+var _has_tr := false
+var _tr_frame := 0
 var nb: Array = [] # neighbours [car, gap, ...] from race.gd
 var r_max_now := 1.0 # yaw rate the grip allows right now (for the AI)
 var _fy_f_prev := 0.0
@@ -488,8 +492,22 @@ func _walls() -> void:
 			v *= 1.0 - 0.15 / 60.0
 
 
-func sync_visual() -> void:
+## `snap` = teleported (grid, restart): don't blend from the old spot.
+func sync_visual(snap := true) -> void:
 	_update_visual(0.0)
+	if snap:
+		_tr_prev = _tr_cur
+
+
+## Called every rendered frame: places the car between its last two physics
+## positions, so motion is smooth at any refresh rate (physics runs at 60 Hz).
+func interpolate(f: float) -> void:
+	if not _has_tr:
+		return
+	# Not moved on the latest physics frame (paused, parked): sit still.
+	if _tr_frame != Engine.get_physics_frames():
+		f = 1.0
+	global_transform = _tr_prev.interpolate_with(_tr_cur, f)
 
 
 func _update_visual(delta: float) -> void:
@@ -500,6 +518,10 @@ func _update_visual(delta: float) -> void:
 	var roll: float = clamp(-r * v * 0.0022, -0.07, 0.07)
 	var pitch: float = (brake - throttle * 0.4) * 0.015 * clamp(abs(v) / 30.0, 0.0, 1.0)
 	model.transform = Transform3D(Basis.from_euler(Vector3(pitch, 0.0, roll)), Vector3.ZERO)
+	_tr_prev = _tr_cur if _has_tr and _tr_cur.origin.distance_squared_to(tr.origin) < 400.0 else tr
+	_tr_cur = tr
+	_has_tr = true
+	_tr_frame = Engine.get_physics_frames()
 	global_transform = tr
 	wheel_spin += v * delta / 0.36
 	for i in wheels.size():

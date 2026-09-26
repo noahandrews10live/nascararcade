@@ -438,6 +438,14 @@ var scanlines := true
 ## the Compatibility renderer), otherwise the game stays in 1999 mode.
 var modern_supported := false
 var modern := false
+## Modern-mode quality: 0 AUTO, 1 LOW, 2 MEDIUM, 3 HIGH, 4 ULTRA.
+const QUALITY_NAMES := ["AUTO", "LOW", "MEDIUM", "HIGH", "ULTRA"]
+var quality := 0
+## The level AUTO is currently running at (adjusted from measured frame times).
+var auto_quality := 3
+## Blend car positions between physics steps so motion is smooth at any refresh rate.
+var smoothing := true
+var vsync := true
 
 signal graphics_changed
 
@@ -493,6 +501,10 @@ func load_settings() -> void:
 			setup[k] = cf.get_value("setup", k, setup[k])
 		modern = cf.get_value("video", "modern", modern) and modern_supported
 		scanlines = cf.get_value("video", "scanlines", scanlines)
+		quality = cf.get_value("video", "quality", quality)
+		auto_quality = cf.get_value("video", "auto_quality", auto_quality)
+		smoothing = cf.get_value("video", "smoothing", smoothing)
+		vsync = cf.get_value("video", "vsync", vsync)
 	assists = settings.assists == 1
 	manual_shift = settings.manual == 1
 
@@ -507,6 +519,10 @@ func save_settings() -> void:
 		cf.set_value("setup", k, setup[k])
 	cf.set_value("video", "modern", modern)
 	cf.set_value("video", "scanlines", scanlines)
+	cf.set_value("video", "quality", quality)
+	cf.set_value("video", "auto_quality", auto_quality)
+	cf.set_value("video", "smoothing", smoothing)
+	cf.set_value("video", "vsync", vsync)
 	cf.save(SETTINGS_PATH)
 
 
@@ -625,6 +641,11 @@ func _fill_teams() -> void:
 			"skill": rng.randf_range(0.94, 0.985),
 		})
 		i += 1
+
+
+## Effective quality level 1..4 (LOW..ULTRA).
+func quality_level() -> int:
+	return auto_quality if quality == 0 else quality
 
 
 func toggle_graphics() -> void:

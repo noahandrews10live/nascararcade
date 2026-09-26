@@ -260,6 +260,14 @@ func _record(delta: float) -> void:
 
 
 ## Puts every car where it was at recording time t (interpolated).
+## Blend every car between its last two physics positions (see Car.interpolate).
+func interpolate(f: float) -> void:
+	for c in cars:
+		c.interpolate(f)
+	if control and control.pace_car.visible:
+		control.pace_car.interpolate(f)
+
+
 func replay_apply(t: float) -> void:
 	var n := rec_times.size()
 	if n < 2:
@@ -288,7 +296,7 @@ func replay_apply(t: float) -> void:
 		c.slide = 0.0
 		c.scrub = 0.0
 		c.scraping = false
-		c.sync_visual()
+		c.sync_visual(false)
 
 
 ## Neighbour index, rebuilt once per tick: every car gets a flat list
