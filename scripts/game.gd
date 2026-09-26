@@ -22,7 +22,7 @@ var tracks: Array[Dictionary] = [
 		"laps": 3, "draft": 1.0, "grid_player": 9,
 		"sky_top": Color(0.18, 0.38, 0.78), "sky_horizon": Color(0.72, 0.84, 0.95),
 		"grass": Color(0.24, 0.55, 0.18), "fog": Color(0.70, 0.80, 0.92),
-		"lake": true,
+		"lake": true, "sun_elev": 58.0, "sun_az": 35.0,
 	},
 	{
 		"name": "LONE STAR MOTOR SPEEDWAY",
@@ -36,7 +36,7 @@ var tracks: Array[Dictionary] = [
 		"laps": 4, "draft": 0.7, "grid_player": 9,
 		"sky_top": Color(0.35, 0.45, 0.80), "sky_horizon": Color(0.98, 0.78, 0.55),
 		"grass": Color(0.42, 0.52, 0.20), "fog": Color(0.93, 0.78, 0.62),
-		"lake": false,
+		"lake": false, "sun_elev": 9.0, "sun_az": 205.0,
 	},
 	{
 		"name": "THUNDER VALLEY SHORT TRACK",
@@ -50,7 +50,7 @@ var tracks: Array[Dictionary] = [
 		"laps": 8, "draft": 0.35, "grid_player": 9,
 		"sky_top": Color(0.05, 0.05, 0.20), "sky_horizon": Color(0.25, 0.20, 0.40),
 		"grass": Color(0.16, 0.36, 0.14), "fog": Color(0.12, 0.10, 0.22),
-		"lake": false, "night": true,
+		"lake": false, "night": true, "sun_elev": 40.0, "sun_az": 120.0,
 	},
 ]
 
@@ -75,6 +75,14 @@ const SELECTABLE_TEAMS := 6
 var selected_track := 0
 var selected_team := 0
 var scanlines := true
+## "Modern" = Forward+ PBR rendering. Needs a RenderingDevice (not available on web /
+## the Compatibility renderer), otherwise the game stays in 1999 mode.
+var modern_supported := false
+var modern := false
+
+signal graphics_changed
+
+var _tex := {}
 
 var arcade_font: FontVariation
 var records := ConfigFile.new()
@@ -89,6 +97,181 @@ func _ready() -> void:
 	# Slant the glyphs for that italic arcade cabinet look.
 	arcade_font.variation_transform = Transform2D(Vector2(1, 0), Vector2(-0.22, 1), Vector2.ZERO)
 	records.load(RECORDS_PATH)
+	modern_supported = RenderingServer.get_rendering_device() != null
+	modern = modern_supported
+
+
+func toggle_graphics() -> void:
+	if not modern_supported:
+		return
+	modern = not modern
+	restyle_tree(get_tree().root)
+	graphics_changed.emit()
+
+
+# --- materials -------------------------------------------------------------------
+
+## Creates a material of a given kind; style() gives it the retro or modern look.
+func make_mat(kind: String, color := Color.WHITE) -> StandardMaterial3D:
+	var m := StandardMaterial3D.new()
+	m.albedo_color = color
+	m.set_meta("kind", kind)
+	m.set_meta("base_color", color)
+	style(m)
+	return m
+
+
+func restyle_tree(node: Node) -> void:
+	if node is GeometryInstance3D:
+		var mo = node.material_override
+		if mo is StandardMaterial3D and mo.has_meta("kind"):
+			style(mo)
+		if node is MeshInstance3D and node.mesh:
+			for i in node.mesh.get_surface_count():
+				var sm = node.mesh.surface_get_material(i)
+				if sm is StandardMaterial3D and sm.has_meta("kind"):
+					style(sm)
+		if node is MultiMeshInstance3D and node.multimesh and node.multimesh.mesh:
+			for i in node.multimesh.mesh.get_surface_count():
+				var mm = node.multimesh.mesh.surface_get_material(i)
+				if mm is StandardMaterial3D and mm.has_meta("kind"):
+					style(mm)
+	if node.is_in_group("retro_only"):
+		node.visible = not modern
+	if node.is_in_group("modern_only"):
+		node.visible = modern
+	for c in node.get_children():
+		restyle_tree(c)
+
+
+func style(m: StandardMaterial3D) -> void:
+	var kind: String = m.get_meta("kind")
+	var base: Color = m.get_meta("base_color", Color.WHITE)
+	# Reset to a neutral state first so switching modes is lossless.
+	m.shading_mode = BaseMaterial3D.SHADING_MODE_PER_PIXEL if modern else BaseMaterial3D.SHADING_MODE_PER_VERTEX
+	m.albedo_color = base
+	m.metallic = 0.0
+	m.metallic_specular = 0.5
+	m.roughness = 0.8
+	m.clearcoat_enabled = false
+	m.albedo_texture = null
+	m.normal_enabled = false
+	m.normal_texture = null
+	m.roughness_texture = null
+	m.uv1_triplanar = false
+	m.uv1_world_triplanar = false
+	m.emission_enabled = false
+	m.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS_ANISOTROPIC
+	match kind:
+		"paint":
+			if modern:
+				m.metallic = 0.35
+				m.roughness = 0.24
+				m.clearcoat_enabled = true
+				m.clearcoat = 1.0
+				m.clearcoat_roughness = 0.06
+			else:
+				m.roughness = 0.4
+				m.metallic_specular = 0.7
+		"glass":
+			m.metallic = 0.7 if modern else 0.0
+			m.roughness = 0.04 if modern else 0.3
+			m.metallic_specular = 1.0
+		"chrome":
+			m.metallic = 0.95 if modern else 0.3
+			m.roughness = 0.18
+		"rubber":
+			m.roughness = 0.95
+			m.metallic_specular = 0.2
+		"plastic":
+			m.roughness = 0.5
+		"light":
+			m.emission_enabled = true
+			m.emission = base
+			m.emission_energy_multiplier = 3.0 if modern else 1.0
+		"asphalt", "grass", "concrete", "line", "scenery":
+			m.vertex_color_use_as_albedo = true
+			# The palette was picked by eye, so treat it as sRGB in the linear pipeline.
+			m.vertex_color_is_srgb = modern
+			m.cull_mode = BaseMaterial3D.CULL_DISABLED
+			if kind == "scenery" and not modern:
+				m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+			if modern:
+				m.roughness = {"asphalt": 0.82, "grass": 0.95, "concrete": 0.7, "line": 0.55, "scenery": 0.8}[kind]
+				if kind in ["asphalt", "grass", "concrete"]:
+					m.uv1_triplanar = true
+					m.uv1_world_triplanar = true
+					m.uv1_triplanar_sharpness = 4.0
+					var sc: float = {"asphalt": 0.35, "grass": 0.12, "concrete": 0.25}[kind]
+					m.uv1_scale = Vector3(sc, sc, sc)
+					m.albedo_texture = texture(kind, false)
+					m.normal_enabled = true
+					m.normal_texture = texture(kind, true)
+					m.normal_scale = {"asphalt": 0.9, "grass": 0.6, "concrete": 0.4}[kind]
+					m.albedo_color = Color(1.12, 1.12, 1.12) * base
+		"lamp":
+			m.vertex_color_use_as_albedo = true
+			m.vertex_color_is_srgb = modern
+			m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+			m.albedo_color = Color(4, 4, 3.6) if modern else Color.WHITE
+		"foliage":
+			m.roughness = 1.0
+		"ground":
+			if modern:
+				m.roughness = 0.95
+				m.uv1_triplanar = true
+				m.uv1_world_triplanar = true
+				m.uv1_scale = Vector3(0.05, 0.05, 0.05)
+				m.albedo_texture = texture("grass", false)
+				m.normal_enabled = true
+				m.normal_texture = texture("grass", true)
+				m.normal_scale = 0.5
+				m.albedo_color = base.darkened(0.25)
+		"water":
+			m.metallic_specular = 1.0
+			m.roughness = 0.05 if modern else 0.1
+			m.metallic = 0.3 if modern else 0.0
+
+
+## Procedural, tileable surface textures (shared, generated once).
+func texture(kind: String, normal: bool) -> Texture2D:
+	var key := kind + ("_n" if normal else "")
+	if _tex.has(key):
+		return _tex[key]
+	var noise := FastNoiseLite.new()
+	noise.seed = hash(kind)
+	var t := NoiseTexture2D.new()
+	t.width = 512
+	t.height = 512
+	t.seamless = true
+	t.noise = noise
+	var ramp := Gradient.new()
+	match kind:
+		"asphalt":
+			noise.noise_type = FastNoiseLite.TYPE_VALUE
+			noise.frequency = 0.35
+			noise.fractal_octaves = 3
+			ramp.set_color(0, Color(0.62, 0.62, 0.63))
+			ramp.set_color(1, Color(1.0, 1.0, 1.0))
+		"grass":
+			noise.noise_type = FastNoiseLite.TYPE_SIMPLEX
+			noise.frequency = 0.06
+			noise.fractal_octaves = 5
+			ramp.set_color(0, Color(0.72, 0.78, 0.6))
+			ramp.set_color(1, Color(1.05, 1.0, 0.9))
+		_:
+			noise.noise_type = FastNoiseLite.TYPE_SIMPLEX
+			noise.frequency = 0.02
+			noise.fractal_octaves = 4
+			ramp.set_color(0, Color(0.85, 0.85, 0.84))
+			ramp.set_color(1, Color(1.0, 1.0, 1.0))
+	if normal:
+		t.as_normal_map = true
+		t.bump_strength = {"asphalt": 6.0, "grass": 3.0}.get(kind, 2.0)
+	else:
+		t.color_ramp = ramp
+	_tex[key] = t
+	return t
 
 
 func _setup_input() -> void:
@@ -106,6 +289,7 @@ func _setup_input() -> void:
 		"pause": [KEY_ESCAPE, KEY_P, "btn:%d" % JOY_BUTTON_BACK],
 		"quit_race": [KEY_Q],
 		"toggle_scanlines": [KEY_F2],
+		"toggle_graphics": [KEY_F3],
 		"toggle_fullscreen": [KEY_F11],
 	}
 	for action in binds:
@@ -130,6 +314,8 @@ func _setup_input() -> void:
 
 
 func _unhandled_input(event: InputEvent) -> void:
+	if event.is_action_pressed("toggle_graphics"):
+		toggle_graphics()
 	if event.is_action_pressed("toggle_fullscreen"):
 		var w := get_window()
 		w.mode = Window.MODE_WINDOWED if w.mode == Window.MODE_FULLSCREEN else Window.MODE_FULLSCREEN

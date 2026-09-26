@@ -224,16 +224,6 @@ func sync_visual() -> void:
 
 # --- model ---------------------------------------------------------------------
 
-func _mat(c: Color, per_vertex := true) -> StandardMaterial3D:
-	var m := StandardMaterial3D.new()
-	m.albedo_color = c
-	m.roughness = 0.4
-	m.metallic_specular = 0.7
-	if per_vertex:
-		m.shading_mode = BaseMaterial3D.SHADING_MODE_PER_VERTEX
-	return m
-
-
 func _add_box(size: Vector3, p: Vector3, m: Material, parent: Node3D = null) -> MeshInstance3D:
 	var mi := MeshInstance3D.new()
 	var bm := BoxMesh.new()
@@ -250,14 +240,12 @@ func _build_model() -> void:
 	add_child(model)
 	var c1: Color = team.c1
 	var c2: Color = team.c2
-	var body := _mat(c1)
-	var trim := _mat(c2)
-	var glass := _mat(Color(0.08, 0.1, 0.14))
-	var black := _mat(Color(0.05, 0.05, 0.05))
-	var tire := _mat(Color(0.08, 0.08, 0.08))
-	var light := _mat(Color(1.0, 0.95, 0.6))
-	light.emission_enabled = true
-	light.emission = Color(1.0, 0.9, 0.5)
+	var body := Game.make_mat("paint", c1)
+	var trim := Game.make_mat("paint", c2)
+	var glass := Game.make_mat("glass", Color(0.06, 0.08, 0.11))
+	var black := Game.make_mat("plastic", Color(0.05, 0.05, 0.05))
+	var tire := Game.make_mat("rubber", Color(0.07, 0.07, 0.07))
+	var light := Game.make_mat("light", Color(1.0, 0.92, 0.6))
 	# lower body and nose / tail slopes
 	_add_box(Vector3(1.9, 0.55, 4.9), Vector3(0, 0.55, 0), body)
 	_add_box(Vector3(1.86, 0.2, 1.5), Vector3(0, 0.9, -1.65), body) # hood
@@ -274,7 +262,7 @@ func _build_model() -> void:
 	_add_box(Vector3(1.9, 0.3, 0.12), Vector3(0, 0.38, 2.47), black)
 	_add_box(Vector3(0.35, 0.14, 0.02), Vector3(-0.6, 0.72, -2.46), light)
 	_add_box(Vector3(0.35, 0.14, 0.02), Vector3(0.6, 0.72, -2.46), light)
-	var tail := _mat(Color(0.8, 0.05, 0.05))
+	var tail := Game.make_mat("light", Color(0.8, 0.05, 0.05))
 	_add_box(Vector3(0.45, 0.12, 0.02), Vector3(-0.55, 0.75, 2.46), tail)
 	_add_box(Vector3(0.45, 0.12, 0.02), Vector3(0.55, 0.75, 2.46), tail)
 	# rear spoiler
@@ -310,7 +298,7 @@ func _build_model() -> void:
 		door.position = Vector3(side * 0.975, 0.72, 0.0)
 		door.rotation = Vector3(0, side * PI * 0.5, 0)
 		model.add_child(door)
-		_add_box(Vector3(0.01, 0.5, 0.9), Vector3(side * 0.962, 0.72, 0.0), _mat(Color(1, 1, 1) if cn.v < 0.5 else Color(0.05, 0.05, 0.05)))
+		_add_box(Vector3(0.01, 0.5, 0.9), Vector3(side * 0.962, 0.72, 0.0), Game.make_mat("paint", Color(1, 1, 1) if cn.v < 0.5 else Color(0.05, 0.05, 0.05)))
 	model.add_child(roof)
 	var spon := Label3D.new()
 	spon.text = team.sponsor
@@ -335,6 +323,10 @@ func _build_model() -> void:
 	sm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	shadow.material_override = sm
 	shadow.position = Vector3(0, 0.04, 0)
+	shadow.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	# Modern mode has real shadows; the blob is only for the 1999 look.
+	shadow.add_to_group("retro_only")
+	shadow.visible = not Game.modern
 	add_child(shadow)
 	# sparks
 	sparks = CPUParticles3D.new()

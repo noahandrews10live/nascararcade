@@ -131,7 +131,21 @@ void fragment() {
 	scan_layer.add_child(scan_rect)
 	scan_rect.visible = Game.scanlines
 
+	Game.graphics_changed.connect(func():
+		_apply_graphics()
+		_refresh_graphics_label())
 	_enter_title()
+
+
+func _refresh_graphics_label() -> void:
+	if menu_labels.has("gfx"):
+		menu_labels.gfx.text = _graphics_text()
+
+
+func _graphics_text() -> String:
+	if not Game.modern_supported:
+		return "GRAPHICS: 1999"
+	return "F3  GRAPHICS: %s" % ("MODERN" if Game.modern else "1999")
 
 
 # --- world ---------------------------------------------------------------------
@@ -147,28 +161,102 @@ func _use_track(idx: int) -> void:
 	for k in tracks:
 		tracks[k].visible = k == idx
 	track = tracks[idx]
+	_apply_graphics()
+
+
+## Applies the 1999 or modern look to the renderer, environment and window.
+func _apply_graphics() -> void:
+	var modern := Game.modern
+	var win := get_window()
+	# 1999: render everything at 640x480 and upscale. Modern: native resolution 3D,
+	# with the 640x480 UI scaled up smoothly.
+	win.content_scale_mode = Window.CONTENT_SCALE_MODE_CANVAS_ITEMS if modern else Window.CONTENT_SCALE_MODE_VIEWPORT
+	get_viewport().msaa_3d = Viewport.MSAA_4X if modern else Viewport.MSAA_DISABLED
+	get_viewport().screen_space_aa = Viewport.SCREEN_SPACE_AA_DISABLED
+	scan_rect.visible = Game.scanlines and not modern
+	if track == null:
+		return
 	var cfg: Dictionary = track.cfg
+	var night: bool = cfg.get("night", false)
+	sun.rotation = Vector3(-deg_to_rad(cfg.sun_elev), deg_to_rad(cfg.sun_az), 0)
 	var sky := Sky.new()
-	var psm := ProceduralSkyMaterial.new()
-	psm.sky_top_color = cfg.sky_top
-	psm.sky_horizon_color = cfg.sky_horizon
-	psm.ground_horizon_color = cfg.sky_horizon
-	psm.ground_bottom_color = (cfg.grass as Color).darkened(0.5)
-	psm.sun_angle_max = 20.0
-	sky.sky_material = psm
+	if modern and not night:
+		var ps := PhysicalSkyMaterial.new()
+		ps.rayleigh_coefficient = 2.2
+		ps.mie_coefficient = 0.004
+		ps.turbidity = 8.0
+		ps.sun_disk_scale = 1.5
+		ps.ground_color = (cfg.grass as Color).darkened(0.3)
+		ps.energy_multiplier = 1.0
+		sky.sky_material = ps
+	else:
+		var psm := ProceduralSkyMaterial.new()
+		psm.sky_top_color = cfg.sky_top
+		psm.sky_horizon_color = cfg.sky_horizon
+		psm.ground_horizon_color = cfg.sky_horizon
+		psm.ground_bottom_color = (cfg.grass as Color).darkened(0.5)
+		psm.sun_angle_max = 20.0
+		sky.sky_material = psm
 	env.background_mode = Environment.BG_SKY
 	env.sky = sky
-	env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
-	var night: bool = cfg.get("night", false)
-	env.ambient_light_color = Color(0.55, 0.55, 0.7) if night else (cfg.sky_horizon as Color)
-	env.ambient_light_energy = 0.9 if night else 0.55
-	env.tonemap_mode = Environment.TONE_MAPPER_LINEAR
 	env.fog_enabled = true
 	env.fog_light_color = cfg.fog
-	env.fog_density = 0.0016 if night else 0.0009
 	env.fog_sky_affect = 0.3
-	sun.light_energy = 0.55 if night else 1.1
-	sun.light_color = Color(0.8, 0.85, 1.0) if night else Color(1.0, 0.97, 0.9)
+	if modern:
+		env.ambient_light_source = Environment.AMBIENT_SOURCE_SKY
+		env.ambient_light_energy = 1.0 if not night else 0.6
+		env.reflected_light_source = Environment.REFLECTION_SOURCE_SKY
+		env.tonemap_mode = Environment.TONE_MAPPER_ACES
+		env.tonemap_exposure = 1.0 if not night else 1.3
+		env.tonemap_white = 6.0
+		env.ssao_enabled = true
+		env.ssao_radius = 1.2
+		env.ssao_intensity = 1.8
+		env.ssr_enabled = true
+		env.ssr_max_steps = 48
+		env.ssr_fade_in = 0.2
+		env.ssr_fade_out = 2.0
+		env.glow_enabled = true
+		env.glow_intensity = 0.6
+		env.glow_bloom = 0.04
+		env.glow_hdr_threshold = 1.1
+		env.glow_blend_mode = Environment.GLOW_BLEND_MODE_ADDITIVE
+		env.fog_density = 0.00035 if not night else 0.0012
+		env.fog_sun_scatter = 0.35
+		env.fog_aerial_perspective = 0.6
+		env.volumetric_fog_enabled = night
+		env.volumetric_fog_density = 0.012
+		env.volumetric_fog_albedo = Color(0.8, 0.8, 0.85)
+		env.volumetric_fog_length = 220.0
+		env.adjustment_enabled = true
+		env.adjustment_saturation = 1.08
+		env.adjustment_contrast = 1.04
+		sun.light_energy = 0.15 if night else (1.4 if cfg.sun_elev > 20.0 else 1.1)
+		sun.light_color = Color(0.7, 0.78, 1.0) if night else Color(1.0, 0.97, 0.92)
+		sun.shadow_enabled = true
+		sun.directional_shadow_mode = DirectionalLight3D.SHADOW_PARALLEL_4_SPLITS
+		sun.directional_shadow_max_distance = 320.0
+		sun.shadow_blur = 1.2
+		sun.light_angular_distance = 0.6
+	else:
+		env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
+		env.ambient_light_color = Color(0.55, 0.55, 0.7) if night else (cfg.sky_horizon as Color)
+		env.ambient_light_energy = 0.9 if night else 0.55
+		env.reflected_light_source = Environment.REFLECTION_SOURCE_BG
+		env.tonemap_mode = Environment.TONE_MAPPER_LINEAR
+		env.tonemap_exposure = 1.0
+		env.ssao_enabled = false
+		env.ssr_enabled = false
+		env.glow_enabled = false
+		env.volumetric_fog_enabled = false
+		env.adjustment_enabled = false
+		env.fog_density = 0.0016 if night else 0.0009
+		env.fog_sun_scatter = 0.0
+		env.fog_aerial_perspective = 0.0
+		sun.rotation = Vector3(deg_to_rad(-55), deg_to_rad(35), 0)
+		sun.light_energy = 0.55 if night else 1.1
+		sun.light_color = Color(0.8, 0.85, 1.0) if night else Color(1.0, 0.97, 0.9)
+		sun.shadow_enabled = false
 
 
 func _new_race(player_team: int) -> void:
@@ -253,6 +341,7 @@ func _enter_title() -> void:
 	_label("start", "PRESS START", 30, Color.WHITE, Vector2(0, 300), HORIZONTAL_ALIGNMENT_CENTER, 7)
 	_label("", "ARROWS / WASD  STEER + GAS + BRAKE     C  CAMERA     ESC  PAUSE", 11, Color(0.85, 0.85, 0.85), Vector2(0, 420), HORIZONTAL_ALIGNMENT_CENTER, 3)
 	_label("", "FREE PLAY", 16, Color(0.3, 1.0, 0.4), Vector2(0, 446), HORIZONTAL_ALIGNMENT_CENTER, 4)
+	_label("gfx", _graphics_text(), 12, Color(0.5, 0.9, 1.0), Vector2(0, 400), HORIZONTAL_ALIGNMENT_CENTER, 3)
 	_label("", "(C)1999  THUNDER ARCADE WORKS", 11, Color(0.8, 0.8, 0.8), Vector2(0, 462), HORIZONTAL_ALIGNMENT_CENTER, 3)
 
 
@@ -424,7 +513,7 @@ func _on_finished(car: Node3D, place: int) -> void:
 func _unhandled_input(event: InputEvent) -> void:
 	if event.is_action_pressed("toggle_scanlines"):
 		Game.scanlines = not Game.scanlines
-		scan_rect.visible = Game.scanlines
+		scan_rect.visible = Game.scanlines and not Game.modern
 	if state in [State.COUNTDOWN, State.RACE, State.FINISHED]:
 		if event.is_action_pressed("pause"):
 			paused = not paused

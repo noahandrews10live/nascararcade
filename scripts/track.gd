@@ -21,7 +21,7 @@ var bank: PackedFloat32Array # radians, raises the outside edge
 var speed_profile: PackedFloat32Array # max comfortable speed for a nominal car
 var minimap: PackedVector2Array # normalised 0..1 outline
 
-var mat: StandardMaterial3D
+var _st := {} # material kind -> SurfaceTool
 
 
 func setup(config: Dictionary) -> void:
@@ -32,13 +32,9 @@ func setup(config: Dictionary) -> void:
 	_build_centerline()
 	_build_profile()
 	_build_minimap()
-	mat = StandardMaterial3D.new()
-	mat.vertex_color_use_as_albedo = true
-	mat.shading_mode = BaseMaterial3D.SHADING_MODE_PER_VERTEX
-	mat.roughness = 0.9
-	mat.cull_mode = BaseMaterial3D.CULL_DISABLED
 	_build_mesh()
 	_build_scenery()
+	_commit_surfaces()
 
 
 # --- geometry ----------------------------------------------------------------
@@ -268,16 +264,49 @@ func to_minimap(world: Vector3) -> Vector2:
 
 
 # --- mesh ----------------------------------------------------------------------
+# Geometry is sorted into one surface per material kind (asphalt, grass, concrete,
+# paint lines, scenery, lamps) so each can get its own retro or modern material.
 
-func _quad(st: SurfaceTool, a: Vector3, b: Vector3, c: Vector3, d: Vector3, col: Color) -> void:
-	# a,b on sample i; c,d on sample i+1 (a->b left to right)
+func _st_for(kind: String) -> SurfaceTool:
+	if not _st.has(kind):
+		var st := SurfaceTool.new()
+		st.begin(Mesh.PRIMITIVE_TRIANGLES)
+		_st[kind] = st
+	return _st[kind]
+
+
+## a,b on sample i; c,d on sample i+1 (a->b left to right). n0/n1 are optional
+## smooth normals for the two edges; otherwise the face normal is used.
+func _quad(kind: String, a: Vector3, b: Vector3, c: Vector3, d: Vector3, col: Color, n0 := Vector3.ZERO, n1 := Vector3.ZERO) -> void:
+	var st := _st_for(kind)
+	if n0 == Vector3.ZERO:
+		n0 = (b - a).cross(c - a).normalized()
+		if n0 == Vector3.ZERO:
+			n0 = (d - b).cross(c - b).normalized()
+		n1 = n0
 	st.set_color(col)
+	st.set_normal(n0)
 	st.add_vertex(a)
+	st.set_normal(n1)
 	st.add_vertex(c)
+	st.set_normal(n0)
 	st.add_vertex(b)
 	st.add_vertex(b)
+	st.set_normal(n1)
 	st.add_vertex(c)
 	st.add_vertex(d)
+
+
+func _commit_surfaces() -> void:
+	for kind in _st:
+		var mi := MeshInstance3D.new()
+		mi.mesh = _st[kind].commit()
+		mi.material_override = Game.make_mat(kind)
+		mi.name = "Surface_" + kind
+		if kind == "lamp":
+			mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		add_child(mi)
+	_st.clear()
 
 
 func _pt(i: int, d: float) -> Vector3:
@@ -285,9 +314,14 @@ func _pt(i: int, d: float) -> Vector3:
 	return pos[i] + right[i] * d + Vector3.UP * height_at(d, bank[i])
 
 
+## Surface normal of the banked racing surface at sample i.
+func _road_up(i: int, tilt: float) -> Vector3:
+	i = (i + n) % n
+	var rb := (right[i] * cos(tilt) + Vector3.UP * sin(tilt)).normalized()
+	return rb.cross(fwd[i]).normalized()
+
+
 func _build_mesh() -> void:
-	var st := SurfaceTool.new()
-	st.begin(Mesh.PRIMITIVE_TRIANGLES)
 	var hw := width * 0.5
 	var iw := inner_wall()
 	var ae := apron_edge()
@@ -295,6 +329,8 @@ func _build_mesh() -> void:
 	var sponsor_cols := [Color(0.9, 0.1, 0.1), Color(0.1, 0.3, 0.9), Color(1.0, 0.8, 0.1), Color(0.1, 0.6, 0.2), Color(0.95, 0.95, 0.95), Color(0.9, 0.4, 0.05)]
 	var wall_h := 1.2
 	var fence_h := 5.0
+	var apron_tilt := atan(0.35 / apron)
+	var up := Vector3.UP
 	for i in n:
 		var i2 := (i + 1) % n
 		var stripe := (i / 3) % 2 == 0
@@ -303,41 +339,45 @@ func _build_mesh() -> void:
 		asphalt.a = 1.0
 		var groove := Color(0.24, 0.24, 0.26) * shade
 		groove.a = 1.0
+		var ru0 := _road_up(i, bank[i])
+		var ru1 := _road_up(i2, bank[i2])
+		var au0 := _road_up(i, apron_tilt)
+		var au1 := _road_up(i2, apron_tilt)
 		# infield grass strip + inner wall
-		_quad(st, _pt(i, iw), _pt(i, ae), _pt(i2, iw), _pt(i2, ae), grass * (1.0 if stripe else 0.93))
-		_quad(st, _pt(i, iw) + Vector3.UP * 0.9, _pt(i, iw), _pt(i2, iw) + Vector3.UP * 0.9, _pt(i2, iw), Color(0.85, 0.85, 0.85))
+		_quad("grass", _pt(i, iw), _pt(i, ae), _pt(i2, iw), _pt(i2, ae), grass * (1.0 if stripe else 0.93), up, up)
+		_quad("concrete", _pt(i, iw) + up * 0.9, _pt(i, iw), _pt(i2, iw) + up * 0.9, _pt(i2, iw), Color(0.85, 0.85, 0.85))
 		# apron
-		_quad(st, _pt(i, ae), _pt(i, -hw - 0.7), _pt(i2, ae), _pt(i2, -hw - 0.7), Color(0.42, 0.42, 0.44) * shade)
+		_quad("asphalt", _pt(i, ae), _pt(i, -hw - 0.7), _pt(i2, ae), _pt(i2, -hw - 0.7), Color(0.42, 0.42, 0.44) * shade, au0, au1)
 		# double yellow
-		_quad(st, _pt(i, -hw - 0.7), _pt(i, -hw - 0.45), _pt(i2, -hw - 0.7), _pt(i2, -hw - 0.45), Color(1.0, 0.85, 0.1))
-		_quad(st, _pt(i, -hw - 0.45), _pt(i, -hw - 0.25), _pt(i2, -hw - 0.45), _pt(i2, -hw - 0.25), Color(0.40, 0.40, 0.42))
-		_quad(st, _pt(i, -hw - 0.25), _pt(i, -hw), _pt(i2, -hw - 0.25), _pt(i2, -hw), Color(1.0, 0.85, 0.1))
-		# racing surface: bottom lane, groove, upper lane
-		_quad(st, _pt(i, -hw), _pt(i, -hw + width * 0.2), _pt(i2, -hw), _pt(i2, -hw + width * 0.2), asphalt)
-		_quad(st, _pt(i, -hw + width * 0.2), _pt(i, -hw + width * 0.55), _pt(i2, -hw + width * 0.2), _pt(i2, -hw + width * 0.55), groove)
-		_quad(st, _pt(i, -hw + width * 0.55), _pt(i, hw - 0.6), _pt(i2, -hw + width * 0.55), _pt(i2, hw - 0.6), asphalt)
-		_quad(st, _pt(i, hw - 0.6), _pt(i, hw), _pt(i2, hw - 0.6), _pt(i2, hw), Color(0.92, 0.92, 0.92))
+		_quad("line", _pt(i, -hw - 0.7), _pt(i, -hw - 0.45), _pt(i2, -hw - 0.7), _pt(i2, -hw - 0.45), Color(1.0, 0.85, 0.1), au0, au1)
+		_quad("asphalt", _pt(i, -hw - 0.45), _pt(i, -hw - 0.25), _pt(i2, -hw - 0.45), _pt(i2, -hw - 0.25), Color(0.40, 0.40, 0.42), au0, au1)
+		_quad("line", _pt(i, -hw - 0.25), _pt(i, -hw), _pt(i2, -hw - 0.25), _pt(i2, -hw), Color(1.0, 0.85, 0.1), au0, au1)
+		# racing surface: bottom lane, rubbered-in groove, upper lane
+		_quad("asphalt", _pt(i, -hw), _pt(i, -hw + width * 0.2), _pt(i2, -hw), _pt(i2, -hw + width * 0.2), asphalt, ru0, ru1)
+		_quad("asphalt", _pt(i, -hw + width * 0.2), _pt(i, -hw + width * 0.55), _pt(i2, -hw + width * 0.2), _pt(i2, -hw + width * 0.55), groove, ru0, ru1)
+		_quad("asphalt", _pt(i, -hw + width * 0.55), _pt(i, hw - 0.6), _pt(i2, -hw + width * 0.55), _pt(i2, hw - 0.6), asphalt, ru0, ru1)
+		_quad("line", _pt(i, hw - 0.6), _pt(i, hw), _pt(i2, hw - 0.6), _pt(i2, hw), Color(0.92, 0.92, 0.92), ru0, ru1)
 		# outer wall with sponsor panels
 		var panel: Color = sponsor_cols[(i / 8) % sponsor_cols.size()]
 		var wb := _pt(i, hw)
 		var wb2 := _pt(i2, hw)
-		_quad(st, wb + Vector3.UP * wall_h * 0.45, wb, wb2 + Vector3.UP * wall_h * 0.45, wb2, Color(0.95, 0.95, 0.95))
-		_quad(st, wb + Vector3.UP * wall_h, wb + Vector3.UP * wall_h * 0.45, wb2 + Vector3.UP * wall_h, wb2 + Vector3.UP * wall_h * 0.45, panel)
+		_quad("concrete", wb + up * wall_h * 0.45, wb, wb2 + up * wall_h * 0.45, wb2, Color(0.95, 0.95, 0.95))
+		_quad("line", wb + up * wall_h, wb + up * wall_h * 0.45, wb2 + up * wall_h, wb2 + up * wall_h * 0.45, panel)
 		var ro := right[i] * 0.5
 		var ro2 := right[i2] * 0.5
-		_quad(st, wb + Vector3.UP * wall_h, wb + Vector3.UP * wall_h + ro, wb2 + Vector3.UP * wall_h, wb2 + Vector3.UP * wall_h + ro2, Color(0.8, 0.8, 0.8))
+		_quad("concrete", wb + up * wall_h, wb + up * wall_h + ro, wb2 + up * wall_h, wb2 + up * wall_h + ro2, Color(0.8, 0.8, 0.8), up, up)
 		# catch fence (thin top rail) and posts every 4th sample
-		_quad(st, wb + Vector3.UP * fence_h + ro, wb + Vector3.UP * (fence_h - 0.15) + ro, wb2 + Vector3.UP * fence_h + ro2, wb2 + Vector3.UP * (fence_h - 0.15) + ro2, Color(0.55, 0.55, 0.58))
+		_quad("scenery", wb + up * fence_h + ro, wb + up * (fence_h - 0.15) + ro, wb2 + up * fence_h + ro2, wb2 + up * (fence_h - 0.15) + ro2, Color(0.55, 0.55, 0.58))
 		if i % 4 == 0:
 			var f := fwd[i] * 0.15
-			var base := wb + Vector3.UP * wall_h + ro
-			_quad(st, base + Vector3.UP * (fence_h - wall_h) - f, base - f, base + Vector3.UP * (fence_h - wall_h) + f, base + f, Color(0.35, 0.35, 0.38))
+			var base := wb + up * wall_h + ro
+			_quad("scenery", base + up * (fence_h - wall_h) - f, base - f, base + up * (fence_h - wall_h) + f, base + f, Color(0.35, 0.35, 0.38))
 		# outside run-off to the ground
 		var ob := _pt(i, hw) + ro
 		var ob2 := _pt(i2, hw) + ro2
 		var og := pos[i] + right[i] * (hw + 25.0)
 		var og2 := pos[i2] + right[i2] * (hw + 25.0)
-		_quad(st, ob + Vector3.UP * wall_h, og, ob2 + Vector3.UP * wall_h, og2, grass * 0.85)
+		_quad("grass", ob + up * wall_h, og, ob2 + up * wall_h, og2, grass * 0.85)
 	# Start / finish checkers
 	for row in 2:
 		var cells := int(width)
@@ -346,31 +386,28 @@ func _build_mesh() -> void:
 			var d1 := d0 + width / cells
 			var s0 := -1.0 + row * 1.0
 			var col := Color.WHITE if (c + row) % 2 == 0 else Color(0.05, 0.05, 0.05)
-			var a := surface_point(s0, d0) + Vector3.UP * 0.03
-			var b := surface_point(s0, d1) + Vector3.UP * 0.03
-			var cc := surface_point(s0 + 1.0, d0) + Vector3.UP * 0.03
-			var dd := surface_point(s0 + 1.0, d1) + Vector3.UP * 0.03
-			_quad(st, a, b, cc, dd, col)
-	st.generate_normals()
-	var mi := MeshInstance3D.new()
-	mi.mesh = st.commit()
-	mi.material_override = mat
-	mi.name = "TrackMesh"
-	add_child(mi)
+			var a := surface_point(s0, d0) + up * 0.03
+			var b := surface_point(s0, d1) + up * 0.03
+			var cc := surface_point(s0 + 1.0, d0) + up * 0.03
+			var dd := surface_point(s0 + 1.0, d1) + up * 0.03
+			_quad("line", a, b, cc, dd, col)
 
 
-func _box(st: SurfaceTool, center: Vector3, size: Vector3, basis: Basis, col: Color) -> void:
+func _box(kind: String, center: Vector3, size: Vector3, basis: Basis, col: Color) -> void:
 	var h := size * 0.5
 	var c := [Vector3(-h.x, -h.y, -h.z), Vector3(h.x, -h.y, -h.z), Vector3(h.x, h.y, -h.z), Vector3(-h.x, h.y, -h.z),
 		Vector3(-h.x, -h.y, h.z), Vector3(h.x, -h.y, h.z), Vector3(h.x, h.y, h.z), Vector3(-h.x, h.y, h.z)]
 	var faces := [[0, 1, 2, 3], [5, 4, 7, 6], [4, 0, 3, 7], [1, 5, 6, 2], [3, 2, 6, 7], [4, 5, 1, 0]]
 	var shade := [0.85, 0.85, 0.75, 0.75, 1.0, 0.6]
+	var st := _st_for(kind)
 	for fi in faces.size():
 		var f: Array = faces[fi]
 		var p := []
 		for k in 4:
 			p.append(center + basis * c[f[k]])
+		var nrm: Vector3 = ((p[1] - p[0]) as Vector3).cross(p[2] - p[0]).normalized()
 		st.set_color(Color(col.r * shade[fi], col.g * shade[fi], col.b * shade[fi]))
+		st.set_normal(nrm)
 		st.add_vertex(p[0])
 		st.add_vertex(p[2])
 		st.add_vertex(p[1])
@@ -382,8 +419,6 @@ func _box(st: SurfaceTool, center: Vector3, size: Vector3, basis: Basis, col: Co
 func _build_scenery() -> void:
 	var rng := RandomNumberGenerator.new()
 	rng.seed = hash(cfg.name)
-	var st := SurfaceTool.new()
-	st.begin(Mesh.PRIMITIVE_TRIANGLES)
 	var hw := width * 0.5
 	var S: float = cfg.straight
 	var night: bool = cfg.get("night", false)
@@ -392,6 +427,7 @@ func _build_scenery() -> void:
 	var crowd := [Color(0.9, 0.2, 0.2), Color(0.2, 0.3, 0.9), Color(1, 1, 1), Color(1, 0.8, 0.2), Color(0.3, 0.8, 0.3), Color(0.9, 0.5, 0.1), Color(0.6, 0.2, 0.7)]
 	var seg := length / n
 	var rows := 14
+	var up := Vector3.UP
 	for i in n:
 		var s := i * seg
 		var sd: float = min(s, length - s)
@@ -401,68 +437,71 @@ func _build_scenery() -> void:
 		for r in rows:
 			var d0 := hw + 8.0 + r * 2.2
 			var h0 := 2.0 + r * 1.3
-			var a := pos[i] + right[i] * d0 + Vector3.UP * h0
-			var b := pos[i] + right[i] * (d0 + 2.2) + Vector3.UP * h0
-			var c := pos[i2] + right[i2] * d0 + Vector3.UP * h0
-			var d := pos[i2] + right[i2] * (d0 + 2.2) + Vector3.UP * h0
+			var a := pos[i] + right[i] * d0 + up * h0
+			var b := pos[i] + right[i] * (d0 + 2.2) + up * h0
+			var c := pos[i2] + right[i2] * d0 + up * h0
+			var d := pos[i2] + right[i2] * (d0 + 2.2) + up * h0
 			var col: Color = crowd[rng.randi() % crowd.size()] if rng.randf() < 0.8 else Color(0.5, 0.5, 0.55)
-			_quad(st, a, b, c, d, col * (0.8 if night else 1.0))
+			_quad("scenery", a, b, c, d, col * (0.8 if night else 1.0), up, up)
 			# riser
-			_quad(st, b, b + Vector3.UP * 1.3, d, d + Vector3.UP * 1.3, Color(0.45, 0.45, 0.5))
+			_quad("concrete", b, b + up * 1.3, d, d + up * 1.3, Color(0.45, 0.45, 0.5))
 		# back wall of the stand
 		var top := hw + 8.0 + rows * 2.2
 		var bt := pos[i] + right[i] * top
 		var bt2 := pos[i2] + right[i2] * top
-		_quad(st, bt + Vector3.UP * (2.0 + rows * 1.3 + 3.0), bt, bt2 + Vector3.UP * (2.0 + rows * 1.3 + 3.0), bt2, Color(0.55, 0.55, 0.6))
+		_quad("concrete", bt + up * (2.0 + rows * 1.3 + 3.0), bt, bt2 + up * (2.0 + rows * 1.3 + 3.0), bt2, Color(0.55, 0.55, 0.6))
 		# roof
 		var roof_h := 2.0 + rows * 1.3 + 3.0
-		_quad(st, pos[i] + right[i] * (hw + 14.0) + Vector3.UP * roof_h, bt + Vector3.UP * roof_h, pos[i2] + right[i2] * (hw + 14.0) + Vector3.UP * roof_h, bt2 + Vector3.UP * roof_h, Color(0.75, 0.75, 0.8))
+		_quad("scenery", pos[i] + right[i] * (hw + 14.0) + up * roof_h, bt + up * roof_h, pos[i2] + right[i2] * (hw + 14.0) + up * roof_h, bt2 + up * roof_h, Color(0.75, 0.75, 0.8))
 	# Scoring pylon in the infield at start/finish.
 	var pyl := pos[0] + right[0] * (inner_wall() - 30.0)
-	_box(st, pyl + Vector3.UP * 16.0, Vector3(4, 32, 4), Basis.IDENTITY, Color(0.2, 0.2, 0.25))
+	_box("scenery", pyl + up * 16.0, Vector3(4, 32, 4), Basis.IDENTITY, Color(0.2, 0.2, 0.25))
 	for k in 10:
-		_box(st, pyl + Vector3.UP * (3.0 + k * 2.8) + right[0] * 2.05, Vector3(0.1, 2.2, 3.2), Basis(Vector3.UP, atan2(right[0].x, right[0].z)), crowd[k % crowd.size()])
+		_box("lamp" if night else "scenery", pyl + up * (3.0 + k * 2.8) + right[0] * 2.05, Vector3(0.1, 2.2, 3.2), Basis(up, atan2(right[0].x, right[0].z)), crowd[k % crowd.size()])
 	# Flag stand gantry over the start/finish line.
-	var b0 := Basis(Vector3.UP, atan2(fwd[0].x, fwd[0].z))
+	var b0 := Basis(up, atan2(fwd[0].x, fwd[0].z))
 	var p_in := surface_point(0.0, -hw - 1.5)
 	var p_out := surface_point(0.0, hw + 0.5)
 	var top_y: float = max(p_in.y, p_out.y) + 9.0
-	_box(st, Vector3(p_in.x, (p_in.y + top_y) * 0.5, p_in.z), Vector3(0.6, top_y - p_in.y, 0.6), b0, Color(0.8, 0.8, 0.8))
-	_box(st, Vector3(p_out.x, (p_out.y + top_y) * 0.5, p_out.z), Vector3(0.6, top_y - p_out.y, 0.6), b0, Color(0.8, 0.8, 0.8))
+	_box("scenery", Vector3(p_in.x, (p_in.y + top_y) * 0.5, p_in.z), Vector3(0.6, top_y - p_in.y, 0.6), b0, Color(0.8, 0.8, 0.8))
+	_box("scenery", Vector3(p_out.x, (p_out.y + top_y) * 0.5, p_out.z), Vector3(0.6, top_y - p_out.y, 0.6), b0, Color(0.8, 0.8, 0.8))
 	var mid := (p_in + p_out) * 0.5
 	mid.y = top_y
-	_box(st, mid, Vector3(p_in.distance_to(p_out) + 1.0, 1.6, 1.2), Basis(Vector3.UP, atan2(right[0].x, right[0].z) - PI * 0.5), Color(0.1, 0.1, 0.12))
+	_box("scenery", mid, Vector3(p_in.distance_to(p_out) + 1.0, 1.6, 1.2), Basis(up, atan2(right[0].x, right[0].z) - PI * 0.5), Color(0.1, 0.1, 0.12))
 	# Infield buildings / haulers.
 	for k in 14:
 		var t := float(k) / 14.0
 		var idx := int(t * n * 0.35 + n * 0.08) % n
 		var p := pos[idx] + right[idx] * (inner_wall() - 22.0 - rng.randf() * 20.0)
 		var truck_col: Color = crowd[rng.randi() % crowd.size()]
-		_box(st, p + Vector3.UP * 2.0, Vector3(3.0, 4.0, 16.0), Basis(Vector3.UP, atan2(fwd[idx].x, fwd[idx].z) + 0.4), truck_col)
-	# Light towers for night tracks.
+		_box("scenery", p + up * 2.0, Vector3(3.0, 4.0, 16.0), Basis(up, atan2(fwd[idx].x, fwd[idx].z) + 0.4), truck_col)
+	# Light towers for night tracks. In modern mode each one gets a real spotlight
+	# so the volumetric fog shows beams.
 	if night:
 		for i in range(0, n, max(1, n / 16)):
 			var lp := pos[i] + right[i] * (hw + 6.0)
-			_box(st, lp + Vector3.UP * 17.0, Vector3(0.8, 34, 0.8), Basis.IDENTITY, Color(0.4, 0.4, 0.45))
-			_box(st, lp + Vector3.UP * 34.0, Vector3(4.0, 2.5, 1.0), Basis(Vector3.UP, atan2(right[i].x, right[i].z)), Color(3.0, 3.0, 2.6))
-	var mesh := st.commit()
-	var mi := MeshInstance3D.new()
-	mi.mesh = mesh
-	var smat := mat.duplicate()
-	smat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	mi.material_override = smat
-	mi.name = "Scenery"
-	add_child(mi)
+			_box("scenery", lp + up * 17.0, Vector3(0.8, 34, 0.8), Basis.IDENTITY, Color(0.4, 0.4, 0.45))
+			_box("lamp", lp + up * 34.0, Vector3(4.0, 2.5, 1.0), Basis(up, atan2(right[i].x, right[i].z)), Color(1.0, 1.0, 0.9))
+			var spot := SpotLight3D.new()
+			add_child(spot)
+			spot.position = lp + up * 33.0 - right[i] * 1.0
+			spot.look_at(pos[i] - right[i] * 6.0, up)
+			spot.light_color = Color(1.0, 0.95, 0.85)
+			spot.light_energy = 9.0
+			spot.spot_range = 150.0
+			spot.spot_angle = 50.0
+			spot.spot_attenuation = 0.6
+			spot.light_volumetric_fog_energy = 0.6
+			spot.shadow_enabled = false
+			spot.add_to_group("modern_only")
+			spot.visible = Game.modern
 
 	# Ground plane
 	var ground := MeshInstance3D.new()
 	var pm := PlaneMesh.new()
 	pm.size = Vector2(9000, 9000)
 	ground.mesh = pm
-	var gm := StandardMaterial3D.new()
-	gm.albedo_color = cfg.grass
-	gm.roughness = 1.0
-	ground.material_override = gm
+	ground.material_override = Game.make_mat("ground", cfg.grass)
 	ground.position.y = -0.15
 	add_child(ground)
 
@@ -472,13 +511,9 @@ func _build_scenery() -> void:
 		cm.top_radius = cfg.radius * 0.45
 		cm.bottom_radius = cfg.radius * 0.45
 		cm.height = 0.05
-		cm.radial_segments = 24
+		cm.radial_segments = 48
 		lake.mesh = cm
-		var lm := StandardMaterial3D.new()
-		lm.albedo_color = Color(0.15, 0.35, 0.65)
-		lm.metallic_specular = 1.0
-		lm.roughness = 0.1
-		lake.material_override = lm
+		lake.material_override = Game.make_mat("water", Color(0.12, 0.28, 0.45))
 		lake.position = Vector3(0, -0.08, 0)
 		lake.scale = Vector3(2.2, 1, 0.9)
 		add_child(lake)
@@ -490,10 +525,7 @@ func _build_scenery() -> void:
 	tree.height = 12.0
 	tree.radial_segments = 6
 	tree.rings = 1
-	var tm := StandardMaterial3D.new()
-	tm.albedo_color = Color(0.1, 0.35, 0.12) if not night else Color(0.05, 0.15, 0.08)
-	tm.shading_mode = BaseMaterial3D.SHADING_MODE_PER_VERTEX
-	tree.material = tm
+	tree.material = Game.make_mat("foliage", Color(0.1, 0.35, 0.12) if not night else Color(0.05, 0.15, 0.08))
 	var mm := MultiMesh.new()
 	mm.transform_format = MultiMesh.TRANSFORM_3D
 	mm.mesh = tree
@@ -504,7 +536,7 @@ func _build_scenery() -> void:
 		var off := hw + 45.0 + rng.randf() * 260.0
 		var p := pos[idx] + right[idx] * off
 		var sc := 0.7 + rng.randf() * 0.9
-		mm.set_instance_transform(k, Transform3D(Basis().scaled(Vector3(sc, sc, sc)), p + Vector3.UP * 6.0 * sc))
+		mm.set_instance_transform(k, Transform3D(Basis().scaled(Vector3(sc, sc, sc)), p + up * 6.0 * sc))
 	var mmi := MultiMeshInstance3D.new()
 	mmi.multimesh = mm
 	add_child(mmi)

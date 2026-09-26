@@ -5,8 +5,20 @@
 A late-90s arcade stock car racer, like the NASCAR arcade cabinets of 1999, built in **Godot 4.3**.
 
 Everything is generated at runtime: tracks, grandstands, cars, the HUD and the synth
-audio. The project has no imported assets. It renders at 640×480 with vertex-coloured
-low-poly geometry, per-vertex lighting, distance fog and optional CRT scanlines.
+audio. The project has no imported assets.
+
+### Two graphics modes (F3 to switch)
+
+- **Modern** (default on desktop) uses Godot's Forward+ renderer at native resolution, with:
+  - clear-coat car paint and glossy glass;
+  - procedurally generated asphalt, grass and concrete textures with normal maps;
+  - soft real-time sun shadows, ambient occlusion and screen-space reflections;
+  - a physically based sky, bloom, and aerial haze;
+  - volumetric fog with light-tower beams on the night track.
+  Each track has its own time of day: midday, golden hour or night.
+- **1999** is the original look: 640×480 upscaled, vertex colours, per-vertex lighting,
+  blob shadows and CRT scanlines (F2). The web build always uses this mode, because
+  browsers only get Godot's Compatibility renderer.
 
 ## Features
 
@@ -31,7 +43,7 @@ low-poly geometry, per-vertex lighting, distance fog and optional CRT scanlines.
 
 ## Running
 
-1. Install [Godot 4.3+](https://godotengine.org/download). The standard build is fine; you don't need .NET.
+1. Install [Godot 4.3+](https://godotengine.org/download). The standard build is fine; you don't need .NET. Modern graphics need a Vulkan (or Direct3D 12) capable GPU; on older machines, launch with `godot --path . --rendering-method gl_compatibility` and the game runs in 1999 mode.
 2. Open `project.godot` in the editor and press **F5**, or run from the command line:
    ```sh
    godot --path .
@@ -58,15 +70,16 @@ godot --headless --path . --export-release Web build/web/index.html
 | Change camera | C | Y |
 | Pause | Esc / P | Back |
 | Quit race (while paused) | Q | — |
-| Toggle scanlines | F2 | — |
+| Graphics: Modern / 1999 | F3 | — |
+| Toggle scanlines (1999 mode) | F2 | — |
 | Fullscreen | F11 | — |
 
 ## Project layout
 
 ```
-project.godot          640x480 viewport stretch, GL Compatibility renderer
+project.godot          Forward+ on desktop, Compatibility on web; 640x480 base UI
 scenes/main.tscn       single scene; everything else is built in code
-scripts/game.gd        autoload: tracks, teams, input map, records, arcade font
+scripts/game.gd        autoload: tracks, teams, input map, records, font, retro/modern materials
 scripts/main.gd        state machine, menus, cameras, arcade clock
 scripts/track.gd       oval generator: centre line, banking, speed profile, meshes, scenery
 scripts/race.gd        field spawn, AI drivers, drafting, contact, laps, running order
@@ -75,6 +88,7 @@ scripts/hud.gd         time / lap / position / tach / minimap / messages
 scripts/audio.gd       AudioStreamGenerator software synth
 tests/smoke_test.gd    headless: runs a full autopilot race on every track
 tests/screenshots.gd   captures screenshots of each screen (needs a renderer)
+tests/screenshots_modern.sh  same, using the Forward+ renderer under xvfb
 ```
 
 ### How the physics works
