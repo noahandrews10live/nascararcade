@@ -693,8 +693,9 @@ func _enter_countdown() -> void:
 	var seg: float = track.length / track.n
 	for i in track.n:
 		ref += seg / min(track.speed_profile[i], 80.0)
-	time_left = round(ref * 1.6 + 12.0)
-	lap_bonus = round(ref * 1.2)
+	# (Real laps run ~25% over the ideal profile: traffic, tyre warm-up, bumps.)
+	time_left = round(ref * 1.8 + 15.0)
+	lap_bonus = round(ref * 1.35)
 	hud.race = race
 	hud.track = track
 	hud.time_left = time_left

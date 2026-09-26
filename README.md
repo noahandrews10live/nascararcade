@@ -47,13 +47,32 @@ Motion smoothing), and Options → VSync off gives the lowest input delay.
 
 ## Racing: how it models 2026 Next Gen racing
 
-- **Car physics.** Each car is a rigid body on the banked track, with:
-  - tyres that have a grip peak and fall-off, and grip that changes with load;
-  - downforce and drag;
-  - a 5-speed sequential gearbox;
-  - fuel burn and tyre wear.
+- **Car physics.** Each car is simulated like a real stock car:
+  - **four tyres**, each with its own load, slip angle, grip peak and fall-off, a
+    friction circle (braking or driving uses up cornering grip), brakes that can
+    lock a wheel, and wheelspin;
+  - **a spool rear axle with stagger** sized to each oval's turns (road courses run
+    none), so the car pushes or turns like the real thing;
+  - **suspension**: the body heaves, pitches and rolls on springs, dampers,
+    anti-roll bars and bump stops (it rides on the stops in the banking), so load
+    transfer, and the car's balance, comes from the chassis. Pavement seams and
+    turn-entry bumps upset it;
+  - **tyre temperature, pressure and wear per tyre**: grip peaks around 100 °C,
+    fresh tyres are cold for a lap, overheated ones go greasy, right sides run
+    hottest on ovals. The HUD shows all four;
+  - **the track changes**: a rubbered-in groove gets faster, marbles build up high,
+    night tracks grip more;
+  - **aero** that depends on ride height and yaw: downforce fades as the car turns
+    sideways, becomes lift when it's backwards (roof flaps pop up past ~130°), a
+    car tucked in off your rear quarter takes air off the spoiler and makes you
+    loose;
+  - **3D wrecks**: a car that tips far enough, gets lifted in a hit, or goes
+    sideways at speed becomes a free 3D body and can get airborne, barrel-roll and
+    land on its wheels or its roof;
+  - a 5-speed sequential gearbox and fuel burn.
 
-  Cars can get loose or tight, spin, and wreck.
+  Driving assists are OFF, MILD (steering help only, looser traction and ABS) or
+  FULL. Gamepads rumble with scrub, bumps, locked brakes and hits.
 - **Power.** Gen-3 style, unrestricted 950 hp everywhere:
   - superspeedways run tall gears and trimmed drag: about 208–212 mph alone and
     215–220 mph in the draft;
@@ -178,6 +197,7 @@ All tests run headless (`godot --headless --fixed-fps 60 --path . -s <script>`):
 | Script | What it checks |
 |---|---|
 | `tests/smoke_test.gd` | Arcade game flow on every track |
+| `tests/telemetry_test.gd` | Chassis telemetry (roll, tyre loads, temperatures, bump stops) and wreck physics checks |
 | `tests/physics_test.gd` | Solo lap speeds, draft gain and a 40-car race per track |
 | `tests/field_test.gd` | Full-field AI race with incident tracing (`TRACK=n SECS=s TRACE=car#`) |
 | `tests/rules_test.gd` | A full rules race: cautions, pits, stages and points |
