@@ -126,9 +126,12 @@ var model: Node3D
 var _retro: Node3D
 var _body := {}
 var _dented_at := 0.0
+var _haze: MeshInstance3D
+var _haze_s := -1.0
+static var _haze_mat: ShaderMaterial
 var sparks: CPUParticles3D
-var smoke: CPUParticles3D
-var tyre_smoke: CPUParticles3D
+var smoke: GeometryInstance3D
+var tyre_smoke: GeometryInstance3D
 var wheels: Array[Node3D] = []
 var panels: Array[MeshInstance3D] = []
 var wheel_spin := 0.0
@@ -535,11 +538,23 @@ func _update_visual(delta: float) -> void:
 	if sparks:
 		sparks.emitting = scraping and speed() > 12.0
 		sparks.position.x = HALF_W * sign(d)
+	if _haze:
+		# Heat shimmer from the exhaust: strongest on the gas, fades at speed as the
+		# air carries it away.
+		var hs: float = throttle * (1.0 - clamp(abs(v) / 90.0, 0.0, 0.6))
+		if abs(hs - _haze_s) > 0.05:
+			_haze_s = hs
+			_haze.set_instance_shader_parameter("strength", hs)
 	if tyre_smoke:
-		tyre_smoke.emitting = (slide > 0.4 or scrub > 0.6) and speed() > 10.0
+		_set_emitting(tyre_smoke, (slide > 0.4 or scrub > 0.6 or (spinning and speed() > 6.0)) and speed() > 6.0)
 	if smoke:
-		smoke.emitting = total_damage() > 0.3 or out
-		smoke.amount = 24
+		_set_emitting(smoke, total_damage() > 0.3 or out)
+
+
+## Only touch `emitting` when it changes (re-setting it can restart GPU particles).
+static func _set_emitting(p: Node, on: bool) -> void:
+	if p.get("emitting") != on:
+		p.set("emitting", on)
 
 
 # --- model ---------------------------------------------------------------------
@@ -595,6 +610,20 @@ func _build_model() -> void:
 	_retro.visible = not Game.modern
 	model.add_child(_retro)
 	_body = CarBody.build(modern_root, team, model)
+	if Game.forward_plus:
+		if _haze_mat == null:
+			_haze_mat = ShaderMaterial.new()
+			_haze_mat.shader = load("res://shaders/heat_haze.gdshader")
+		_haze = MeshInstance3D.new()
+		var hq := QuadMesh.new()
+		hq.size = Vector2(1.8, 1.1)
+		_haze.mesh = hq
+		_haze.material_override = _haze_mat
+		_haze.position = Vector3(0, 0.75, 2.9)
+		_haze.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		_haze.visibility_range_end = 45.0
+		_haze.add_to_group("haze")
+		modern_root.add_child(_haze)
 	wheels.assign(_body.wheels)
 	var c1: Color = team.c1
 	var c2: Color = team.c2
@@ -729,7 +758,9 @@ static func _puff_texture() -> GradientTexture2D:
 	return _puff
 
 
-func _smoke_emitter(col: Color, size: float) -> CPUParticles3D:
+func _smoke_emitter(col: Color, size: float) -> GeometryInstance3D:
+	if Game.forward_plus:
+		return _gpu_smoke(col, size)
 	var p := CPUParticles3D.new()
 	p.emitting = false
 	p.amount = 28
@@ -759,6 +790,61 @@ func _smoke_emitter(col: Color, size: float) -> CPUParticles3D:
 	m.albedo_texture = _puff_texture()
 	qm.material = m
 	p.mesh = qm
+	add_child(p)
+	return p
+
+
+## Desktop smoke: simulated on the GPU, so it can be thicker and hang around longer
+## (a spinning car leaves a proper cloud) at no CPU cost.
+func _gpu_smoke(col: Color, size: float) -> GPUParticles3D:
+	var p := GPUParticles3D.new()
+	p.emitting = false
+	p.amount = 72
+	p.lifetime = 2.6
+	p.local_coords = false
+	p.visibility_aabb = AABB(Vector3(-30, -5, -30), Vector3(60, 25, 60))
+	var pm := ParticleProcessMaterial.new()
+	pm.direction = Vector3(0, 1, 0.3)
+	pm.spread = 45.0
+	pm.initial_velocity_min = 1.0
+	pm.initial_velocity_max = 3.5
+	pm.gravity = Vector3(0, 0.8, 0)
+	pm.damping_min = 1.5
+	pm.damping_max = 2.5
+	pm.inherit_velocity_ratio = 0.35
+	pm.scale_min = size * 0.6
+	pm.scale_max = size * 1.1
+	pm.emission_shape = ParticleProcessMaterial.EMISSION_SHAPE_BOX
+	pm.emission_box_extents = Vector3(0.9, 0.1, 0.6)
+	var curve := Curve.new()
+	curve.add_point(Vector2(0, 0.35))
+	curve.add_point(Vector2(1, 1.6))
+	var ct := CurveTexture.new()
+	ct.curve = curve
+	pm.scale_curve = ct
+	var grad := Gradient.new()
+	grad.offsets = PackedFloat32Array([0.0, 0.15, 1.0])
+	grad.colors = PackedColorArray([Color(col.r, col.g, col.b, 0.0), col, Color(col.r, col.g, col.b, 0.0)])
+	var gt := GradientTexture1D.new()
+	gt.gradient = grad
+	pm.color_ramp = gt
+	pm.angle_min = -180.0
+	pm.angle_max = 180.0
+	p.process_material = pm
+	var qm := QuadMesh.new()
+	var m := StandardMaterial3D.new()
+	# Lit, so the smoke picks up sun and shadow instead of glowing.
+	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	m.vertex_color_use_as_albedo = true
+	m.billboard_mode = BaseMaterial3D.BILLBOARD_PARTICLES
+	m.billboard_keep_scale = true
+	m.albedo_texture = _puff_texture()
+	m.roughness = 1.0
+	m.proximity_fade_enabled = true
+	m.proximity_fade_distance = 0.6
+	qm.material = m
+	p.draw_pass_1 = qm
+	p.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	add_child(p)
 	return p
 

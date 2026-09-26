@@ -41,6 +41,8 @@ func setup(config: Dictionary) -> void:
 	_commit_surfaces()
 	_build_fence()
 	_build_crowd()
+	_build_motorhomes()
+	_build_probes()
 
 
 # --- geometry ----------------------------------------------------------------
@@ -915,3 +917,113 @@ static func _box_st(st: SurfaceTool, c: Vector3, size: Vector3, col: Color) -> v
 		st.add_vertex(c + v[f[0]])
 		st.add_vertex(c + v[f[3]])
 		st.add_vertex(c + v[f[2]])
+
+
+## Fans' motorhomes parked in rows in the infield (and a few outside turn 4), with
+## awnings out. Positions are checked against the whole track so none sit on it.
+func _build_motorhomes() -> void:
+	var rng := RandomNumberGenerator.new()
+	rng.seed = hash(cfg.name) + 11
+	var clear := width * 0.5 + 22.0
+	var xforms: Array[Transform3D] = []
+	var cols: Array[Color] = []
+	var tries := 0
+	while xforms.size() < 60 and tries < 600:
+		tries += 1
+		var idx := rng.randi() % n
+		var s := idx * (length / n)
+		if in_pit_zone(s) or in_pit_zone(s + 60.0) or in_pit_zone(s - 60.0):
+			continue
+		var d := inner_wall() - rng.randf_range(28.0, 90.0)
+		var p := pos[idx] + right[idx] * d
+		if not _clear_of_track(p, clear):
+			continue
+		# Park in neat rows: face along the track, small random yaw.
+		var yaw := atan2(fwd[idx].x, fwd[idx].z) + PI * 0.5 + rng.randf_range(-0.08, 0.08)
+		var too_close := false
+		for x in xforms:
+			if x.origin.distance_to(p) < 11.0:
+				too_close = true
+				break
+		if too_close:
+			continue
+		xforms.append(Transform3D(Basis(Vector3.UP, yaw), p))
+		var tint: Color = [Color(1, 1, 1), Color(0.95, 0.92, 0.85), Color(0.85, 0.87, 0.9), Color(0.9, 0.95, 1.0)][rng.randi() % 4]
+		cols.append(tint)
+	if xforms.is_empty():
+		return
+	var mm := MultiMesh.new()
+	mm.transform_format = MultiMesh.TRANSFORM_3D
+	mm.use_colors = true
+	mm.mesh = _motorhome_mesh()
+	mm.instance_count = xforms.size()
+	for k in xforms.size():
+		mm.set_instance_transform(k, xforms[k])
+		mm.set_instance_color(k, cols[k])
+	var mmi := MultiMeshInstance3D.new()
+	mmi.name = "Motorhomes"
+	mmi.multimesh = mm
+	mmi.material_override = Game.make_mat("crowd", Color(1, 1, 1))
+	add_child(mmi)
+
+
+func _clear_of_track(p: Vector3, clear: float) -> bool:
+	var c2 := clear * clear
+	for i in range(0, n, 2):
+		var q := pos[i]
+		var dx := p.x - q.x
+		var dz := p.z - q.z
+		if dx * dx + dz * dz < c2:
+			return false
+	return true
+
+
+## A Class A motorhome: body, cab, side stripe, windows, wheels and a striped awning.
+static func _motorhome_mesh() -> Mesh:
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var body := Color(0.92, 0.92, 0.9)
+	_box_st(st, Vector3(0, 1.95, 0), Vector3(2.5, 3.1, 11.0), body)
+	_box_st(st, Vector3(0, 1.3, 5.7), Vector3(2.45, 1.8, 0.5), body) # nose
+	_box_st(st, Vector3(0, 2.55, 5.55), Vector3(2.3, 1.1, 0.25), Color(0.08, 0.1, 0.12)) # windshield
+	_box_st(st, Vector3(0, 1.1, 0), Vector3(2.52, 0.35, 11.0), Color(0.55, 0.2, 0.15)) # stripe
+	_box_st(st, Vector3(0, 1.75, 0), Vector3(2.52, 0.12, 11.0), Color(0.3, 0.3, 0.35)) # pinstripe
+	for z in [-3.0, 0.5, 3.5]:
+		_box_st(st, Vector3(0, 2.5, z), Vector3(2.54, 0.7, 1.6), Color(0.08, 0.1, 0.12)) # windows
+	for z in [-3.6, 3.8]:
+		for x in [-1.1, 1.1]:
+			_box_st(st, Vector3(x, 0.5, z), Vector3(0.35, 1.0, 1.0), Color(0.06, 0.06, 0.06))
+	# Awning on the door side, striped.
+	for k in 6:
+		var c := Color(0.85, 0.3, 0.15) if k % 2 == 0 else Color(0.95, 0.9, 0.8)
+		_box_st(st, Vector3(-2.5, 3.1 - k * 0.04, -3.0 + k * 1.2), Vector3(2.6, 0.06, 1.2), c)
+	_box_st(st, Vector3(-3.7, 1.55, -3.4), Vector3(0.08, 3.1, 0.08), Color(0.6, 0.6, 0.62))
+	_box_st(st, Vector3(-3.7, 1.55, 3.4), Vector3(0.08, 3.1, 0.08), Color(0.6, 0.6, 0.62))
+	st.generate_normals()
+	return st.commit()
+
+
+## Reflection probes along the grandstands and pit road, so cars reflect the stands
+## and the world around them rather than only the sky (desktop Modern, HIGH and up).
+func _build_probes() -> void:
+	if not Game.forward_plus:
+		return
+	var stand_len := float(cfg.get("front_mid", 0.0)) + 2.0 * float(cfg.get("front_side", 0.0)) + 2.0 * float(cfg.get("dog_r", 0.0)) * deg_to_rad(float(cfg.get("dog_phi", 0.0)))
+	stand_len = clamp(stand_len * 0.9, 200.0, 900.0)
+	var count := clampi(int(stand_len / 150.0), 2, 6)
+	for k in count:
+		var s := (float(k) / (count - 1) - 0.5) * stand_len
+		var i := int(posmod(int(s / (length / n)), n))
+		var probe := ReflectionProbe.new()
+		probe.name = "Probe%d" % k
+		probe.update_mode = ReflectionProbe.UPDATE_ONCE
+		probe.size = Vector3(stand_len / count + 40.0, 30.0, width + 40.0)
+		probe.box_projection = false
+		probe.intensity = 0.9
+		probe.max_distance = 400.0
+		probe.ambient_mode = ReflectionProbe.AMBIENT_DISABLED
+		probe.blend_distance = 20.0
+		add_child(probe)
+		probe.position = pos[i] + Vector3.UP * 2.5
+		probe.rotation.y = atan2(right[i].x, right[i].z)
+		probe.add_to_group("probe")

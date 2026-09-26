@@ -8,6 +8,7 @@ signal car_finished(car: Node3D, place: int)
 signal incident(car: Node3D, kind: String)
 
 const Car := preload("res://scripts/car.gd")
+const SkidMarks := preload("res://scripts/skid_marks.gd")
 
 var track: Node3D
 var cars: Array[Node3D] = []
@@ -40,8 +41,12 @@ var wear_scale := 1.0 # fuel burn / tyre wear multiplier so short races still ne
 
 
 ## `grid` (optional) is the starting order as team indices, e.g. from qualifying.
+var skids: MultiMeshInstance3D
+
 func setup(trk: Node3D, player_team: int, lap_count: int, size := 40, grid: Array = [], player2_team := -1) -> void:
 	track = trk
+	skids = SkidMarks.new()
+	add_child(skids)
 	laps = lap_count
 	field_size = size
 	if Game.debug_seed != 0:
@@ -197,6 +202,7 @@ func tick(delta: float) -> void:
 		var was_out: bool = c.out
 		var was_spin: bool = c.spinning
 		c.step(delta)
+		skids.track_car(c)
 		if c.pit_state == 3: # in the pit box
 			c.v = 0.0
 			c.vy = 0.0

@@ -447,6 +447,7 @@ var auto_quality := 2 if OS.has_feature("web") else 3
 ## Blend car positions between physics steps so motion is smooth at any refresh rate.
 var smoothing := true
 var vsync := true
+var motion_blur := 1 # 0 off, 1 low, 2 high (desktop Modern only)
 
 signal graphics_changed
 
@@ -509,6 +510,7 @@ func load_settings() -> void:
 		auto_quality = cf.get_value("video", "auto_quality", auto_quality)
 		smoothing = cf.get_value("video", "smoothing", smoothing)
 		vsync = cf.get_value("video", "vsync", vsync)
+		motion_blur = cf.get_value("video", "motion_blur", motion_blur)
 	assists = settings.assists == 1
 	manual_shift = settings.manual == 1
 
@@ -527,6 +529,7 @@ func save_settings() -> void:
 	cf.set_value("video", "auto_quality", auto_quality)
 	cf.set_value("video", "smoothing", smoothing)
 	cf.set_value("video", "vsync", vsync)
+	cf.set_value("video", "motion_blur", motion_blur)
 	cf.save(SETTINGS_PATH)
 
 

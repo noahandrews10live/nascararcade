@@ -120,6 +120,7 @@ func _ready() -> void:
 	cam.near = 0.3
 	add_child(cam)
 	cam.current = true
+	_build_motion_blur()
 	synth = Synth.new()
 	add_child(synth)
 
@@ -351,6 +352,52 @@ func _apply_quality(night: bool) -> void:
 	env.ssr_enabled = fp and q >= 4
 	env.volumetric_fog_enabled = fp and night and q >= 3
 	env.glow_enabled = fp or q >= 3
+	get_tree().call_group("probe", "set_visible", fp and q >= 3)
+	get_tree().call_group("haze", "set_visible", fp and q >= 3)
+
+
+## Camera motion blur (desktop Modern): a full-screen card on the camera, see
+## shaders/motion_blur.gdshader. Off in menus, split screen and the 1999 look.
+var _blur: MeshInstance3D
+var _blur_mat: ShaderMaterial
+var _prev_vp := Projection()
+var _prev_cam := Transform3D()
+
+
+func _build_motion_blur() -> void:
+	if not Game.forward_plus:
+		return
+	_blur = MeshInstance3D.new()
+	var qm := QuadMesh.new()
+	qm.size = Vector2(1, 1)
+	_blur.mesh = qm
+	_blur_mat = ShaderMaterial.new()
+	_blur_mat.shader = load("res://shaders/motion_blur.gdshader")
+	_blur_mat.render_priority = 100
+	_blur.material_override = _blur_mat
+	_blur.extra_cull_margin = 16384.0
+	_blur.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	_blur.position = Vector3(0, 0, -1)
+	_blur.visible = false
+	cam.add_child(_blur)
+
+
+func _update_motion_blur() -> void:
+	if _blur == null:
+		return
+	var on: bool = Game.modern and Game.motion_blur > 0 and split_cams.is_empty() and not paused \
+		and state in [State.COUNTDOWN, State.RACE, State.FINISHED, State.REPLAY]
+	var xf := cam.global_transform
+	var vp := cam.get_camera_projection() * Projection(xf.affine_inverse())
+	# A camera cut would smear the whole frame: start fresh instead.
+	var cut: bool = xf.origin.distance_to(_prev_cam.origin) > 25.0 or xf.basis.z.dot(_prev_cam.basis.z) < 0.9
+	_blur.visible = on and not cut
+	if on:
+		_blur_mat.set_shader_parameter("prev_view_proj", _prev_vp)
+		_blur_mat.set_shader_parameter("amount", 0.35 if Game.motion_blur == 1 else 0.7)
+		_blur_mat.set_shader_parameter("samples", 6 if Game.quality_level() <= 2 else 10)
+	_prev_vp = vp
+	_prev_cam = xf
 
 
 ## AUTO quality: watch frame times while racing and step the preset down when
@@ -1143,6 +1190,7 @@ func _process(delta: float) -> void:
 		return
 	race.interpolate(Engine.get_physics_interpolation_fraction() if Game.smoothing else 1.0)
 	_update_camera(delta)
+	_update_motion_blur()
 	_auto_quality(delta)
 	_update_audio()
 	if screen:
@@ -1406,6 +1454,7 @@ func _enter_options() -> void:
 		{"id": "gfx", "label": "GRAPHICS", "values": ["1999", "MODERN"] if Game.modern_supported else ["1999"], "index": 1 if Game.modern else 0, "hint": "MODERN: REALISTIC LIGHTING AND DETAIL.  1999: THE ORIGINAL ARCADE LOOK"},
 		{"id": "quality", "label": "QUALITY (MODERN)", "values": Game.QUALITY_NAMES, "index": Game.quality, "hint": "AUTO LOWERS DETAIL WHEN FRAMES RUN LATE"},
 		{"id": "smooth", "label": "MOTION SMOOTHING", "values": ["OFF", "ON"], "index": 1 if Game.smoothing else 0, "hint": "SMOOTH MOTION ON 120/144 HZ SCREENS (ADDS UNDER 1 FRAME OF DELAY)"},
+		{"id": "blur", "label": "MOTION BLUR", "values": ["OFF", "LOW", "HIGH"], "index": Game.motion_blur, "hint": "DESKTOP MODERN LOOK ONLY"},
 		{"id": "vsync", "label": "VSYNC", "values": ["OFF", "ON"], "index": 1 if Game.vsync else 0, "hint": "OFF: LOWEST INPUT DELAY, MAY TEAR"},
 		{"id": "scan", "label": "SCANLINES (1999)", "values": ["OFF", "ON"], "index": 1 if Game.scanlines else 0},
 		{"id": "reset", "label": "RESET LAP RECORDS"},
@@ -1442,6 +1491,9 @@ func _on_menu_changed(id: String, idx: int) -> void:
 				Game.save_settings()
 			elif id == "smooth":
 				Game.smoothing = idx == 1
+				Game.save_settings()
+			elif id == "blur":
+				Game.motion_blur = idx
 				Game.save_settings()
 			elif id == "vsync":
 				Game.vsync = idx == 1
