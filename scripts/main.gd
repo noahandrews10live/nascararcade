@@ -7,6 +7,8 @@ const Race := preload("res://scripts/race.gd")
 const Car := preload("res://scripts/car.gd")
 const Weather := preload("res://scripts/weather.gd")
 const TelemetryHud := preload("res://scripts/telemetry_hud.gd")
+const TrackEditor := preload("res://scripts/track_editor.gd")
+const Net := preload("res://scripts/net.gd")
 const Hud := preload("res://scripts/hud.gd")
 const Synth := preload("res://scripts/audio.gd")
 const Menu := preload("res://scripts/menu.gd")
@@ -72,7 +74,9 @@ const MODES := [
 	["2 PLAYER", "SPLIT SCREEN. PLAYER 2: I J K L, U = PIT, OR A SECOND GAMEPAD."],
 	["LIGHTNING CHALLENGES", "RACE-DEFINING MOMENTS. BEAT FIVE TO UNLOCK A LEGEND."],
 	["PAINT SHOP", "CREATE YOUR OWN CAR: NUMBER, DRIVER, SPONSOR AND COLORS."],
-	["OPTIONS", "GRAPHICS AND RECORDS."],
+	["ONLINE", "RACE FRIENDS OVER THE INTERNET OR YOUR LOCAL NETWORK."],
+	["TRACK EDITOR", "BUILD YOUR OWN TRACK, TEST-DRIVE IT AND SAVE IT AS A MOD."],
+	["OPTIONS", "GRAPHICS, SOUND, WHEEL AND RECORDS."],
 ]
 var mode_idx := 0
 
@@ -123,6 +127,14 @@ func _ready() -> void:
 	add_child(cam)
 	cam.current = true
 	_build_motion_blur()
+	net = Net.new()
+	net.name = "Net"
+	add_child(net)
+	net.lobby_changed.connect(func():
+		if state == State.MENU and menu_kind == "lobby":
+			_enter_lobby())
+	net.status.connect(func(t): _sub(t, 3.0))
+	net.race_started.connect(_net_start_race)
 	synth = Synth.new()
 	add_child(synth)
 
@@ -576,6 +588,9 @@ func _new_race(player_team: int) -> void:
 			for k in p.damage:
 				p.damage[k] = float(ch.damage)
 			p._update_damage_visual()
+	elif mode == "online":
+		var roster: Array = net_config.roster
+		race.setup(track, player_team, int(net_config.laps), roster.size(), roster)
 	elif mode == "2p":
 		var size2: int = Game.FIELDS[Game.settings.field]
 		race.setup(track, player_team, Game.race_laps(Game.selected_track), size2, [], team2)
@@ -597,6 +612,8 @@ func _new_race(player_team: int) -> void:
 		race.arcade = true
 	race.lap_completed.connect(_on_lap)
 	race.car_finished.connect(_on_finished)
+	if mode == "online":
+		net.attach(race)
 	# Time of day for every race; weather for the full-rules races.
 	var weather_mode: int = int(Game.settings.get("weather", 0)) if (race.control and mode != "challenge") else 0
 	var w: Node = Weather.new()
@@ -686,12 +703,12 @@ func _enter_mode_select() -> void:
 	synth.beep(1320.0, 0.08)
 	_clear_screen()
 	_label("", "SELECT MODE", 34, Color(1.0, 0.85, 0.1), Vector2(0, 30), HORIZONTAL_ALIGNMENT_CENTER, 8)
-	var step: int = int(300.0 / MODES.size())
-	_panel(Rect2(60, 96, 520, MODES.size() * step + 20), Color(0, 0, 0, 0.6))
+	var step := 29
+	_panel(Rect2(60, 84, 520, MODES.size() * step + 16), Color(0, 0, 0, 0.6))
 	for i in MODES.size():
-		_label("mode%d" % i, MODES[i][0], 26, Color.WHITE, Vector2(0, 104 + i * step), HORIZONTAL_ALIGNMENT_CENTER, 7)
-		_label("mdesc%d" % i, MODES[i][1], 11, Color(0.7, 0.8, 0.9), Vector2(0, 136 + i * step), HORIZONTAL_ALIGNMENT_CENTER, 3)
-	_label("", "UP / DOWN   CHOOSE        START  SELECT", 14, Color(0.85, 0.85, 0.85), Vector2(0, 420))
+		_label("mode%d" % i, MODES[i][0], 21, Color.WHITE, Vector2(0, 90 + i * step), HORIZONTAL_ALIGNMENT_CENTER, 6)
+	_label("mdesc", "", 12, Color(0.7, 0.85, 1.0), Vector2(0, 396), HORIZONTAL_ALIGNMENT_CENTER, 3)
+	_label("", "UP / DOWN   CHOOSE        START  SELECT", 14, Color(0.85, 0.85, 0.85), Vector2(0, 424))
 	_refresh_mode_select()
 
 
@@ -700,6 +717,7 @@ func _refresh_mode_select() -> void:
 		var l: Label = menu_labels["mode%d" % i]
 		l.label_settings.font_color = Color(1.0, 0.85, 0.1) if i == mode_idx else Color(0.6, 0.6, 0.65)
 		l.text = ("> %s <" % MODES[i][0]) if i == mode_idx else MODES[i][0]
+	menu_labels.mdesc.text = MODES[mode_idx][1]
 
 
 func _enter_track_select() -> void:
@@ -955,6 +973,9 @@ func _on_finished(car: Node3D, place: int) -> void:
 # --- main loop ------------------------------------------------------------------
 
 func _unhandled_input(event: InputEvent) -> void:
+	if editor and is_instance_valid(editor) and editor.visible and state == State.MENU:
+		editor.handle(event)
+		return
 	if photo_mode and state != State.REPLAY:
 		_photo_input(event)
 		return
@@ -1025,6 +1046,10 @@ func _unhandled_input(event: InputEvent) -> void:
 					6:
 						_enter_paint_shop()
 					7:
+						_enter_online()
+					8:
+						_enter_track_editor()
+					9:
 						_enter_options()
 			elif event.is_action_pressed("back"):
 				_enter_title()
@@ -1126,6 +1151,9 @@ func _unhandled_input(event: InputEvent) -> void:
 					_after_season_race()
 				elif mode == "challenge":
 					_enter_challenges()
+				elif mode == "online" and net.connected:
+					net.in_race = false
+					_enter_lobby()
 				else:
 					_enter_title()
 
@@ -1137,6 +1165,8 @@ func _physics_process(delta: float) -> void:
 		synth.pass_volume = 0.0
 		return
 	state_time += delta
+	if net and net.in_race:
+		net.tick(delta)
 	match state:
 		State.TITLE, State.MODE_SELECT, State.TRACK_SELECT, State.CAR_SELECT, State.MENU, State.SESSION_RESULTS, State.STANDINGS:
 			_loop_attract()
@@ -1720,6 +1750,14 @@ func _on_menu_changed(id: String, idx: int) -> void:
 			if Game.settings.has(id):
 				Game.settings[id] = idx
 				Game.save_settings()
+		"lobby":
+			match id:
+				"lobby_track":
+					_lobby_track = idx
+				"lobby_laps":
+					_lobby_laps = idx
+				"lobby_ai":
+					_lobby_ai = idx
 		"garage":
 			if id == "balance":
 				Game.setup.balance = idx - 3
@@ -1779,6 +1817,9 @@ func _on_menu_activated(id: String) -> void:
 	if id.begins_with("sheet"):
 		_on_sheet(id)
 		return
+	if id.begins_with("net_"):
+		_on_online_menu(id)
+		return
 	match id:
 		"go", "weekend":
 			_start_weekend()
@@ -1835,6 +1876,11 @@ func _on_menu_cancelled() -> void:
 				_enter_race_setup()
 		"sheets":
 			_enter_garage(menu_return)
+		"online":
+			_enter_mode_select()
+		"lobby":
+			net.leave()
+			_enter_online()
 		"rnd", "sponsors":
 			_enter_career_hub()
 		"hub", "options":
@@ -1863,6 +1909,9 @@ func _start_weekend() -> void:
 
 func _start_session() -> void:
 	if session_idx >= sessions.size():
+		if editor and is_instance_valid(editor) and Game.track().name == "EDITOR TEST":
+			_enter_track_editor() # back to the editor after a test drive
+			return
 		_enter_title()
 		return
 	session = sessions[session_idx]
@@ -2203,6 +2252,134 @@ func _replay_overlay() -> void:
 	synth.engine_on = true
 	synth.engine_rpm = 3000.0 + abs(c.v) * 70.0
 	synth.engine_load = 0.8
+
+
+# --- online ---------------------------------------------------------------------
+
+var net: Node
+var net_config := {}
+var net_address := "ws://127.0.0.1:24565"
+var _lobby_track := 0
+var _lobby_laps := 1
+var _lobby_ai := 1
+var _addr_edit: LineEdit
+
+
+func _enter_online() -> void:
+	var rows := [
+		{"id": "net_host", "label": "HOST A RACE", "hint": "DESKTOP: OPENS PORT %d FOR YOUR FRIENDS" % Net.PORT},
+		{"id": "net_addr", "label": "ADDRESS", "values": [net_address], "index": 0, "hint": "START TO TYPE AN ADDRESS (BROWSERS NEED A WSS:// HOST)"},
+		{"id": "net_join", "label": "JOIN A RACE", "hint": "CONNECTS TO THE ADDRESS ABOVE"},
+		{"id": "net_back", "label": "BACK"},
+	]
+	_open_menu("online", "ONLINE", rows, 0)
+
+
+func _enter_lobby() -> void:
+	var rows: Array = []
+	for id in net.players:
+		var pl: Dictionary = net.players[id]
+		var team: Dictionary = Game.teams[clamp(int(pl.team), 0, Game.teams.size() - 1)]
+		rows.append({"id": "net_player", "label": "%s  #%s" % [pl.name, team.num], "disabled": true, "hint": "HOST" if int(id) == 1 else "READY"})
+	if net.hosting:
+		var names: Array = Game.tracks.map(func(t): return t.short)
+		rows.append({"id": "lobby_track", "label": "TRACK", "values": names, "index": _lobby_track})
+		rows.append({"id": "lobby_laps", "label": "LAPS", "values": ["3", "5", "10", "20"], "index": _lobby_laps})
+		rows.append({"id": "lobby_ai", "label": "AI CARS", "values": ["0", "8", "16", "24"], "index": _lobby_ai})
+		rows.append({"id": "net_start", "label": "START RACE"})
+	else:
+		rows.append({"id": "net_wait", "label": "WAITING FOR THE HOST", "disabled": true})
+	rows.append({"id": "net_leave", "label": "LEAVE"})
+	_open_menu("lobby", "LOBBY  (%d DRIVERS)" % net.players.size(), rows, rows.size() - (2 if net.hosting else 1))
+
+
+func _on_online_menu(id: String) -> void:
+	match id:
+		"net_host":
+			var err: String = net.host()
+			if err != "":
+				_sub(err, 3.0)
+			else:
+				_enter_lobby()
+		"net_join":
+			var err2: String = net.join(net_address)
+			if err2 != "":
+				_sub(err2, 3.0)
+			else:
+				_enter_lobby()
+		"net_addr":
+			_edit_address()
+		"net_back":
+			_enter_mode_select()
+		"net_leave":
+			net.leave()
+			_enter_online()
+		"net_start":
+			var laps: int = [3, 5, 10, 20][_lobby_laps]
+			var ai: int = [0, 8, 16, 24][_lobby_ai]
+			net.start_race(_lobby_track, laps, ai + net.players.size())
+
+
+func _edit_address() -> void:
+	if _addr_edit == null:
+		_addr_edit = LineEdit.new()
+		_addr_edit.position = Vector2(120, 360)
+		_addr_edit.size = Vector2(400, 32)
+		_addr_edit.text_submitted.connect(func(t: String):
+			net_address = t.strip_edges()
+			_addr_edit.visible = false
+			_enter_online())
+		ui_layer.add_child(_addr_edit)
+	_addr_edit.text = net_address
+	_addr_edit.visible = true
+	_addr_edit.grab_focus()
+
+
+func _net_start_race(config: Dictionary) -> void:
+	net_config = config
+	mode = "online"
+	session = "race"
+	var slot: int = net.my_slot(config)
+	Game.selected_team = int(config.roster[slot]) if slot >= 0 else Game.selected_team
+	_use_track(int(config.track))
+	seed(int(config.seed))
+	_enter_countdown()
+
+
+# --- track editor ---------------------------------------------------------------------
+
+var editor: Control
+
+
+func _enter_track_editor() -> void:
+	_set_state(State.MENU)
+	_clear_screen()
+	menu_kind = "editor"
+	if editor == null or not is_instance_valid(editor):
+		editor = TrackEditor.new()
+		editor.test_drive.connect(_editor_test_drive)
+		editor.closed.connect(func():
+			editor.visible = false
+			_enter_mode_select())
+		ui_layer.add_child(editor)
+	editor.visible = true
+
+
+## Practice on the layout being edited (it's added as a track for the session).
+func _editor_test_drive(cfg: Dictionary) -> void:
+	editor.visible = false
+	var d: Dictionary = cfg.duplicate(true)
+	d.name = "EDITOR TEST"
+	var idx: int = Game.add_track(d)
+	if tracks.has(idx):
+		tracks[idx].queue_free()
+		tracks.erase(idx)
+	mode = "race"
+	_use_track(idx)
+	sessions = ["practice"]
+	session_idx = 0
+	session = "practice"
+	_enter_countdown()
 
 
 # --- broadcast director, highlights, photo mode -------------------------------------

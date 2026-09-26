@@ -487,6 +487,7 @@ func _ready() -> void:
 	# Slant the glyphs for that italic arcade cabinet look.
 	arcade_font.variation_transform = Transform2D(Vector2(1, 0), Vector2(-0.22, 1), Vector2.ZERO)
 	records.load(RECORDS_PATH)
+	load_mods()
 	_fill_teams()
 	# Modern works on both renderers; Forward+ (desktop Vulkan/D3D12) adds SSAO,
 	# SSR, volumetric fog and FSR 2 on top of the Compatibility (browser) version.
@@ -498,6 +499,81 @@ func _ready() -> void:
 	load_custom()
 	load_challenges()
 	load_career()
+
+
+# --- mods: tracks and teams from JSON --------------------------------------------
+
+const MODS_DIR := "user://mods"
+const COLOR_KEYS := ["sky_top", "sky_horizon", "grass", "fog", "c1", "c2", "cn"]
+
+
+## Tracks in user://mods/tracks/*.json and teams in user://mods/teams/*.json (a list
+## of teams per file). Colours are "#rrggbb". Missing track settings come from a
+## standard intermediate, so a mod only needs a name and a layout.
+func load_mods() -> void:
+	for path in _json_files(MODS_DIR + "/tracks"):
+		var d = _read_json(path)
+		if d is Dictionary and d.has("name"):
+			add_track(d)
+	for path in _json_files(MODS_DIR + "/teams"):
+		var arr = _read_json(path)
+		if arr is Array:
+			for t in arr:
+				if t is Dictionary and t.has("num"):
+					teams.append(_colors_in(t))
+
+
+func add_track(d: Dictionary) -> int:
+	var t: Dictionary = tracks[1].duplicate(true)
+	for k in ["front_mid", "front_side", "dog_r", "dog_phi", "back"]:
+		t.erase(k)
+	for k in d:
+		t[k] = d[k]
+	t = _colors_in(t)
+	t["mod"] = true
+	t["short"] = String(t.get("short", String(t.name).left(14)))
+	for i in tracks.size():
+		if tracks[i].name == t.name:
+			tracks[i] = t
+			return i
+	tracks.append(t)
+	return tracks.size() - 1
+
+
+func save_track_mod(d: Dictionary) -> String:
+	DirAccess.make_dir_recursive_absolute(MODS_DIR + "/tracks")
+	var out := {}
+	for k in d:
+		var v = d[k]
+		out[k] = ("#" + (v as Color).to_html(false)) if v is Color else v
+	var path := MODS_DIR + "/tracks/" + String(d.name).to_lower().replace(" ", "_").replace("'", "") + ".json"
+	var f := FileAccess.open(path, FileAccess.WRITE)
+	if f:
+		f.store_string(JSON.stringify(out, "  "))
+	return ProjectSettings.globalize_path(path)
+
+
+func _colors_in(d: Dictionary) -> Dictionary:
+	for k in COLOR_KEYS:
+		if d.has(k) and d[k] is String:
+			d[k] = Color.html(d[k])
+	return d
+
+
+func _json_files(dir: String) -> Array:
+	var out: Array = []
+	var da := DirAccess.open(dir)
+	if da == null:
+		return out
+	for f in da.get_files():
+		if f.ends_with(".json"):
+			out.append(dir + "/" + f)
+	return out
+
+
+func _read_json(path: String):
+	var f := FileAccess.open(path, FileAccess.READ)
+	return JSON.parse_string(f.get_as_text()) if f else null
 
 
 func load_settings() -> void:

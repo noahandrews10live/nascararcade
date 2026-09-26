@@ -222,6 +222,9 @@ func tick(delta: float) -> void:
 				target = lerp(1.0, 1.05, clamp((-gap - 80.0) / 250.0, 0.0, 1.0))
 			c.rubber = move_toward(c.rubber, target, delta * 0.02)
 			c.drag_mult *= 1.0 / pow(c.rubber, 3.0)
+		if c.remote:
+			c.step_remote(delta)
+			continue
 		var was_out: bool = c.out
 		var was_spin: bool = c.spinning
 		c.step(delta)
@@ -622,7 +625,7 @@ func _drive_ai(c: Node3D, delta: float) -> void:
 	var ss: float = c.s()
 	var k: float = track.curvature_at(ss)
 	var look: float = max(c.v, 0.0) * 0.7
-	var grip_scale: float = sqrt(c.mu * c.tyre_grip()) * lerp(0.92, 1.0, c.df_front_mult)
+	var grip_scale: float = sqrt(c.mu * c.tyre_grip() * c._track_grip) * lerp(0.92, 1.0, c.df_front_mult)
 	var target: float = track.profile_at(ss + look) * grip_scale * c.ai_skill * 0.95
 	if c.flat_time > 1.2:
 		target *= 0.55 # limp it back to pit road (after the moment it takes to react)
@@ -894,11 +897,14 @@ func _contact(a: Node3D, b: Node3D, rel: Vector2) -> void:
 	var rb_p: Vector2 = cp - rel
 	var vrel: Vector2 = a.point_velocity(ra_p) - b.point_velocity(rb_p)
 	var vn: float = vrel.dot(n)
-	# Separate the boxes.
-	a.dist -= n.x * best_ov * 0.5
-	a.d -= n.y * best_ov * 0.5
-	b.dist += n.x * best_ov * 0.5
-	b.d += n.y * best_ov * 0.5
+	# Separate the boxes. (Online, each player only moves and pushes the car they
+	# own; the other side of the contact is handled on its owner's machine.)
+	var ka: float = 0.0 if a.remote else (0.5 if not b.remote else 1.0)
+	var kb: float = 0.0 if b.remote else (0.5 if not a.remote else 1.0)
+	a.dist -= n.x * best_ov * ka
+	a.d -= n.y * best_ov * ka
+	b.dist += n.x * best_ov * kb
+	b.d += n.y * best_ov * kb
 	if vn <= 0.0:
 		return
 	# Gentle rubs mostly slide the cars along each other (sheet metal flexes, the
@@ -910,10 +916,12 @@ func _contact(a: Node3D, b: Node3D, rel: Vector2) -> void:
 	var vt: float = vrel.dot(t)
 	var jt: float = clamp(vt / (a.inv_mass_along(t, ra_p) + b.inv_mass_along(t, rb_p)), -0.15 * j, 0.15 * j)
 	var imp: Vector2 = n * j + t * jt
-	a.apply_impulse(-imp, ra_p)
-	b.apply_impulse(imp, rb_p)
-	a.add_damage(j, ra_p)
-	b.add_damage(j, rb_p)
+	if not a.remote:
+		a.apply_impulse(-imp, ra_p)
+		a.add_damage(j, ra_p)
+	if not b.remote:
+		b.apply_impulse(imp, rb_p)
+		b.add_damage(j, rb_p)
 	# Grudges: the car that got hit (in the rear or turned) remembers who did it.
 	if vn > 3.0:
 		var victim: Node3D = b if n.x > 0.3 else a # b is ahead along n: a hit b from behind

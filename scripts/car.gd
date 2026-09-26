@@ -196,6 +196,10 @@ var steer_feel := 0.0 # aligning torque from the front tyres (for force feedback
 var locked_wheels := 0 # bitmask of wheels locked under braking
 var assist_level := 1.0 # 0 off, 0.5 mild, 1 full
 var far_away := false # set by the race: well away from any player (cheaper physics)
+# Online: another player's (or the host's AI) car, driven by network updates.
+var remote := false
+var _net := PackedFloat32Array()
+var _net_age := 0.0
 var stagger := 0.01 # right rear bigger than left rear (fraction of circumference)
 # Setup (the garage): wheel rates, bump stop gap, brake bias, cold pressures per side
 var k_front := 90000.0
@@ -497,6 +501,42 @@ func _mu_eff(load_ratio: float) -> float:
 	elif d < track.inner_edge():
 		surf = 0.95
 	return mu * tyre_grip() * surf * pow(max(load_ratio, 0.3), -0.3)
+
+
+## A network update for a remote car: dist, d, yaw, v, vy, r, roll, pitch, heave,
+## visible, finished, lap.
+func net_state(st: PackedFloat32Array) -> void:
+	_net = st
+	_net_age = 0.0
+	visible = st[9] > 0.5
+	finished = finished or st[10] > 0.5
+	if abs(st[0] - dist) > 60.0:
+		dist = st[0] # too far off: snap
+		d = st[1]
+		yaw = st[2]
+
+
+## Remote cars: glide toward where the last update says they are now
+## (extrapolated by their speed), then draw.
+func step_remote(delta: float) -> void:
+	if _net.size() < 9:
+		_update_visual(delta)
+		return
+	_net_age += delta
+	var tgt_dist: float = _net[0] + (_net[3] * cos(_net[2]) - _net[4] * sin(_net[2])) * _net_age
+	var tgt_d: float = _net[1] + (_net[3] * sin(_net[2]) + _net[4] * cos(_net[2])) * _net_age
+	var k: float = 1.0 - exp(-10.0 * delta)
+	dist = lerp(dist, tgt_dist, k)
+	d = lerp(d, tgt_d, k)
+	yaw = lerp_angle(yaw, _net[2], k)
+	v = _net[3]
+	vy = _net[4]
+	r = _net[5]
+	chassis_roll = _net[6]
+	chassis_pitch = _net[7]
+	chassis_z = _net[8]
+	spinning = abs(yaw) > 0.6 and speed() > 8.0
+	_update_visual(delta)
 
 
 ## Corner loads on the springs at 1 g: front/rear from the CG position, 52% on the
