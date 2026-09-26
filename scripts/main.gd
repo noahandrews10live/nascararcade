@@ -1004,7 +1004,8 @@ var _out_timer := 0.0
 ## Wrecked out or stopped with an empty tank: the player's race is over.
 func _check_player_out(delta: float) -> void:
 	var p: Node3D = race.player
-	var dry: bool = p.fuel <= 0.0 and p.speed() < 1.0 and p.pit_state == 0
+	# Stranded on track or on the way to pit road (pit road itself is automatic).
+	var dry: bool = p.fuel <= 0.0 and p.speed() < 1.0 and p.pit_state <= 1
 	if p.out or dry:
 		_out_timer += delta
 		if _out_timer > 3.0:
