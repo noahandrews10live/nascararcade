@@ -92,5 +92,51 @@ func _run() -> void:
 		_check(tt[1] > 70.0 and tt[1] < 150.0, "right front is in its working window (70-150 C)")
 		race.free()
 		t.free()
+	_wreck_tests(game)
 	print("FAILURES: ", failures)
 	quit(1 if failures > 0 else 0)
+
+
+## Sideways at superspeedway speed the roof acts as a wing and the car takes off;
+## turned backwards the roof flaps pop up and keep it down; a slow spin stays on
+## its wheels.
+func _wreck_tests(game: Node) -> void:
+	var t: Node3D = Track.new()
+	root.add_child(t)
+	t.setup(game.tracks[0])
+	print("== wrecks (", game.tracks[0].name, ")")
+	for case in [["sideways at 200 mph", 90.0, PI * 0.5, true], ["backwards at 190 mph", 85.0, PI, false], ["half spin at 60 mph", 27.0, 1.6, false]]:
+		var race: Node3D = Race.new()
+		root.add_child(race)
+		race.setup(t, -1, 5, 1)
+		race.grid_up(0.0, 30.0)
+		race.go_green()
+		var c: Node3D = race.cars[0]
+		c.ai = false
+		c.assisted = false
+		c.dist = t.length * 0.5
+		c.d = 0.0
+		c.v = case[1] * cos(case[2])
+		c.vy = case[1] * sin(case[2])
+		c.yaw = case[2]
+		c.throttle = 0.0
+		c.brake = 0.0
+		var went := false
+		var flaps := false
+		var peak := 0.0
+		for i in 600:
+			race.tick(DT)
+			went = went or c.tumbling
+			flaps = flaps or c.roof_flaps
+			if c.tumbling:
+				var su: Array = c._surface_under(c.t_pos, c.s())
+				peak = max(peak, (c.t_pos - (su[2] as Vector3)).dot(su[3]))
+		print("   %s: airborne/tumbled=%s  roof flaps=%s  peak height %.1f m  settled=%s" % [case[0], went, flaps, peak, not c.tumbling])
+		if case[3]:
+			_check(went, "%s: the car gets airborne" % case[0])
+		elif case[2] == PI:
+			_check(flaps, "%s: roof flaps deploy" % case[0])
+		else:
+			_check(not went, "%s: stays on its wheels" % case[0])
+		race.free()
+	t.free()

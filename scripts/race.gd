@@ -99,10 +99,12 @@ func setup(trk: Node3D, player_team: int, lap_count: int, size := 40, grid: Arra
 		if p == grid_p2:
 			player2 = c
 			c.assisted = Game.assists
+			c.assist_level = Game.assist_level
 			Game.apply_setup(c)
 		elif c.is_player:
 			player = c
 			c.assisted = Game.assists or arcade_setup
+			c.assist_level = 1.0 if arcade_setup else Game.assist_level
 			if not arcade_setup:
 				Game.apply_setup(c)
 			if career:
@@ -747,3 +749,11 @@ func _contact(a: Node3D, b: Node3D, rel: Vector2) -> void:
 	var hit: float = vn
 	a.bump = max(a.bump, hit)
 	b.bump = max(b.bump, hit)
+	# Big hits can climb one car over another: the struck car gets lifted and
+	# rolled (how cars get airborne in real wrecks).
+	if vn > 11.0:
+		var lift: float = j * 0.09 * clamp((vn - 11.0) / 15.0, 0.0, 1.0)
+		for pair in [[a, -1.0], [b, 1.0]]:
+			var x: Node3D = pair[0]
+			var side: float = x.track_to_body(n * pair[1]).y
+			x.kick(lift * abs(side), side * lift * 0.9, 0.0)

@@ -401,6 +401,18 @@ func surface_point(s: float, d: float) -> Vector3:
 	return p + r * d + Vector3.UP * height_at(d, b)
 
 
+func fwd_at(s: float) -> Vector3:
+	var l := _locate(s)
+	var i := int(l.x)
+	return fwd[i].lerp(fwd[(i + 1) % n], l.y).normalized()
+
+
+func right_at(s: float) -> Vector3:
+	var l := _locate(s)
+	var i := int(l.x)
+	return right[i].lerp(right[(i + 1) % n], l.y).normalized()
+
+
 ## Full transform of a car at (s, d) with yaw offset `yaw` (radians, + = heading right).
 func car_transform(s: float, d: float, yaw: float) -> Transform3D:
 	var l := _locate(s)

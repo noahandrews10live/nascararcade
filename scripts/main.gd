@@ -1111,7 +1111,29 @@ func _player2_input() -> void:
 		return
 	p.throttle = Input.get_action_strength("p2_accelerate")
 	p.brake = Input.get_action_strength("p2_brake")
+	_rumble(p, 1)
 	p.steer_in = Input.get_action_strength("p2_right") - Input.get_action_strength("p2_left")
+
+
+## Gamepad rumble: the front tyres scrubbing (light motor), bumps, locked brakes,
+## wall hits and contact (heavy motor).
+var _rumble_t := [0.0, 0.0]
+
+
+func _rumble(p: Node3D, device: int) -> void:
+	if Input.get_connected_joypads().find(device) < 0:
+		return
+	_rumble_t[device] -= get_physics_process_delta_time()
+	if _rumble_t[device] > 0.0:
+		return
+	_rumble_t[device] = 0.1
+	var rough := 0.0
+	for i in 4:
+		rough += abs(p._road_rate[i])
+	var weak: float = clamp(p.scrub * 0.7 + abs(p.steer_feel) * 0.15 + (0.25 if p.rpm() > p.REDLINE - 150.0 else 0.0), 0.0, 1.0)
+	var strong: float = clamp(p.bump / 15.0 + p.wall_hit / 12.0 + rough * 0.25 + (0.35 if p.locked_wheels != 0 else 0.0) + (0.6 if p.tumbling else 0.0), 0.0, 1.0)
+	if weak > 0.04 or strong > 0.04:
+		Input.start_joy_vibration(device, weak, strong, 0.14)
 
 
 func _player_input() -> void:
@@ -1143,6 +1165,7 @@ func _player_input() -> void:
 			return
 	p.throttle = Input.get_action_strength("accelerate")
 	p.brake = Input.get_action_strength("brake")
+	_rumble(p, 0)
 	p.steer_in = Input.get_action_strength("steer_right") - Input.get_action_strength("steer_left")
 	if Input.is_action_just_pressed("shift_up"):
 		p.shift_request = 1
@@ -1390,7 +1413,7 @@ func _enter_race_setup(return_to := "") -> void:
 		{"id": "cautions", "label": "CAUTIONS", "values": ["OFF", "ON"], "index": Game.settings.cautions},
 		{"id": "damage", "label": "DAMAGE", "values": ["OFF", "ON"], "index": Game.settings.damage, "hint": "DAMAGE HURTS SPEED, HANDLING AND CAN END YOUR RACE"},
 		{"id": "wear", "label": "FUEL + TIRE WEAR", "values": ["OFF", "ON"], "index": Game.settings.wear, "hint": "SCALED TO RACE LENGTH SO PIT STRATEGY MATTERS"},
-		{"id": "assists", "label": "DRIVING ASSISTS", "values": ["OFF", "ON"], "index": Game.settings.assists, "hint": "STEERING, TRACTION AND STABILITY HELP"},
+		{"id": "assists", "label": "DRIVING ASSISTS", "values": ["OFF", "MILD", "FULL"], "index": Game.settings.assists, "hint": "MILD: STEERING HELP ONLY, LOOSER TRACTION AND ABS.  OFF: ALL YOU"},
 		{"id": "manual", "label": "TRANSMISSION", "values": ["AUTOMATIC", "MANUAL"], "index": Game.settings.manual, "hint": "MANUAL: E = UP, Q = DOWN (RB / LB)"},
 		{"id": "garage", "label": "GARAGE SETUP", "hint": "BALANCE, TIRE PRESSURE AND GEARING"},
 	]

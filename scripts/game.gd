@@ -189,6 +189,8 @@ var teams: Array[Dictionary] = [
 const SELECTABLE_TEAMS := 6
 
 var assists := true # steering/stability/traction help for the player
+var assist_level := 1.0 # 0 off, 0.5 mild, 1 full
+const ASSIST_LEVELS := [0.0, 0.5, 1.0]
 var manual_shift := false
 var debug_seed := 0 # fixed randomness for tests
 var selected_track := 0
@@ -463,7 +465,7 @@ const WEEKENDS := ["RACE ONLY", "QUALIFY + RACE", "PRACTICE + QUALIFY + RACE"]
 var settings := {
 	# Browsers get a 20-car field by default (GDScript runs slower there).
 	"length": 1, "difficulty": 1, "field": 0 if OS.has_feature("web") else 2, "cautions": 1, "damage": 1, "wear": 1,
-	"assists": 1, "manual": 0, "weekend": 1,
+	"assists": 2, "manual": 0, "weekend": 1,
 }
 ## Garage setup (applied to the player's car): -3..3 balance (tight..loose),
 ## tyre pressure 0 low / 1 std / 2 high, gearing 0 short / 1 std / 2 long.
@@ -511,16 +513,25 @@ func load_settings() -> void:
 		smoothing = cf.get_value("video", "smoothing", smoothing)
 		vsync = cf.get_value("video", "vsync", vsync)
 		motion_blur = cf.get_value("video", "motion_blur", motion_blur)
-	assists = settings.assists == 1
+		# Assists used to be OFF / ON; ON is now FULL (OFF / MILD / FULL).
+		if not cf.get_value("settings", "assists_v2", false) and int(settings.assists) == 1:
+			settings.assists = 2
+	_apply_assists()
 	manual_shift = settings.manual == 1
 
 
+func _apply_assists() -> void:
+	assist_level = ASSIST_LEVELS[clamp(int(settings.assists), 0, 2)]
+	assists = assist_level > 0.0
+
+
 func save_settings() -> void:
-	assists = settings.assists == 1
+	_apply_assists()
 	manual_shift = settings.manual == 1
 	var cf := ConfigFile.new()
 	for k in settings:
 		cf.set_value("settings", k, settings[k])
+	cf.set_value("settings", "assists_v2", true)
 	for k in setup:
 		cf.set_value("setup", k, setup[k])
 	cf.set_value("video", "modern_look", modern)
