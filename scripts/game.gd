@@ -438,11 +438,12 @@ var scanlines := true
 ## the Compatibility renderer), otherwise the game stays in 1999 mode.
 var modern_supported := false
 var modern := false
+var forward_plus := false
 ## Modern-mode quality: 0 AUTO, 1 LOW, 2 MEDIUM, 3 HIGH, 4 ULTRA.
 const QUALITY_NAMES := ["AUTO", "LOW", "MEDIUM", "HIGH", "ULTRA"]
 var quality := 0
 ## The level AUTO is currently running at (adjusted from measured frame times).
-var auto_quality := 3
+var auto_quality := 2 if OS.has_feature("web") else 3
 ## Blend car positions between physics steps so motion is smooth at any refresh rate.
 var smoothing := true
 var vsync := true
@@ -483,13 +484,16 @@ func _ready() -> void:
 	arcade_font.variation_transform = Transform2D(Vector2(1, 0), Vector2(-0.22, 1), Vector2.ZERO)
 	records.load(RECORDS_PATH)
 	_fill_teams()
+	# Modern works on both renderers; Forward+ (desktop Vulkan/D3D12) adds SSAO,
+	# SSR, volumetric fog and FSR 2 on top of the Compatibility (browser) version.
+	forward_plus = RenderingServer.get_rendering_device() != null
+	modern_supported = true
+	modern = true
 	load_settings()
 	load_season()
 	load_custom()
 	load_challenges()
 	load_career()
-	modern_supported = RenderingServer.get_rendering_device() != null
-	modern = modern_supported
 
 
 func load_settings() -> void:
@@ -499,7 +503,7 @@ func load_settings() -> void:
 			settings[k] = cf.get_value("settings", k, settings[k])
 		for k in setup:
 			setup[k] = cf.get_value("setup", k, setup[k])
-		modern = cf.get_value("video", "modern", modern) and modern_supported
+		modern = cf.get_value("video", "modern_look", modern) and modern_supported
 		scanlines = cf.get_value("video", "scanlines", scanlines)
 		quality = cf.get_value("video", "quality", quality)
 		auto_quality = cf.get_value("video", "auto_quality", auto_quality)
@@ -517,7 +521,7 @@ func save_settings() -> void:
 		cf.set_value("settings", k, settings[k])
 	for k in setup:
 		cf.set_value("setup", k, setup[k])
-	cf.set_value("video", "modern", modern)
+	cf.set_value("video", "modern_look", modern)
 	cf.set_value("video", "scanlines", scanlines)
 	cf.set_value("video", "quality", quality)
 	cf.set_value("video", "auto_quality", auto_quality)
@@ -720,6 +724,25 @@ func style(m: StandardMaterial3D) -> void:
 			else:
 				m.roughness = 0.4
 				m.metallic_specular = 0.7
+		"livery":
+			# The body mesh carries the livery in its vertex colours.
+			m.vertex_color_use_as_albedo = true
+			m.vertex_color_is_srgb = modern
+			if modern:
+				m.metallic = 0.25
+				m.roughness = 0.3
+				m.clearcoat_enabled = true
+				m.clearcoat = 1.0
+				m.clearcoat_roughness = 0.05
+			else:
+				m.roughness = 0.4
+				m.metallic_specular = 0.7
+		"carbon":
+			m.roughness = 0.45 if modern else 0.6
+			m.metallic = 0.1 if modern else 0.0
+		"wheel":
+			m.metallic = 0.6 if modern else 0.2
+			m.roughness = 0.35
 		"glass":
 			m.metallic = 0.7 if modern else 0.0
 			m.roughness = 0.04 if modern else 0.3
@@ -766,6 +789,29 @@ func style(m: StandardMaterial3D) -> void:
 			m.albedo_color = Color(4, 4, 3.6) if modern else Color.WHITE
 		"foliage":
 			m.roughness = 1.0
+		"seats":
+			# 1999: the seat rows are the crowd. Modern: plain aluminium bleachers
+			# (the fans are separate models).
+			m.vertex_color_use_as_albedo = not modern
+			m.cull_mode = BaseMaterial3D.CULL_DISABLED
+			if modern:
+				m.albedo_color = Color(0.5, 0.52, 0.56)
+				m.metallic = 0.5
+				m.roughness = 0.5
+			else:
+				m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		"tree", "crowd":
+			m.vertex_color_use_as_albedo = true
+			m.vertex_color_is_srgb = modern
+			m.roughness = 1.0 if kind == "tree" else 0.85
+			m.cull_mode = BaseMaterial3D.CULL_DISABLED if kind == "tree" else BaseMaterial3D.CULL_BACK
+		"fence":
+			# Chain link: a tiling wire pattern, see-through, fading to a haze with distance.
+			m.albedo_texture = chain_link_texture()
+			m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+			m.cull_mode = BaseMaterial3D.CULL_DISABLED
+			m.metallic = 0.6 if modern else 0.0
+			m.roughness = 0.5
 		"ground":
 			if modern:
 				m.roughness = 0.95
@@ -781,6 +827,26 @@ func style(m: StandardMaterial3D) -> void:
 			m.metallic_specular = 1.0
 			m.roughness = 0.05 if modern else 0.1
 			m.metallic = 0.3 if modern else 0.0
+
+
+## Chain-link fence pattern: two sets of diagonal wires on a transparent background.
+func chain_link_texture() -> Texture2D:
+	if _tex.has("chain"):
+		return _tex["chain"]
+	var sz := 64
+	var img := Image.create(sz, sz, false, Image.FORMAT_RGBA8)
+	for y in sz:
+		for x in sz:
+			var a := posmod(x + y, sz / 4)
+			var b := posmod(x - y, sz / 4)
+			var da: int = min(a, sz / 4 - a)
+			var db: int = min(b, sz / 4 - b)
+			var wire: float = max(clamp(1.6 - da, 0.0, 1.0), clamp(1.6 - db, 0.0, 1.0))
+			img.set_pixel(x, y, Color(0.8, 0.82, 0.85, wire))
+	img.generate_mipmaps()
+	var t := ImageTexture.create_from_image(img)
+	_tex["chain"] = t
+	return t
 
 
 ## Procedural, tileable surface textures (shared, generated once).

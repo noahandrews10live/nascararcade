@@ -8,6 +8,7 @@ extends Node3D
 ## `r` (+ = clockwise seen from above). Tyres use a Pacejka-style curve with a grip
 ## peak and fall-off, so cars can be loose, tight, spin and wreck.
 
+const CarBody := preload("res://scripts/car_body.gd")
 const LENGTH := 5.0
 const WIDTH := 1.95
 const HALF_L := 2.5
@@ -122,6 +123,9 @@ var ai_stuck := 0.0
 var ai_reverse := 0.0
 
 var model: Node3D
+var _retro: Node3D
+var _body := {}
+var _dented_at := 0.0
 var sparks: CPUParticles3D
 var smoke: CPUParticles3D
 var tyre_smoke: CPUParticles3D
@@ -547,7 +551,7 @@ func _add_box(size: Vector3, p: Vector3, m: Material, parent: Node3D = null) -> 
 	mi.mesh = bm
 	mi.material_override = m
 	mi.position = p
-	(parent if parent else model).add_child(mi)
+	(parent if parent else _retro).add_child(mi)
 	panels.append(mi)
 	mi.set_meta("home", p)
 	return mi
@@ -569,11 +573,29 @@ func _update_damage_visual() -> void:
 		var jitter := Vector3(rng.randf_range(-1, 1), rng.randf_range(-1, 0.3), rng.randf_range(-1, 1))
 		mi.position = home + jitter * amt * 0.12
 		mi.rotation = Vector3(rng.randf_range(-1, 1), rng.randf_range(-1, 1), rng.randf_range(-1, 1)) * amt * 0.18
+	# Rebuilding the dented body costs a little, so only when the damage has grown.
+	var total := total_damage()
+	if _body.size() > 0 and abs(total - _dented_at) > 0.015:
+		_dented_at = total
+		CarBody.dent(_body, damage, hash(team.num))
 
 
 func _build_model() -> void:
 	model = Node3D.new()
 	add_child(model)
+	# Two looks: the sculpted Modern car and the boxy 1999 one (whichever is on).
+	var modern_root := Node3D.new()
+	modern_root.name = "Modern"
+	modern_root.add_to_group("modern_only")
+	modern_root.visible = Game.modern
+	model.add_child(modern_root)
+	_retro = Node3D.new()
+	_retro.name = "Retro"
+	_retro.add_to_group("retro_only")
+	_retro.visible = not Game.modern
+	model.add_child(_retro)
+	_body = CarBody.build(modern_root, team, model)
+	wheels.assign(_body.wheels)
 	var c1: Color = team.c1
 	var c2: Color = team.c2
 	var body := Game.make_mat("paint", c1)
@@ -603,26 +625,21 @@ func _build_model() -> void:
 	_add_box(Vector3(0.45, 0.12, 0.02), Vector3(0.55, 0.75, 2.46), tail)
 	# rear spoiler
 	_add_box(Vector3(1.8, 0.28, 0.05), Vector3(0, 1.12, 2.38), body)
-	# wheels
-	for x in [-0.86, 0.86]:
-		for z in [-1.5, 1.45]:
-			var w := MeshInstance3D.new()
-			var cm := CylinderMesh.new()
-			cm.top_radius = 0.36
-			cm.bottom_radius = 0.36
-			cm.height = 0.3
-			cm.radial_segments = 8
-			cm.rings = 0
-			w.mesh = cm
-			w.material_override = tire
-			var holder := Node3D.new()
-			holder.position = Vector3(x, 0.36, z)
-			model.add_child(holder)
-			w.rotation = Vector3(0, 0, PI * 0.5)
-			var spinner := Node3D.new()
-			holder.add_child(spinner)
-			spinner.add_child(w)
-			wheels.append(spinner)
+	# 1999 wheels: 8-sided cylinders on the shared spinners.
+	for sp in wheels:
+		var w := MeshInstance3D.new()
+		var cm := CylinderMesh.new()
+		cm.top_radius = 0.36
+		cm.bottom_radius = 0.36
+		cm.height = 0.3
+		cm.radial_segments = 8
+		cm.rings = 0
+		w.mesh = cm
+		w.material_override = tire
+		w.rotation = Vector3(0, 0, PI * 0.5)
+		w.add_to_group("retro_only")
+		w.visible = not Game.modern
+		sp.add_child(w)
 	# numbers: roof and doors
 	var num: String = team.num
 	var cn: Color = team.cn
@@ -633,9 +650,9 @@ func _build_model() -> void:
 		var door := _num_label(num, cn, 200)
 		door.position = Vector3(side * 0.975, 0.72, 0.0)
 		door.rotation = Vector3(0, side * PI * 0.5, 0)
-		model.add_child(door)
+		_retro.add_child(door)
 		_add_box(Vector3(0.01, 0.5, 0.9), Vector3(side * 0.962, 0.72, 0.0), Game.make_mat("paint", Color(1, 1, 1) if cn.v < 0.5 else Color(0.05, 0.05, 0.05)))
-	model.add_child(roof)
+	_retro.add_child(roof)
 	var spon := Label3D.new()
 	spon.text = team.sponsor
 	spon.font = Game.arcade_font
@@ -647,7 +664,7 @@ func _build_model() -> void:
 	spon.position = Vector3(0, 1.01, -1.9)
 	spon.rotation = Vector3(-PI * 0.5, 0, 0)
 	spon.double_sided = false
-	model.add_child(spon)
+	_retro.add_child(spon)
 	# blob shadow
 	var shadow := MeshInstance3D.new()
 	var pm := PlaneMesh.new()

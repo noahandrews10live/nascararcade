@@ -229,15 +229,18 @@ func _apply_graphics() -> void:
 	var night: bool = cfg.get("night", false)
 	sun.rotation = Vector3(-deg_to_rad(cfg.sun_elev), deg_to_rad(cfg.sun_az), 0)
 	var sky := Sky.new()
-	if modern and not night:
-		var ps := PhysicalSkyMaterial.new()
-		ps.rayleigh_coefficient = 2.2
-		ps.mie_coefficient = 0.004
-		ps.turbidity = 8.0
-		ps.sun_disk_scale = 1.5
-		ps.ground_color = (cfg.grass as Color).darkened(0.3)
-		ps.energy_multiplier = 1.0
-		sky.sky_material = ps
+	if modern:
+		var sm := ShaderMaterial.new()
+		sm.shader = load("res://shaders/sky.gdshader")
+		sm.set_shader_parameter("zenith", cfg.sky_top)
+		sm.set_shader_parameter("horizon", cfg.sky_horizon)
+		sm.set_shader_parameter("ground", (cfg.grass as Color).darkened(0.45))
+		sm.set_shader_parameter("sun_color", Color(1.0, 0.8, 0.6) if cfg.sun_elev < 20.0 else Color(1.0, 0.95, 0.86))
+		sm.set_shader_parameter("night", night)
+		sm.set_shader_parameter("energy", 1.0)
+		sm.set_shader_parameter("cloud_cover", float(cfg.get("clouds", 0.42)))
+		sm.set_shader_parameter("cloud_seed", float(hash(cfg.name) % 100))
+		sky.sky_material = sm
 	else:
 		var psm := ProceduralSkyMaterial.new()
 		psm.sky_top_color = cfg.sky_top
@@ -319,20 +322,29 @@ func _apply_graphics() -> void:
 func _apply_quality(night: bool) -> void:
 	var q := Game.quality_level()
 	var vp := get_viewport()
-	vp.scaling_3d_mode = Viewport.SCALING_3D_MODE_FSR2
-	vp.scaling_3d_scale = [0.67, 0.67, 0.77, 0.87, 1.0][q]
-	vp.fsr_sharpness = 0.35
+	var fp := Game.forward_plus
+	if fp:
+		vp.scaling_3d_mode = Viewport.SCALING_3D_MODE_FSR2
+		vp.scaling_3d_scale = [0.67, 0.67, 0.77, 0.87, 1.0][q]
+		vp.fsr_sharpness = 0.35
+	else:
+		# Compatibility renderer (browser): plain upscaling and FXAA.
+		vp.scaling_3d_mode = Viewport.SCALING_3D_MODE_BILINEAR
+		vp.scaling_3d_scale = [0.7, 0.7, 0.85, 1.0, 1.0][q]
+		vp.screen_space_aa = Viewport.SCREEN_SPACE_AA_FXAA if q >= 2 else Viewport.SCREEN_SPACE_AA_DISABLED
 	RenderingServer.directional_shadow_atlas_set_size([2048, 2048, 4096, 4096, 8192][q], true)
-	sun.directional_shadow_mode = DirectionalLight3D.SHADOW_PARALLEL_4_SPLITS if q >= 3 else DirectionalLight3D.SHADOW_PARALLEL_2_SPLITS
-	sun.directional_shadow_max_distance = [150.0, 150.0, 220.0, 320.0, 420.0][q]
+	sun.shadow_enabled = fp or q >= 2
+	sun.directional_shadow_mode = DirectionalLight3D.SHADOW_PARALLEL_4_SPLITS if q >= 3 and fp else DirectionalLight3D.SHADOW_PARALLEL_2_SPLITS
+	sun.directional_shadow_max_distance = [150.0, 150.0, 200.0, 320.0, 420.0][q] if fp else [0.0, 0.0, 120.0, 180.0, 240.0][q]
 	RenderingServer.directional_soft_shadow_filter_set_quality(
 		[RenderingServer.SHADOW_QUALITY_SOFT_VERY_LOW, RenderingServer.SHADOW_QUALITY_SOFT_VERY_LOW, RenderingServer.SHADOW_QUALITY_SOFT_LOW, RenderingServer.SHADOW_QUALITY_SOFT_MEDIUM, RenderingServer.SHADOW_QUALITY_SOFT_HIGH][q])
-	env.ssao_enabled = q >= 2
-	RenderingServer.environment_set_ssao_quality(
-		RenderingServer.ENV_SSAO_QUALITY_LOW if q <= 2 else RenderingServer.ENV_SSAO_QUALITY_MEDIUM, q <= 2, 0.5, 2, 50.0, 300.0)
-	env.ssr_enabled = q >= 4
-	env.volumetric_fog_enabled = night and q >= 3
-	env.glow_enabled = true
+	env.ssao_enabled = fp and q >= 2
+	if fp:
+		RenderingServer.environment_set_ssao_quality(
+			RenderingServer.ENV_SSAO_QUALITY_LOW if q <= 2 else RenderingServer.ENV_SSAO_QUALITY_MEDIUM, q <= 2, 0.5, 2, 50.0, 300.0)
+	env.ssr_enabled = fp and q >= 4
+	env.volumetric_fog_enabled = fp and night and q >= 3
+	env.glow_enabled = fp or q >= 3
 
 
 ## AUTO quality: watch frame times while racing and step the preset down when
@@ -1384,7 +1396,7 @@ func _enter_season_hub() -> void:
 
 func _enter_options() -> void:
 	var rows := [
-		{"id": "gfx", "label": "GRAPHICS", "values": ["1999", "MODERN"] if Game.modern_supported else ["1999"], "index": 1 if Game.modern else 0, "hint": "MODERN NEEDS A VULKAN GPU (NOT AVAILABLE IN THE BROWSER)"},
+		{"id": "gfx", "label": "GRAPHICS", "values": ["1999", "MODERN"] if Game.modern_supported else ["1999"], "index": 1 if Game.modern else 0, "hint": "MODERN: REALISTIC LIGHTING AND DETAIL.  1999: THE ORIGINAL ARCADE LOOK"},
 		{"id": "quality", "label": "QUALITY (MODERN)", "values": Game.QUALITY_NAMES, "index": Game.quality, "hint": "AUTO LOWERS DETAIL WHEN FRAMES RUN LATE"},
 		{"id": "smooth", "label": "MOTION SMOOTHING", "values": ["OFF", "ON"], "index": 1 if Game.smoothing else 0, "hint": "SMOOTH MOTION ON 120/144 HZ SCREENS (ADDS UNDER 1 FRAME OF DELAY)"},
 		{"id": "vsync", "label": "VSYNC", "values": ["OFF", "ON"], "index": 1 if Game.vsync else 0, "hint": "OFF: LOWEST INPUT DELAY, MAY TEAR"},

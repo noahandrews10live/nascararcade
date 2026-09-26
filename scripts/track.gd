@@ -39,6 +39,8 @@ func setup(config: Dictionary) -> void:
 	_build_mesh()
 	_build_scenery()
 	_commit_surfaces()
+	_build_fence()
+	_build_crowd()
 
 
 # --- geometry ----------------------------------------------------------------
@@ -500,7 +502,7 @@ func _build_mesh() -> void:
 	for i in n:
 		var i2 := (i + 1) % n
 		var stripe := (i / 3) % 2 == 0
-		var shade := 1.0 if stripe else 0.94
+		var shade := 1.0 if stripe else 0.97
 		var asphalt := Color(0.30, 0.30, 0.32) * shade
 		asphalt.a = 1.0
 		var groove := Color(0.24, 0.24, 0.26) * shade
@@ -619,7 +621,7 @@ func _build_scenery() -> void:
 			var c := pos[i2] + right[i2] * d0 + up * h0
 			var d := pos[i2] + right[i2] * (d0 + 2.2) + up * h0
 			var col: Color = crowd[rng.randi() % crowd.size()] if rng.randf() < 0.8 else Color(0.5, 0.5, 0.55)
-			_quad("scenery", a, b, c, d, col * (0.8 if night else 1.0), up, up)
+			_quad("seats", a, b, c, d, col * (0.8 if night else 1.0), up, up)
 			# riser
 			_quad("concrete", b, b + up * 1.3, d, d + up * 1.3, Color(0.45, 0.45, 0.5))
 		# back wall of the stand
@@ -670,8 +672,11 @@ func _build_scenery() -> void:
 			spot.spot_attenuation = 0.6
 			spot.light_volumetric_fog_energy = 0.6
 			spot.shadow_enabled = false
-			spot.add_to_group("modern_only")
-			spot.visible = Game.modern
+			if Game.forward_plus:
+				spot.add_to_group("modern_only")
+				spot.visible = Game.modern
+			else:
+				spot.visible = false # too many lights for the browser renderer
 
 	# Ground plane
 	var ground := MeshInstance3D.new()
@@ -695,25 +700,218 @@ func _build_scenery() -> void:
 		lake.scale = Vector3(2.2, 1, 0.9)
 		add_child(lake)
 
-	# Trees outside the track (MultiMesh cones).
-	var tree := CylinderMesh.new()
-	tree.top_radius = 0.0
-	tree.bottom_radius = 4.0
-	tree.height = 12.0
-	tree.radial_segments = 6
-	tree.rings = 1
-	tree.material = Game.make_mat("foliage", Color(0.1, 0.35, 0.12) if not night else Color(0.05, 0.15, 0.08))
+	# Trees outside the track: pines and broadleaf trees, each species one MultiMesh.
+	var foliage := Game.make_mat("tree", Color(1, 1, 1))
+	var kinds := [_pine_mesh(), _broadleaf_mesh()]
+	for kind_i in 2:
+		var mm := MultiMesh.new()
+		mm.transform_format = MultiMesh.TRANSFORM_3D
+		mm.use_colors = true
+		mm.mesh = kinds[kind_i]
+		var count := 220
+		mm.instance_count = count
+		for k in count:
+			var idx := rng.randi() % n
+			var off := hw + 45.0 + rng.randf() * 260.0
+			var p := pos[idx] + right[idx] * off
+			var sc := 0.7 + rng.randf() * 0.8
+			var b := Basis(Vector3.UP, rng.randf() * TAU).scaled(Vector3(sc, sc * rng.randf_range(0.85, 1.2), sc))
+			mm.set_instance_transform(k, Transform3D(b, p))
+			var tint := rng.randf_range(0.75, 1.1)
+			var col := Color(tint, tint * rng.randf_range(0.95, 1.05), tint * rng.randf_range(0.85, 1.0))
+			if night:
+				col *= 0.45
+			mm.set_instance_color(k, col)
+		var mmi := MultiMeshInstance3D.new()
+		mmi.multimesh = mm
+		mmi.material_override = foliage
+		add_child(mmi)
+
+
+## A pine: trunk and three stacked cones, vertex coloured (the MultiMesh tints it).
+static func _pine_mesh() -> Mesh:
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	_cone(st, Vector3.ZERO, 0.35, 0.25, 3.0, 6, Color(0.3, 0.2, 0.12))
+	for t in 3:
+		_cone(st, Vector3(0, 2.2 + t * 2.6, 0), 3.6 - t * 0.9, 0.0, 4.2, 9, Color(0.1, 0.26, 0.12).lightened(t * 0.05))
+	st.generate_normals()
+	return st.commit()
+
+
+## A broadleaf tree: trunk and a clump of low-poly spheres.
+static func _broadleaf_mesh() -> Mesh:
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	_cone(st, Vector3.ZERO, 0.4, 0.3, 5.0, 6, Color(0.32, 0.22, 0.14))
+	var blobs := [Vector3(0, 7.5, 0), Vector3(1.8, 6.5, 0.6), Vector3(-1.6, 6.8, -0.8), Vector3(0.3, 6.2, 1.9), Vector3(-0.4, 9.0, 0.2)]
+	var radii := [3.2, 2.4, 2.5, 2.2, 2.0]
+	for k in blobs.size():
+		_blob(st, blobs[k], radii[k], Color(0.2, 0.36, 0.13).darkened(k * 0.04))
+	st.generate_normals()
+	return st.commit()
+
+
+static func _cone(st: SurfaceTool, base: Vector3, r0: float, r1: float, h: float, seg: int, col: Color) -> void:
+	st.set_color(col)
+	for k in seg:
+		var a0 := TAU * k / seg
+		var a1 := TAU * (k + 1) / seg
+		var b0 := base + Vector3(cos(a0) * r0, 0, sin(a0) * r0)
+		var b1 := base + Vector3(cos(a1) * r0, 0, sin(a1) * r0)
+		var t0 := base + Vector3(cos(a0) * r1, h, sin(a0) * r1)
+		var t1 := base + Vector3(cos(a1) * r1, h, sin(a1) * r1)
+		st.add_vertex(b0)
+		st.add_vertex(t0)
+		st.add_vertex(b1)
+		if r1 > 0.0:
+			st.add_vertex(b1)
+			st.add_vertex(t0)
+			st.add_vertex(t1)
+
+
+static func _blob(st: SurfaceTool, c: Vector3, r: float, col: Color) -> void:
+	st.set_color(col)
+	var rings := 4
+	var seg := 7
+	for i in rings:
+		var p0 := PI * i / rings
+		var p1 := PI * (i + 1) / rings
+		for k in seg:
+			var a0 := TAU * k / seg
+			var a1 := TAU * (k + 1) / seg
+			var v00 := c + Vector3(sin(p0) * cos(a0), cos(p0), sin(p0) * sin(a0)) * r
+			var v01 := c + Vector3(sin(p0) * cos(a1), cos(p0), sin(p0) * sin(a1)) * r
+			var v10 := c + Vector3(sin(p1) * cos(a0), cos(p1), sin(p1) * sin(a0)) * r
+			var v11 := c + Vector3(sin(p1) * cos(a1), cos(p1), sin(p1) * sin(a1)) * r
+			st.add_vertex(v00)
+			st.add_vertex(v01)
+			st.add_vertex(v10)
+			st.add_vertex(v01)
+			st.add_vertex(v11)
+			st.add_vertex(v10)
+
+
+## Chain-link catch fence on top of the outside wall (Modern look; the 1999 look
+## keeps just the rail and posts). UVs run along the wall so the mesh pattern is even.
+func _build_fence() -> void:
+	var hw := width * 0.5
+	var wall_h := 1.2
+	var fence_h := 5.0
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	st.set_normal(Vector3.UP)
+	var u := 0.0
+	var tile := 0.6 # metres per texture repeat
+	for i in n:
+		var i2 := (i + 1) % n
+		var ro := right[i] * 0.5
+		var ro2 := right[i2] * 0.5
+		var a := _pt(i, hw) + ro + Vector3.UP * wall_h
+		var b := _pt(i2, hw) + ro2 + Vector3.UP * wall_h
+		var du := a.distance_to(b) / tile
+		var vt := (fence_h - wall_h) / tile
+		var nrm := -right[i]
+		st.set_normal(nrm)
+		st.set_uv(Vector2(u, vt))
+		st.add_vertex(a)
+		st.set_uv(Vector2(u, 0))
+		st.add_vertex(a + Vector3.UP * (fence_h - wall_h))
+		st.set_uv(Vector2(u + du, vt))
+		st.add_vertex(b)
+		st.add_vertex(b)
+		st.set_uv(Vector2(u, 0))
+		st.add_vertex(a + Vector3.UP * (fence_h - wall_h))
+		st.set_uv(Vector2(u + du, 0))
+		st.add_vertex(b + Vector3.UP * (fence_h - wall_h))
+		u = fmod(u + du, 64.0)
+	var mi := MeshInstance3D.new()
+	mi.name = "CatchFence"
+	mi.mesh = st.commit()
+	mi.material_override = Game.make_mat("fence", Color(0.7, 0.72, 0.75))
+	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	mi.add_to_group("modern_only")
+	mi.visible = Game.modern
+	add_child(mi)
+
+
+## Fans in the frontstretch grandstands: one MultiMesh of little people in team
+## colours (Modern look).
+func _build_crowd() -> void:
+	var stand_len := float(cfg.get("front_mid", 0.0)) + 2.0 * float(cfg.get("front_side", 0.0)) + 2.0 * float(cfg.get("dog_r", 0.0)) * deg_to_rad(float(cfg.get("dog_phi", 0.0)))
+	stand_len *= 0.9
+	var hw := width * 0.5
+	var rows := 14
+	var rng := RandomNumberGenerator.new()
+	rng.seed = hash(cfg.name) + 7
+	# Mostly everyday colours with some team gear mixed in.
+	var shirts := [Color(0.9, 0.9, 0.88), Color(0.9, 0.9, 0.88), Color(0.12, 0.12, 0.14), Color(0.12, 0.12, 0.14), Color(0.35, 0.36, 0.4),
+		Color(0.2, 0.28, 0.5), Color(0.45, 0.55, 0.7), Color(0.6, 0.15, 0.12), Color(0.85, 0.7, 0.2), Color(0.25, 0.4, 0.25), Color(0.75, 0.35, 0.12)]
+	var xforms: Array[Transform3D] = []
+	var cols: Array[Color] = []
+	var seg := length / n
+	var spacing := 0.7
+	for i in n:
+		var s := i * seg
+		var sd: float = min(s, length - s)
+		if sd > stand_len * 0.5:
+			continue
+		var per := int(seg / spacing)
+		for r in rows * 2:
+			# Two rows of seats on each 2.2 m step.
+			var d0 := hw + 8.0 + (r / 2) * 2.2 + 0.55 + (r % 2) * 1.1
+			var h0 := 2.0 + (r / 2) * 1.3
+			for k in per:
+				if rng.randf() > 0.85:
+					continue # empty seat
+				var t := (k + rng.randf_range(0.1, 0.9)) / per
+				var i2 := (i + 1) % n
+				var p: Vector3 = pos[i].lerp(pos[i2], t) + right[i].lerp(right[i2], t).normalized() * (d0 + rng.randf_range(-0.3, 0.3))
+				p.y = h0
+				var facing := -right[i]
+				var b := Basis.looking_at(facing, Vector3.UP).scaled(Vector3.ONE * rng.randf_range(0.9, 1.1))
+				xforms.append(Transform3D(b, p))
+				cols.append(shirts[rng.randi() % shirts.size()])
+	if xforms.is_empty():
+		return
 	var mm := MultiMesh.new()
 	mm.transform_format = MultiMesh.TRANSFORM_3D
-	mm.mesh = tree
-	var count := 260
-	mm.instance_count = count
-	for k in count:
-		var idx := rng.randi() % n
-		var off := hw + 45.0 + rng.randf() * 260.0
-		var p := pos[idx] + right[idx] * off
-		var sc := 0.7 + rng.randf() * 0.9
-		mm.set_instance_transform(k, Transform3D(Basis().scaled(Vector3(sc, sc, sc)), p + up * 6.0 * sc))
+	mm.use_colors = true
+	mm.mesh = _fan_mesh()
+	mm.instance_count = xforms.size()
+	for k in xforms.size():
+		mm.set_instance_transform(k, xforms[k])
+		mm.set_instance_color(k, cols[k])
 	var mmi := MultiMeshInstance3D.new()
+	mmi.name = "Crowd"
 	mmi.multimesh = mm
+	mmi.material_override = Game.make_mat("crowd", Color(1, 1, 1))
+	mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	mmi.add_to_group("modern_only")
+	mmi.visible = Game.modern
 	add_child(mmi)
+
+
+## One seated fan: torso and head (the instance colour is the shirt).
+static func _fan_mesh() -> Mesh:
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	_box_st(st, Vector3(0, 0.45, 0), Vector3(0.44, 0.6, 0.28), Color(1, 1, 1))
+	_box_st(st, Vector3(0, 0.9, 0), Vector3(0.2, 0.24, 0.22), Color(0.9, 0.75, 0.6))
+	st.generate_normals()
+	return st.commit()
+
+
+static func _box_st(st: SurfaceTool, c: Vector3, size: Vector3, col: Color) -> void:
+	var h := size * 0.5
+	var v := [Vector3(-h.x, -h.y, -h.z), Vector3(h.x, -h.y, -h.z), Vector3(h.x, h.y, -h.z), Vector3(-h.x, h.y, -h.z),
+		Vector3(-h.x, -h.y, h.z), Vector3(h.x, -h.y, h.z), Vector3(h.x, h.y, h.z), Vector3(-h.x, h.y, h.z)]
+	var faces := [[0, 1, 2, 3], [5, 4, 7, 6], [4, 0, 3, 7], [1, 5, 6, 2], [3, 2, 6, 7], [4, 5, 1, 0]]
+	st.set_color(col)
+	for f in faces:
+		st.add_vertex(c + v[f[0]])
+		st.add_vertex(c + v[f[2]])
+		st.add_vertex(c + v[f[1]])
+		st.add_vertex(c + v[f[0]])
+		st.add_vertex(c + v[f[3]])
+		st.add_vertex(c + v[f[2]])
