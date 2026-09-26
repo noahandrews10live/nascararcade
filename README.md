@@ -17,14 +17,21 @@ audio. The project has no imported assets.
 
 ### Two graphics modes (F3 to switch)
 
-- **Modern** (default on desktop) uses Godot's Forward+ renderer at native resolution, with:
-  - clear-coat car paint and glossy glass;
+- **Modern** (the default) is the realistic look:
+  - a sculpted Next Gen style car with a two-tone livery, glass, splitter, spoiler and
+    single-lug wheels; the body dents where it's hit;
   - procedurally generated asphalt, grass and concrete textures with normal maps;
-  - soft real-time sun shadows, ambient occlusion and screen-space reflections;
-  - a physically based sky, bloom and aerial haze;
-  - volumetric fog with light-tower beams at night.
-- **1999** is the original look: 640×480 upscaled, vertex colours, blob shadows and
-  CRT scanlines (F2). The web build always uses this mode.
+  - grandstands full of fans, pine and broadleaf trees and a chain-link catch fence;
+  - a procedural sky with clouds (stars at night), sun shadows and bloom;
+  - on desktop (Forward+): ambient occlusion, screen-space reflections, volumetric fog
+    with light-tower beams at night, and FSR 2 upscaling with temporal anti-aliasing.
+  Options → Quality picks LOW / MEDIUM / HIGH / ULTRA, or AUTO, which lowers detail
+  when frames run late. The browser build runs Modern with lighter effects.
+- **1999** is the original look: 640×480 upscaled, vertex colours, boxy cars, blob
+  shadows and CRT scanlines (F2).
+
+Motion is smooth on any refresh rate: cars are drawn between physics steps (Options →
+Motion smoothing), and Options → VSync off gives the lowest input delay.
 
 ## Game modes
 
@@ -94,7 +101,7 @@ SmartScreen may warn you: click **More info → Run anyway**.
 
 **Any platform, from source:**
 
-1. Install [Godot 4.3+](https://godotengine.org/download). The standard build is fine; you don't need .NET. Modern graphics need a Vulkan (or Direct3D 12) capable GPU; on older machines, launch with `godot --path . --rendering-method gl_compatibility` and the game runs in 1999 mode.
+1. Install [Godot 4.3+](https://godotengine.org/download). The standard build is fine; you don't need .NET. The full Modern effects need a Vulkan (or Direct3D 12) capable GPU; on older machines, launch with `godot --path . --rendering-method gl_compatibility` for the lighter version.
 2. Open `project.godot` in the editor and press **F5**, or run from the command line:
    ```sh
    godot --path .
