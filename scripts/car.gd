@@ -50,7 +50,7 @@ var manual := false
 var shift_request := 0
 
 # Car spec (scaled by team stats and track package)
-var power := 380000.0 # watts at the peak
+var power := 708000.0 # watts at the peak (950 hp)
 var cda := 1.0
 var cla := 2.0
 var mu := 1.0
@@ -58,6 +58,7 @@ var grip_front := 0.98 # setup balance (wedge / track bar / stagger all end up h
 var grip_rear := 1.07
 var wear_mult := 1.0 # tyre pressure trade-off
 var gear_scale := 1.0 # gearing: >1 shorter (more accel, lower top speed)
+var gear_track := 1.0 # the track's gear package (superspeedways run tall gears)
 var damage_mult := 1.0 # 0 = damage off
 var pit_crew_mult := 1.0 # career pit crew upgrades
 var gear := 1
@@ -156,6 +157,7 @@ func setup(t: Dictionary, trk: Node3D) -> void:
 	power = float(pkg.get("hp", 670)) * 745.7 * float(t.get("speed", 1.0))
 	cda = float(pkg.get("cda", 1.0)) / pow(float(t.get("speed", 1.0)), 0.5)
 	cla = float(pkg.get("cla", 2.2))
+	gear_track = float(pkg.get("gear", 1.0))
 	mu = 1.0 * float(t.get("handling", 1.0))
 	_build_model()
 
@@ -197,9 +199,9 @@ func _auto_shift() -> void:
 			gear = clamp(gear + shift_request, 1, 5)
 			shift_request = 0
 		return
-	if gear < 5 and u * RPM_PER_MPS[gear - 1] * gear_scale > 9000.0:
+	if gear < 5 and u * RPM_PER_MPS[gear - 1] * gear_scale * gear_track > 9000.0:
 		gear += 1
-	elif gear > 1 and u * RPM_PER_MPS[gear - 2] * gear_scale < 8200.0:
+	elif gear > 1 and u * RPM_PER_MPS[gear - 2] * gear_scale * gear_track < 8200.0:
 		gear -= 1
 
 
@@ -288,7 +290,7 @@ func _integrate(h: float) -> void:
 
 	# --- engine / gearbox
 	_auto_shift()
-	rpm_now = clamp(abs(u) * RPM_PER_MPS[gear - 1] * gear_scale, 2800.0, REDLINE + 200.0)
+	rpm_now = clamp(abs(u) * RPM_PER_MPS[gear - 1] * gear_scale * gear_track, 2800.0, REDLINE + 200.0)
 	var dmg_power: float = 1.0 - 0.45 * clamp(damage.front - 0.35, 0.0, 1.0)
 	var p_avail: float = _engine_power(rpm_now) * dmg_power
 	if rpm_now >= REDLINE or fuel <= 0.0:

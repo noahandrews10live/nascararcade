@@ -58,13 +58,14 @@ func _draft_gain(t: Node3D) -> Vector2:
 		var c: Node3D = race.cars[i]
 		c.dist = 500.0 - i * 7.0
 		c.d = race.lanes[0]
+	race._build_neighbors()
 	race._aero(10.0)
 	var solo: float = race.cars[0].drag_mult
 	var second: float = race.cars[1].drag_mult
 	var last: float = race.cars[5].drag_mult
 	race.free()
 	# Top speed scales with (1/drag)^(1/3) when power-limited.
-	var vs := 81.0
+	var vs := 93.0
 	return Vector2((vs * pow(solo / second, 1.0 / 3.0) - vs) * MPH, (vs * pow(solo / last, 1.0 / 3.0) - vs) * MPH)
 
 
