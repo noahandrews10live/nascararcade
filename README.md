@@ -211,7 +211,7 @@ godot --headless --path . --export-release Web build/web/index.html
 `docs/` holds the game built as an installable web app. It has a manifest with icon, an offline cache (service worker), full-screen display and a landscape lock. GitHub Pages serves it:
 
 1. On GitHub: **Settings → Pages → Build and deployment**. Choose **Deploy from a branch**, then the branch holding `docs/` and the **/docs** folder. Save.
-2. After a minute the game is at `https://<user>.github.io/nascararcade/`.
+2. After a minute the game is at `https://<user>.github.io/nascararcade/`. If Pages serves the repository root rather than `/docs`, the root `index.html` forwards to `docs/`, so the same address works either way.
 3. On the phone, open that link.
    - **Android (Chrome):** tap **Install the app** on the start screen, or use the ⋮ menu → **Install app**.
    - **iPhone (Safari):** tap **Share → Add to Home Screen**.
