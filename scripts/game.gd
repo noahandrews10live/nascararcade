@@ -209,6 +209,9 @@ func style(m: StandardMaterial3D) -> void:
 					m.normal_texture = texture(kind, true)
 					m.normal_scale = {"asphalt": 0.9, "grass": 0.6, "concrete": 0.4}[kind]
 					m.albedo_color = Color(1.12, 1.12, 1.12) * base
+					if kind == "grass":
+						# Tame the arcade-bright greens toward real turf.
+						m.albedo_color = Color(0.78, 0.74, 0.6)
 		"lamp":
 			m.vertex_color_use_as_albedo = true
 			m.vertex_color_is_srgb = modern
@@ -226,7 +229,7 @@ func style(m: StandardMaterial3D) -> void:
 				m.normal_enabled = true
 				m.normal_texture = texture("grass", true)
 				m.normal_scale = 0.5
-				m.albedo_color = base.darkened(0.25)
+				m.albedo_color = base.darkened(0.3).lerp(Color(0.3, 0.3, 0.2), 0.3)
 		"water":
 			m.metallic_specular = 1.0
 			m.roughness = 0.05 if modern else 0.1
