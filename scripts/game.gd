@@ -262,6 +262,133 @@ func selectable_teams() -> Array:
 	return out
 
 
+# --- Career ------------------------------------------------------------------------
+const CAREER_PATH := "user://career.cfg"
+const UPGRADES := [
+	["engine", "ENGINE", "MORE HORSEPOWER"],
+	["aero", "AERO", "LESS DRAG DOWN THE STRAIGHTS"],
+	["chassis", "CHASSIS", "MORE GRIP IN THE CORNERS"],
+	["crew", "PIT CREW", "FASTER PIT STOPS"],
+]
+const MAX_UPGRADE := 5
+var career := {}
+
+
+func load_career() -> void:
+	var cf := ConfigFile.new()
+	if cf.load(CAREER_PATH) == OK:
+		career = cf.get_value("career", "data", {})
+
+
+func save_career() -> void:
+	var cf := ConfigFile.new()
+	cf.set_value("career", "data", career)
+	cf.save(CAREER_PATH)
+
+
+func clear_career() -> void:
+	career = {}
+	DirAccess.remove_absolute(ProjectSettings.globalize_path(CAREER_PATH))
+
+
+func new_career(team_idx: int) -> void:
+	career = {
+		"team": team_idx, "money": 250000, "rep": 10, "year": 1,
+		"upgrades": {"engine": 0, "aero": 0, "chassis": 0, "crew": 0},
+		"sponsor": {"name": "LOCAL TIRE SHOP", "per_race": 40000, "bonus_win": 100000},
+		"offers": [],
+		"stats": {"starts": 0, "wins": 0, "top5": 0, "top10": 0, "poles": 0, "laps_led": 0, "titles": 0, "earnings": 0},
+		"history": [], "last": "",
+	}
+	career.offers = sponsor_offers()
+	new_season(team_idx, 1)
+	season.career = true
+	save_season()
+	save_career()
+
+
+func upgrade_cost(key: String) -> int:
+	return 150000 * (int(career.upgrades[key]) + 1)
+
+
+func buy_upgrade(key: String) -> bool:
+	var lvl: int = career.upgrades[key]
+	if lvl >= MAX_UPGRADE or int(career.money) < upgrade_cost(key):
+		return false
+	career.money = int(career.money) - upgrade_cost(key)
+	career.upgrades[key] = lvl + 1
+	save_career()
+	return true
+
+
+## A rookie team starts down on everything; R&D closes the gap and then some.
+func apply_career(c: Node3D) -> void:
+	var u: Dictionary = career.upgrades
+	c.power *= 0.965 + 0.011 * float(u.engine)
+	c.cda *= 1.03 - 0.01 * float(u.aero)
+	c.mu *= 0.975 + 0.009 * float(u.chassis)
+	c.pit_crew_mult = 1.15 - 0.05 * float(u.crew)
+
+
+func sponsor_offers() -> Array:
+	var rng := RandomNumberGenerator.new()
+	rng.randomize()
+	var rep: float = career.get("rep", 10)
+	var out: Array = []
+	var names: Array = SPONSORS.duplicate()
+	names.shuffle()
+	for i in 3:
+		var base: float = 40000.0 + rep * 5000.0
+		var per: int = int(round(base * rng.randf_range(0.7, 1.2) / 5000.0) * 5000)
+		var bonus: int = int(round((100000.0 + rep * 4000.0) * rng.randf_range(0.5, 1.5) / 10000.0) * 10000)
+		out.append({"name": names[i], "per_race": per, "bonus_win": bonus})
+	return out
+
+
+## Money and reputation for a finish. Returns a one-line summary.
+func career_race(pos: int, field: int, laps_led: int, won_pole: bool) -> String:
+	var frac: float = 1.0 - float(pos - 1) / max(field - 1, 1)
+	var purse := int(round((60000.0 + 540000.0 * pow(frac, 1.6)) / 1000.0) * 1000)
+	var spons: int = career.sponsor.per_race
+	var bonus: int = career.sponsor.bonus_win if pos == 1 else 0
+	var total := purse + spons + bonus
+	career.money = int(career.money) + total
+	career.rep = clamp(int(career.rep) + int(round(frac * 6.0 - 2.0)) + (5 if pos == 1 else 0), 0, 100)
+	var st: Dictionary = career.stats
+	st.starts += 1
+	st.wins += 1 if pos == 1 else 0
+	st.top5 += 1 if pos <= 5 else 0
+	st.top10 += 1 if pos <= 10 else 0
+	st.poles += 1 if won_pole else 0
+	st.laps_led += laps_led
+	st.earnings += total
+	career.last = "LAST RACE: %s  +$%s" % [ordinal(pos), money_text(total)]
+	save_career()
+	return career.last
+
+
+func career_season_end(final_pos: int, points: int, wins: int) -> void:
+	career.history.append({"year": career.year, "pos": final_pos, "points": points, "wins": wins})
+	if final_pos == 1:
+		career.stats.titles += 1
+	career.year = int(career.year) + 1
+	career.offers = sponsor_offers()
+	new_season(int(career.team), 1)
+	season.career = true
+	save_season()
+	save_career()
+
+
+static func money_text(v: int) -> String:
+	var sgn := "-" if v < 0 else ""
+	var s := str(abs(v))
+	var out := ""
+	while s.length() > 3:
+		out = "," + s.substr(s.length() - 3) + out
+		s = s.substr(0, s.length() - 3)
+	return sgn + s + out
+
+
 # --- Lightning Challenges ------------------------------------------------------------
 const CHALLENGES_PATH := "user://challenges.cfg"
 ## track: index into tracks; grid: your starting spot; start: leader's distance to the
@@ -351,6 +478,7 @@ func _ready() -> void:
 	load_season()
 	load_custom()
 	load_challenges()
+	load_career()
 	modern_supported = RenderingServer.get_rendering_device() != null
 	modern = modern_supported
 

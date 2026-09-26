@@ -59,6 +59,7 @@ var grip_rear := 1.07
 var wear_mult := 1.0 # tyre pressure trade-off
 var gear_scale := 1.0 # gearing: >1 shorter (more accel, lower top speed)
 var damage_mult := 1.0 # 0 = damage off
+var pit_crew_mult := 1.0 # career pit crew upgrades
 var gear := 1
 var rpm_now := 3000.0
 

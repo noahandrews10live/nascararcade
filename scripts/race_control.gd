@@ -496,7 +496,7 @@ func _start_service(c: Node3D) -> void:
 		for k in c.damage:
 			c.damage[k] *= 0.4
 		c._update_damage_visual()
-	c.pit_timer = max(tyre_t, fuel_t) + repair
+	c.pit_timer = max(tyre_t, fuel_t) * c.pit_crew_mult + repair
 	message_for(c, "PIT STOP  %s  %.1fs" % [{"4": "4 TIRES + FUEL", "2": "2 TIRES + FUEL", "F": "FUEL ONLY"}.get(c.pit_plan, "FUEL"), c.pit_timer], "pit")
 
 

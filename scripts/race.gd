@@ -22,6 +22,7 @@ var lanes: Array[float] = []
 var arcade := false # rubber-banding for the arcade mode only
 var field_size := 40
 var arcade_setup := false # set before setup() for arcade races (ignores sim settings)
+var career := false # apply the career car's R&D level to the player
 var debug_no_lane_changes := false
 var control: Node = null # race_control.gd when the full rules are on
 var wear_scale := 1.0 # fuel burn / tyre wear multiplier so short races still need pit strategy
@@ -78,6 +79,8 @@ func setup(trk: Node3D, player_team: int, lap_count: int, size := 40, grid: Arra
 			c.assisted = Game.assists or arcade_setup
 			if not arcade_setup:
 				Game.apply_setup(c)
+			if career:
+				Game.apply_career(c)
 	order = cars.duplicate()
 
 

@@ -66,6 +66,7 @@ const MODES := [
 	["ARCADE", "BEAT THE CLOCK. 16 CARS, SHORT RACES, NO CAUTIONS."],
 	["SINGLE RACE", "A FULL RACE WEEKEND: PRACTICE, QUALIFYING, CAUTIONS, PITS, STAGES."],
 	["SEASON", "RUN A CHAMPIONSHIP. POINTS, WINS AND STANDINGS ARE SAVED."],
+	["CAREER", "ROOKIE TO CHAMPION: PRIZE MONEY, SPONSORS AND R&D UPGRADES."],
 	["LIGHTNING CHALLENGES", "RACE-DEFINING MOMENTS. BEAT FIVE TO UNLOCK A LEGEND."],
 	["PAINT SHOP", "CREATE YOUR OWN CAR: NUMBER, DRIVER, SPONSOR AND COLORS."],
 	["OPTIONS", "GRAPHICS AND RECORDS."],
@@ -295,6 +296,7 @@ func _new_race(player_team: int) -> void:
 	race.name = "Race"
 	add_child(race)
 	var sim := mode != "arcade" and player_team >= 0
+	race.career = mode == "career" and not Game.career.is_empty()
 	if mode == "challenge":
 		var ch: Dictionary = challenge
 		var size: int = ch.field
@@ -675,8 +677,8 @@ func _unhandled_input(event: InputEvent) -> void:
 			if session == "practice":
 				session_idx += 1
 				_start_session()
-			elif mode == "season" and not Game.season.is_empty():
-				_enter_season_hub()
+			elif (mode == "season" or mode == "career") and not Game.season.is_empty():
+				_return_hub()
 			else:
 				_enter_title()
 			return
@@ -705,10 +707,16 @@ func _unhandled_input(event: InputEvent) -> void:
 						else:
 							_enter_season_hub()
 					3:
-						_enter_challenges()
+						mode = "career"
+						if Game.career.is_empty():
+							_enter_car_select()
+						else:
+							_enter_career_hub()
 					4:
-						_enter_paint_shop()
+						_enter_challenges()
 					5:
+						_enter_paint_shop()
+					6:
 						_enter_options()
 			elif event.is_action_pressed("back"):
 				_enter_title()
@@ -740,8 +748,11 @@ func _unhandled_input(event: InputEvent) -> void:
 						_enter_race_setup()
 					"season":
 						_enter_season_setup()
+					"career":
+						Game.new_career(Game.selected_team)
+						_enter_career_hub()
 			elif event.is_action_pressed("back"):
-				if mode == "season":
+				if mode == "season" or mode == "career":
 					_enter_mode_select()
 				else:
 					_enter_track_select()
@@ -757,10 +768,10 @@ func _unhandled_input(event: InputEvent) -> void:
 				if Game.season.is_empty():
 					_enter_title()
 				else:
-					_enter_season_hub()
+					_return_hub()
 		State.RESULTS:
 			if event.is_action_pressed("start") and state_time > 1.0:
-				if mode == "season" and not Game.season.is_empty():
+				if (mode == "season" or mode == "career") and not Game.season.is_empty():
 					_after_season_race()
 				elif mode == "challenge":
 					_enter_challenges()
@@ -1099,7 +1110,7 @@ func _open_menu(kind: String, title: String, rows: Array, cursor := 0) -> void:
 func _enter_race_setup(return_to := "") -> void:
 	if return_to != "":
 		menu_return = return_to
-	elif mode != "season":
+	elif mode != "season" and mode != "career":
 		menu_return = "car"
 	var lengths: Array = []
 	for i in Game.LENGTHS.size():
@@ -1118,7 +1129,7 @@ func _enter_race_setup(return_to := "") -> void:
 		{"id": "manual", "label": "TRANSMISSION", "values": ["AUTOMATIC", "MANUAL"], "index": Game.settings.manual, "hint": "MANUAL: E = UP, Q = DOWN (RB / LB)"},
 		{"id": "garage", "label": "GARAGE SETUP", "hint": "BALANCE, TIRE PRESSURE AND GEARING"},
 	]
-	if mode == "season":
+	if mode == "season" or mode == "career":
 		rows.append({"id": "back", "label": "DONE"})
 	else:
 		rows.append({"id": "go", "label": "START RACE WEEKEND"})
@@ -1211,6 +1222,19 @@ func _on_menu_changed(id: String, idx: int) -> void:
 
 func _on_menu_activated(id: String) -> void:
 	synth.beep(1320.0, 0.06)
+	if id.begins_with("up_"):
+		var key := id.substr(3)
+		if Game.buy_upgrade(key):
+			synth.beep(1760.0, 0.15)
+		else:
+			synth.beep(220.0, 0.2)
+		_enter_rnd(menu.cursor)
+		return
+	if id.begins_with("offer_"):
+		Game.career.sponsor = Game.career.offers[int(id.substr(6))]
+		Game.save_career()
+		_enter_career_hub()
+		return
 	if id.begins_with("ch_"):
 		_start_challenge(int(id.substr(3)))
 		return
@@ -1219,6 +1243,16 @@ func _on_menu_activated(id: String) -> void:
 			_start_weekend()
 		"garage":
 			_enter_garage("race_setup" if menu_kind == "race_setup" else "hub")
+		"rnd":
+			_enter_rnd()
+		"sponsors":
+			_enter_sponsors()
+		"stats":
+			_enter_career_stats()
+		"retire":
+			Game.clear_career()
+			Game.clear_season()
+			_enter_title()
 		"settings":
 			_enter_race_setup("hub")
 		"standings":
@@ -1249,15 +1283,17 @@ func _on_menu_activated(id: String) -> void:
 func _on_menu_cancelled() -> void:
 	match menu_kind:
 		"race_setup":
-			if menu_return == "hub" or mode == "season":
-				_enter_season_hub()
+			if menu_return == "hub" or mode == "season" or mode == "career":
+				_return_hub()
 			else:
 				_enter_car_select()
 		"garage":
 			if menu_return == "hub":
-				_enter_season_hub()
+				_return_hub()
 			else:
 				_enter_race_setup()
+		"rnd", "sponsors":
+			_enter_career_hub()
 		"hub", "options":
 			_enter_title()
 		"challenges":
@@ -1380,9 +1416,20 @@ func _after_season_race() -> void:
 		var c: Node3D = race.order[i]
 		var pts: int = race.control.finishing_points(i + 1, c) if race.control else 0
 		finish.append({"num": c.team.num, "pos": i + 1, "points": pts})
+	if mode == "career":
+		var p: Node3D = race.player
+		var pole: bool = not qual_grid.is_empty() and qual_grid[0] == Game.selected_team
+		Game.career_race(race.position_of(p), race.cars.size(), p.laps_led, pole)
 	Game.record_season_race(Game.selected_track, finish)
 	if int(Game.season.round) >= Game.season.schedule.size():
 		_enter_standings(true)
+	else:
+		_return_hub()
+
+
+func _return_hub() -> void:
+	if mode == "career" or Game.season.get("career", false):
+		_enter_career_hub()
 	else:
 		_enter_season_hub()
 
@@ -1420,7 +1467,16 @@ func _enter_standings(final := false) -> void:
 	if final and table.size() > 0:
 		var champ := Game.team_by_num(table[0][0])
 		_label("", "CHAMPION:  #%s %s" % [table[0][0], champ.driver], 20, Color(0.3, 1.0, 0.4), Vector2(0, 420), HORIZONTAL_ALIGNMENT_CENTER, 5)
-		Game.clear_season()
+		if Game.season.get("career", false) and not Game.career.is_empty():
+			var my_pos := 0
+			var my_row: Array = []
+			for i in table.size():
+				if table[i][0] == me:
+					my_pos = i + 1
+					my_row = table[i]
+			Game.career_season_end(my_pos, my_row[1] if my_row.size() else 0, my_row[2] if my_row.size() else 0)
+		else:
+			Game.clear_season()
 	_label("start", "PRESS START", 16, Color.WHITE, Vector2(0, 446), HORIZONTAL_ALIGNMENT_CENTER, 4)
 
 
@@ -1480,3 +1536,92 @@ func _start_challenge(idx: int) -> void:
 	session = "race"
 	_use_track(int(challenge.track))
 	_enter_countdown()
+
+
+# --- career -------------------------------------------------------------------------
+
+func _enter_career_hub() -> void:
+	mode = "career"
+	var cr: Dictionary = Game.career
+	if Game.season.is_empty():
+		Game.new_season(int(cr.team), 1)
+		Game.season.career = true
+		Game.save_season()
+	var sn: Dictionary = Game.season
+	Game.selected_team = int(cr.team)
+	var n: int = sn.schedule.size()
+	var rnd: int = min(int(sn.round), n - 1)
+	var next_track: int = sn.schedule[rnd]
+	_use_track(next_track)
+	_start_attract()
+	var me: String = Game.teams[int(cr.team)].num
+	var pos := 0
+	var pts := 0
+	var table := Game.standings()
+	for i in table.size():
+		if table[i][0] == me:
+			pos = i + 1
+			pts = table[i][1]
+	var sp: Dictionary = cr.sponsor
+	var rows := [
+		{"id": "weekend", "label": "RACE %d/%d:  %s" % [rnd + 1, n, Game.tracks[next_track].short], "hint": "%s  -  %d LAPS" % [Game.tracks[next_track].name, Game.race_laps(next_track)]},
+		{"id": "rnd", "label": "R&D SHOP", "hint": "BANK: $%s" % Game.money_text(cr.money)},
+		{"id": "sponsors", "label": "SPONSOR: %s" % sp.name, "hint": "$%s PER RACE, $%s FOR A WIN" % [Game.money_text(sp.per_race), Game.money_text(sp.bonus_win)]},
+		{"id": "garage", "label": "GARAGE SETUP"},
+		{"id": "settings", "label": "RACE SETTINGS"},
+		{"id": "standings", "label": "STANDINGS", "hint": ("SEASON %d: %s WITH %d POINTS" % [cr.year, Game.ordinal(pos), pts]) if pos > 0 else "SEASON %d: NO RACES RUN YET" % cr.year},
+		{"id": "stats", "label": "CAREER RECORD", "hint": cr.get("last", "")},
+		{"id": "main", "label": "SAVE + MAIN MENU"},
+		{"id": "retire", "label": "RETIRE", "hint": "ENDS AND DELETES THIS CAREER"},
+	]
+	_open_menu("hub", "YEAR %d  -  $%s  -  REP %d" % [cr.year, Game.money_text(cr.money), cr.rep], rows, 0)
+	menu.row_h = 28
+	menu.build(menu.title, rows, 0)
+
+
+func _enter_rnd(cursor := 0) -> void:
+	var rows: Array = []
+	for u in Game.UPGRADES:
+		var lvl: int = Game.career.upgrades[u[0]]
+		var bar := "|".repeat(lvl) + ".".repeat(Game.MAX_UPGRADE - lvl)
+		var cost := "MAXED" if lvl >= Game.MAX_UPGRADE else "$" + Game.money_text(Game.upgrade_cost(u[0]))
+		rows.append({"id": "up_" + u[0], "label": "%s  %s" % [u[1], bar], "hint": "%s  -  NEXT LEVEL %s" % [u[2], cost]})
+	rows.append({"id": "back", "label": "DONE"})
+	_open_menu("rnd", "R&D  -  BANK $%s" % Game.money_text(Game.career.money), rows, cursor)
+
+
+func _enter_sponsors() -> void:
+	var rows: Array = []
+	var i := 0
+	for o in Game.career.offers:
+		rows.append({"id": "offer_%d" % i, "label": o.name, "hint": "$%s PER RACE  +  $%s PER WIN" % [Game.money_text(o.per_race), Game.money_text(o.bonus_win)]})
+		i += 1
+	rows.append({"id": "back", "label": "KEEP %s" % Game.career.sponsor.name})
+	_open_menu("sponsors", "SPONSOR OFFERS  (REP %d)" % Game.career.rep, rows, rows.size() - 1)
+
+
+func _enter_career_stats() -> void:
+	_set_state(State.STANDINGS)
+	_clear_screen()
+	_panel(Rect2(60, 20, 520, 440), Color(0, 0, 0, 0.72))
+	var cr: Dictionary = Game.career
+	var t: Dictionary = Game.teams[int(cr.team)]
+	_label("", "CAREER RECORD", 32, Color(1.0, 0.85, 0.1), Vector2(0, 28), HORIZONTAL_ALIGNMENT_CENTER, 8)
+	_label("", "#%s %s  -  %s" % [t.num, t.driver, cr.sponsor.name], 16, Color(0.5, 0.9, 1.0), Vector2(0, 70), HORIZONTAL_ALIGNMENT_CENTER, 4)
+	var st: Dictionary = cr.stats
+	var lines := [
+		["SEASONS", str(int(cr.year))], ["STARTS", str(st.starts)], ["WINS", str(st.wins)], ["TOP 5", str(st.top5)],
+		["TOP 10", str(st.top10)], ["POLES", str(st.poles)], ["LAPS LED", str(st.laps_led)],
+		["CHAMPIONSHIPS", str(st.titles)], ["CAREER EARNINGS", "$" + Game.money_text(st.earnings)], ["REPUTATION", "%d / 100" % cr.rep],
+	]
+	var y := 104
+	for ln in lines:
+		_label("", ln[0], 18, Color.WHITE, Vector2(110, y), HORIZONTAL_ALIGNMENT_LEFT, 4)
+		_label("", ln[1], 18, Color(1, 0.85, 0.3), Vector2(380, y), HORIZONTAL_ALIGNMENT_LEFT, 4)
+		y += 28
+	var hist := ""
+	for h in cr.history:
+		hist += "Y%d: %s  " % [h.year, Game.ordinal(h.pos)]
+	if hist != "":
+		_label("", hist, 12, Color(0.8, 0.85, 0.9), Vector2(0, 400), HORIZONTAL_ALIGNMENT_CENTER, 3)
+	_label("start", "PRESS START", 16, Color.WHITE, Vector2(0, 432), HORIZONTAL_ALIGNMENT_CENTER, 4)
