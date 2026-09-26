@@ -5,6 +5,8 @@ extends Node3D
 const Track := preload("res://scripts/track.gd")
 const Race := preload("res://scripts/race.gd")
 const Car := preload("res://scripts/car.gd")
+const Weather := preload("res://scripts/weather.gd")
+const TelemetryHud := preload("res://scripts/telemetry_hud.gd")
 const Hud := preload("res://scripts/hud.gd")
 const Synth := preload("res://scripts/audio.gd")
 const Menu := preload("res://scripts/menu.gd")
@@ -129,6 +131,9 @@ func _ready() -> void:
 	hud_layer.layer = 1
 	add_child(hud_layer)
 	hud_layer.add_child(hud)
+	telemetry = TelemetryHud.new()
+	telemetry.visible = false
+	hud_layer.add_child(telemetry)
 	hud.visible = false
 
 	ui_layer = CanvasLayer.new()
@@ -320,6 +325,92 @@ func _apply_graphics() -> void:
 		sun.shadow_enabled = false
 
 
+## Sun, sky and light from the race clock, plus rain and a wet track (weather.gd).
+var _rain_fx: Node3D
+var _base_fog := 0.0
+
+
+func apply_time_and_weather(w: Node) -> void:
+	if track == null or env == null or env.sky == null:
+		return
+	var elev: float = w.sun_elevation()
+	var az: float = w.sun_azimuth()
+	var dark: bool = elev < 0.0
+	var wet_avg: float = w.average_wet()
+	# Below the horizon the moon lights the scene from high up instead.
+	sun.rotation = Vector3(-deg_to_rad(clamp(elev, 8.0, 85.0) if not dark else 50.0), deg_to_rad(az), 0)
+	var low: float = clamp(1.0 - elev / 20.0, 0.0, 1.0) # golden hour
+	var sun_col := Color(1.0, 0.97, 0.9).lerp(Color(1.0, 0.62, 0.38), low)
+	if dark:
+		sun_col = Color(0.7, 0.78, 1.0)
+	var energy: float = (0.15 if dark else lerp(1.4, 0.8, low)) * (1.0 - 0.45 * w.rain)
+	sun.light_energy = energy
+	sun.light_color = sun_col
+	var sm = env.sky.sky_material
+	if sm is ShaderMaterial and Game.modern:
+		var cfg: Dictionary = track.cfg
+		var night_sky: bool = elev < -3.0
+		var dusk: float = clamp(1.0 - (elev + 3.0) / 12.0, 0.0, 1.0)
+		sm.set_shader_parameter("night", night_sky)
+		sm.set_shader_parameter("zenith", (cfg.sky_top as Color).lerp(Color(0.08, 0.1, 0.25), dusk * 0.8).lerp(Color(0.35, 0.37, 0.42), w.rain))
+		sm.set_shader_parameter("horizon", (cfg.sky_horizon as Color).lerp(Color(1.0, 0.55, 0.35), low * (1.0 - w.rain)).lerp(Color(0.55, 0.57, 0.6), w.rain))
+		sm.set_shader_parameter("sun_color", sun_col)
+		sm.set_shader_parameter("cloud_cover", lerp(float(cfg.get("clouds", 0.42)), 0.97, w.rain))
+		sm.set_shader_parameter("energy", lerp(1.0, 0.5, w.rain) * (1.0 if not dark else 0.8))
+	env.ambient_light_energy = (0.6 if dark else 1.0) * (1.0 - 0.3 * w.rain) * (0.5 if Game.modern and not Game.forward_plus else 1.0)
+	if _base_fog == 0.0:
+		_base_fog = env.fog_density
+	env.fog_density = _base_fog * (1.0 + 3.0 * w.rain)
+	# Light towers come on when it gets dark.
+	for n in track.get_children():
+		if n is SpotLight3D and Game.forward_plus:
+			n.visible = Game.modern and (elev < 6.0)
+	# A wet track: darker and glossy.
+	var asphalt: Node = track.get_node_or_null("Surface_asphalt")
+	if asphalt and asphalt.material_override:
+		var m: StandardMaterial3D = asphalt.material_override
+		if wet_avg > 0.01 or m.has_meta("wet_shown"):
+			Game.style(m)
+			m.roughness = lerp(m.roughness, 0.12, wet_avg)
+			m.albedo_color = m.albedo_color.darkened(0.35 * wet_avg)
+			m.set_meta("wet_shown", wet_avg > 0.01)
+	_update_rain_fx(w.rain)
+
+
+func _update_rain_fx(amount: float) -> void:
+	if amount <= 0.02 and _rain_fx == null:
+		return
+	if _rain_fx == null:
+		var qm := QuadMesh.new()
+		qm.size = Vector2(0.015, 0.7)
+		var m := StandardMaterial3D.new()
+		m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		m.albedo_color = Color(0.8, 0.85, 0.9, 0.35)
+		m.billboard_mode = BaseMaterial3D.BILLBOARD_FIXED_Y
+		qm.material = m
+		var p := CPUParticles3D.new()
+		p.amount = 1600 if Game.forward_plus else 500
+		p.lifetime = 0.9
+		p.local_coords = false
+		p.emission_shape = CPUParticles3D.EMISSION_SHAPE_BOX
+		p.emission_box_extents = Vector3(22, 1, 22)
+		p.direction = Vector3(0.05, -1, 0)
+		p.spread = 3.0
+		p.initial_velocity_min = 24.0
+		p.initial_velocity_max = 30.0
+		p.gravity = Vector3.ZERO
+		p.mesh = qm
+		p.position = Vector3(0, 14, -8)
+		cam.add_child(p)
+		_rain_fx = p
+	var rp := _rain_fx as CPUParticles3D
+	rp.emitting = amount > 0.02
+	# Heavier rain reads as denser, brighter streaks.
+	var qm: QuadMesh = rp.mesh
+	(qm.material as StandardMaterial3D).albedo_color.a = 0.12 + 0.35 * clamp(amount, 0.0, 1.0)
+
+
 ## Modern-mode quality preset: what each level turns on, cheapest first.
 ##   LOW     FSR 2 at 67%, 2 shadow splits (2K), no SSAO / SSR / volumetrics
 ##   MEDIUM  FSR 2 at 77%, 2 splits (4K), half-res SSAO
@@ -506,6 +597,12 @@ func _new_race(player_team: int) -> void:
 		race.arcade = true
 	race.lap_completed.connect(_on_lap)
 	race.car_finished.connect(_on_finished)
+	# Time of day for every race; weather for the full-rules races.
+	var weather_mode: int = int(Game.settings.get("weather", 0)) if (race.control and mode != "challenge") else 0
+	var w: Node = Weather.new()
+	race.add_child(w)
+	w.start(track, race, self, weather_mode)
+	race.weather = w
 
 
 func _clear_screen() -> void:
@@ -697,6 +794,7 @@ func _enter_countdown() -> void:
 	time_left = round(ref * 1.8 + 15.0)
 	lap_bonus = round(ref * 1.35)
 	hud.race = race
+	telemetry.car = race.player
 	hud.track = track
 	hud.time_left = time_left
 	hud.show_timer = mode == "arcade"
@@ -780,7 +878,7 @@ func _enter_results() -> void:
 		y2 += 22
 	_label("start", "PRESS START", 20, Color.WHITE, Vector2(0, 440), HORIZONTAL_ALIGNMENT_CENTER, 5)
 	if race.rec_times.size() > 20:
-		_label("", "R  WATCH REPLAY", 12, Color(0.6, 0.9, 1.0), Vector2(470, 446), HORIZONTAL_ALIGNMENT_LEFT, 3)
+		_label("", "R  REPLAY   H  HIGHLIGHTS", 12, Color(0.6, 0.9, 1.0), Vector2(420, 446), HORIZONTAL_ALIGNMENT_LEFT, 3)
 
 
 # --- race events --------------------------------------------------------------
@@ -791,6 +889,15 @@ func _on_lap(car: Node3D, laps_done: int, lap_time: float) -> void:
 	if Game.submit_record(Game.selected_track, "lap", lap_time):
 		if not new_records.has("NEW LAP RECORD!"):
 			new_records.append("NEW LAP RECORD!")
+	if mode != "arcade" and session == "race" and race.control and laps_done % 5 == 0 and laps_done < race.laps:
+		# Crew chief's report every five laps.
+		var pos: int = race.position_of(car)
+		var lead: Node3D = race.order[0]
+		var gap: float = (lead.dist - car.dist) / max(car.v, 20.0)
+		var fuel_laps: int = int(car.fuel / max(track.length / 1000.0 * 0.62 * car.burn_scale, 0.001))
+		var tyre: String = "tires are good" if car.tyre_grip() > 0.95 else ("tires are going away" if car.tyre_grip() > 0.88 else "tires are gone")
+		var where: String = "you're the leader" if pos == 1 else "P%d, %.1f back of the leader" % [pos, gap]
+		_radio("%s. %s, fuel for %d laps." % [where, tyre, fuel_laps], "chief")
 	if mode != "arcade":
 		if session == "practice":
 			_msg(Game.format_time(lap_time), 2.0, Color.WHITE)
@@ -848,6 +955,19 @@ func _on_finished(car: Node3D, place: int) -> void:
 # --- main loop ------------------------------------------------------------------
 
 func _unhandled_input(event: InputEvent) -> void:
+	if photo_mode and state != State.REPLAY:
+		_photo_input(event)
+		return
+	if event.is_action_pressed("photo") and state in [State.RACE, State.FINISHED] and split_cams.is_empty():
+		# Freeze the race and line up a shot.
+		paused = true
+		pause_layer.visible = false
+		_photo_orbit = Vector3(0.6, 0.25, 9.0)
+		_enter_photo()
+		return
+	if event.is_action_pressed("telemetry") and state in [State.RACE, State.COUNTDOWN, State.FINISHED]:
+		telemetry.visible = not telemetry.visible
+		telemetry.car = race.player
 	if event.is_action_pressed("toggle_scanlines"):
 		Game.scanlines = not Game.scanlines
 		scan_rect.visible = Game.scanlines and not Game.modern
@@ -974,7 +1094,15 @@ func _unhandled_input(event: InputEvent) -> void:
 				else:
 					_return_hub()
 		State.REPLAY:
+			if photo_mode:
+				_photo_input(event)
+				return
+			if event.is_action_pressed("photo"):
+				_enter_photo()
+				return
 			if event.is_action_pressed("start") or event.is_action_pressed("back") or event.is_action_pressed("replay"):
+				_hl_clips.clear()
+				_hl_label = ""
 				screen.visible = true
 				_set_state(State.RESULTS)
 				hud.visible = false
@@ -987,10 +1115,12 @@ func _unhandled_input(event: InputEvent) -> void:
 				i = clamp(i + (1 if event.is_action_pressed("menu_up") else -1), 0, rates.size() - 1)
 				replay_rate = rates[i]
 			elif event.is_action_pressed("camera"):
-				replay_cam = (replay_cam + 1) % 4
+				replay_cam = (replay_cam + 1) % 7
 		State.RESULTS:
 			if event.is_action_pressed("replay") and race.rec_times.size() > 20:
 				_enter_replay()
+			elif event.is_action_pressed("highlights") and race.rec_times.size() > 20:
+				_enter_highlights()
 			elif event.is_action_pressed("start") and state_time > 1.0:
 				if (mode == "season" or mode == "career") and not Game.season.is_empty():
 					_after_season_race()
@@ -1041,7 +1171,12 @@ func _physics_process(delta: float) -> void:
 		State.RESULTS:
 			race.tick(delta)
 		State.REPLAY:
-			replay_t = clamp(replay_t + delta * replay_rate, race.rec_times[0], race.rec_times[race.rec_times.size() - 1])
+			if photo_mode:
+				pass
+			elif not _hl_clips.is_empty():
+				_highlight_tick(delta)
+			else:
+				replay_t = clamp(replay_t + delta * replay_rate, race.rec_times[0], race.rec_times[race.rec_times.size() - 1])
 			race.replay_apply(replay_t)
 			_replay_overlay()
 
@@ -1151,7 +1286,10 @@ func _player_input() -> void:
 			p.want_pit = not p.want_pit
 			_sub("PIT THIS LAP: %s" % _plan_name(p.pit_plan) if p.want_pit else "PIT CANCELLED", 2.0)
 		if Input.is_action_just_pressed("pit_option"):
-			p.pit_plan = {"4": "2", "2": "F", "F": "4"}[p.pit_plan]
+			var cycle := {"4": "2", "2": "F", "F": "4"}
+			if track.cfg.get("road", false) and race.weather and race.weather.mode > 0:
+				cycle = {"4": "2", "2": "F", "F": "W", "W": "4"}
+			p.pit_plan = cycle.get(p.pit_plan, "4")
 			_sub("PIT PLAN: %s" % _plan_name(p.pit_plan), 2.0)
 		if ctl.choosing and Input.is_action_just_pressed("steer_left"):
 			ctl.player_lane_choice = 0
@@ -1175,7 +1313,7 @@ func _player_input() -> void:
 
 
 func _plan_name(plan: String) -> String:
-	return {"4": "4 TIRES + FUEL", "2": "2 TIRES + FUEL", "F": "FUEL ONLY"}[plan]
+	return {"4": "4 TIRES + FUEL", "2": "2 TIRES + FUEL", "F": "FUEL ONLY", "W": "WET TIRES + FUEL"}.get(plan, plan)
 
 
 func _near_pit_entry(p: Node3D) -> bool:
@@ -1183,7 +1321,29 @@ func _near_pit_entry(p: Node3D) -> bool:
 	return to_entry < 500.0
 
 
+## Radio: the spotter and the crew chief speak their calls (the OS / browser voice).
+var telemetry: Control
+var _voices: PackedStringArray = []
+
+
+func _radio(text: String, who: String) -> void:
+	if not Game.radio_voice or state == State.REPLAY:
+		return
+	if _voices.is_empty():
+		_voices = DisplayServer.tts_get_voices_for_language("en")
+		if _voices.is_empty():
+			return
+	var spotter := who == "spotter"
+	var v: String = _voices[0] if spotter or _voices.size() < 2 else _voices[1]
+	DisplayServer.tts_speak(text.to_lower(), v, 70, 1.15 if spotter else 0.9, 1.35 if spotter else 1.1, 0, spotter)
+
+
 func _on_control_message(text: String, kind: String) -> void:
+	match kind:
+		"spotter":
+			_radio({"CAR LOW": "car low", "CAR HIGH": "car high", "3 WIDE": "three wide, stay put", "CLEAR": "clear"}.get(text, text.replace("SPOTTER: ", "")), "spotter")
+		"pit", "flag", "stage":
+			_radio(text, "chief")
 	match kind:
 		"flag":
 			_msg(text, 2.5, Color(1, 0.9, 0.2) if text.begins_with("CAUTION") or text == "ONE TO GO" else (Color(0.3, 1.0, 0.3) if text.begins_with("GREEN") else Color.WHITE))
@@ -1288,16 +1448,22 @@ func _update_camera(delta: float) -> void:
 	var sh := Vector3(rng.randf_range(-1, 1), rng.randf_range(-1, 1), 0) * shake * 0.25
 	match state:
 		State.COUNTDOWN, State.RACE, State.FINISHED:
+			if photo_mode:
+				_photo_camera(delta)
+				return
 			_chase_camera(race.player, delta, cam_mode)
 			if split_cams.size() == 2:
 				_split_camera(split_cams[0], split_state[0], race.player, delta)
 				_split_camera(split_cams[1], split_state[1], race.player2, delta)
 		State.REPLAY:
+			if photo_mode:
+				_photo_camera(delta)
+				return
+			if replay_cam == 0:
+				_director(delta)
 			var focus: Node3D = race.cars[replay_focus]
-			match replay_cam:
-				0:
-					tv_target = focus
-					_tv_camera(delta, true)
+			var shot: int = _dir_shot if replay_cam == 0 else replay_cam
+			match shot:
 				1:
 					_chase_camera(focus, delta, 0)
 				2:
@@ -1305,6 +1471,14 @@ func _update_camera(delta: float) -> void:
 				3:
 					tv_target = focus
 					tv_mode = 3
+					_tv_camera(delta, true)
+				4:
+					_roof_camera(focus)
+				5:
+					_blimp_camera(focus, delta)
+				_:
+					tv_target = focus
+					tv_mode = 2
 					_tv_camera(delta, true)
 		State.CAR_SELECT, State.MENU:
 			if preview_car and (state == State.CAR_SELECT or menu_kind == "paint"):
@@ -1412,6 +1586,7 @@ func _enter_race_setup(return_to := "") -> void:
 		{"id": "field", "label": "FIELD SIZE", "values": Game.FIELDS.map(func(f): return "%d CARS" % f), "index": Game.settings.field},
 		{"id": "weekend", "label": "WEEKEND", "values": Game.WEEKENDS, "index": Game.settings.weekend, "hint": "QUALIFY TO SET YOUR STARTING SPOT"},
 		{"id": "cautions", "label": "CAUTIONS", "values": ["OFF", "ON"], "index": Game.settings.cautions},
+		{"id": "weather", "label": "WEATHER", "values": ["CLEAR", "CHANGEABLE", "RAIN"], "index": int(Game.settings.get("weather", 0)), "hint": "RAIN HOLDS OVALS UNDER CAUTION.  ROAD COURSES RACE ON WET TIRES"},
 		{"id": "damage", "label": "DAMAGE", "values": ["OFF", "ON"], "index": Game.settings.damage, "hint": "DAMAGE HURTS SPEED, HANDLING AND CAN END YOUR RACE"},
 		{"id": "wear", "label": "FUEL + TIRE WEAR", "values": ["OFF", "ON"], "index": Game.settings.wear, "hint": "SCALED TO RACE LENGTH SO PIT STRATEGY MATTERS"},
 		{"id": "assists", "label": "DRIVING ASSISTS", "values": ["OFF", "MILD", "FULL"], "index": Game.settings.assists, "hint": "MILD: STEERING HELP ONLY, LOOSER TRACTION AND ABS.  OFF: ALL YOU"},
@@ -1427,14 +1602,64 @@ func _enter_race_setup(return_to := "") -> void:
 
 func _enter_garage(return_to: String) -> void:
 	menu_return = return_to
+	var st: Dictionary = Game.setup
 	var bal := ["TIGHT 3", "TIGHT 2", "TIGHT 1", "NEUTRAL", "LOOSE 1", "LOOSE 2", "LOOSE 3"]
+	var three := ["SOFT", "STANDARD", "STIFF"]
+	var psi := ["LOW", "STANDARD", "HIGH"]
 	var rows := [
-		{"id": "balance", "label": "HANDLING BALANCE", "values": bal, "index": int(Game.setup.balance) + 3, "hint": "WEDGE / TRACK BAR: TIGHT PUSHES UP THE TRACK, LOOSE TURNS BUT CAN SPIN"},
-		{"id": "pressure", "label": "TIRE PRESSURE", "values": ["LOW", "STANDARD", "HIGH"], "index": Game.setup.pressure, "hint": "LOW: MORE GRIP, FASTER WEAR.  HIGH: LESS GRIP, LASTS LONGER"},
-		{"id": "gearing", "label": "GEARING", "values": ["SHORT", "STANDARD", "LONG"], "index": Game.setup.gearing, "hint": "SHORT: QUICKER OFF THE CORNERS.  LONG: MORE TOP SPEED"},
+		{"id": "balance", "label": "WEDGE", "values": bal, "index": int(st.balance) + 3, "hint": "CROSS WEIGHT: TIGHT PUSHES UP THE TRACK, LOOSE TURNS BUT CAN SPIN"},
+		{"id": "springs_f", "label": "FRONT SPRINGS", "values": three, "index": int(st.springs_f), "hint": "SOFT: MORE GRIP OVER BUMPS.  STIFF: STEADIER, SITS HIGHER"},
+		{"id": "springs_r", "label": "REAR SPRINGS", "values": three, "index": int(st.springs_r), "hint": "STIFFER REAR = LOOSER"},
+		{"id": "bar_f", "label": "FRONT SWAY BAR", "values": three, "index": int(st.bar_f), "hint": "STIFFER BAR = LESS ROLL, TIGHTER IN THE MIDDLE OF THE CORNER"},
+		{"id": "bump", "label": "BUMP STOPS", "values": ["LOW", "STANDARD", "HIGH"], "index": int(st.bump), "hint": "WHEN THE CAR LANDS ON ITS STOPS IN THE BANKING"},
+		{"id": "stagger", "label": "STAGGER", "values": ["LESS", "STANDARD", "MORE"], "index": int(st.stagger), "hint": "MORE STAGGER HELPS IT TURN LEFT (LOOSER ON EXIT)"},
+		{"id": "psi_l", "label": "LEFT PRESSURES", "values": psi, "index": int(st.psi_l), "hint": "LOW: MORE GRIP, FASTER WEAR.  HIGH: LESS GRIP, LASTS"},
+		{"id": "psi_r", "label": "RIGHT PRESSURES", "values": psi, "index": int(st.psi_r), "hint": "THE RIGHT SIDES DO THE WORK ON AN OVAL"},
+		{"id": "bias", "label": "BRAKE BIAS", "values": ["54% F", "56% F", "58% F", "60% F", "62% F"], "index": int(st.bias), "hint": "MORE FRONT: STABLE UNDER BRAKES, CAN LOCK THE FRONTS"},
+		{"id": "gearing", "label": "GEARING", "values": ["SHORT", "STANDARD", "LONG"], "index": int(st.gearing), "hint": "SHORT: QUICKER OFF THE CORNERS.  LONG: MORE TOP SPEED"},
+		{"id": "sheets", "label": "SETUP SHEETS", "hint": "SAVE, LOAD OR SHARE SETUPS"},
 		{"id": "back", "label": "DONE"},
 	]
-	_open_menu("garage", "GARAGE", rows, 3)
+	_open_menu("garage", "GARAGE", rows, rows.size() - 1)
+	menu.row_h = 25
+	menu.top = 78
+	menu.build("GARAGE", rows, rows.size() - 1)
+
+
+func _enter_setup_sheets() -> void:
+	var sheets: Dictionary = Game.setup_sheets(Game.selected_track)
+	var rows := [{"id": "sheet_save", "label": "SAVE CURRENT SETUP", "hint": "SAVED FOR %s" % Game.tracks[Game.selected_track].short}]
+	for name in sheets:
+		rows.append({"id": "sheet:" + String(name), "label": "LOAD  " + String(name)})
+	rows.append({"id": "sheet_copy", "label": "COPY SHARE CODE", "hint": "PUTS A CODE FOR THIS SETUP ON THE CLIPBOARD"})
+	rows.append({"id": "sheet_paste", "label": "PASTE SHARE CODE", "hint": "LOADS A SETUP CODE FROM THE CLIPBOARD"})
+	rows.append({"id": "sheet_back", "label": "BACK"})
+	_open_menu("sheets", "SETUP SHEETS", rows, 0)
+
+
+func _on_sheet(id: String) -> void:
+	match id:
+		"sheets":
+			_enter_setup_sheets()
+		"sheet_save":
+			var n := Game.setup_sheets(Game.selected_track).size() + 1
+			Game.save_setup_sheet(Game.selected_track, "SETUP %d" % n)
+			_enter_setup_sheets()
+			_sub("SAVED AS SETUP %d" % n, 2.0)
+		"sheet_copy":
+			DisplayServer.clipboard_set(Game.setup_code())
+			_sub("SETUP CODE COPIED", 2.0)
+		"sheet_paste":
+			_sub("SETUP LOADED" if Game.setup_from_code(DisplayServer.clipboard_get()) else "NO SETUP CODE ON THE CLIPBOARD", 2.0)
+		"sheet_back":
+			_enter_garage(menu_return)
+		_:
+			var sheets: Dictionary = Game.setup_sheets(Game.selected_track)
+			var key := id.substr(6)
+			if sheets.has(key):
+				Game.load_setup(sheets[key])
+				_sub("LOADED " + key, 2.0)
+				_enter_garage(menu_return)
 
 
 func _enter_season_setup() -> void:
@@ -1479,6 +1704,7 @@ func _enter_options() -> void:
 		{"id": "quality", "label": "QUALITY (MODERN)", "values": Game.QUALITY_NAMES, "index": Game.quality, "hint": "AUTO LOWERS DETAIL WHEN FRAMES RUN LATE"},
 		{"id": "smooth", "label": "MOTION SMOOTHING", "values": ["OFF", "ON"], "index": 1 if Game.smoothing else 0, "hint": "SMOOTH MOTION ON 120/144 HZ SCREENS (ADDS UNDER 1 FRAME OF DELAY)"},
 		{"id": "blur", "label": "MOTION BLUR", "values": ["OFF", "LOW", "HIGH"], "index": Game.motion_blur, "hint": "DESKTOP MODERN LOOK ONLY"},
+		{"id": "radio", "label": "RADIO VOICE", "values": ["OFF", "ON"], "index": 1 if Game.radio_voice else 0, "hint": "SPOKEN SPOTTER AND CREW CHIEF CALLS"},
 		{"id": "vsync", "label": "VSYNC", "values": ["OFF", "ON"], "index": 1 if Game.vsync else 0, "hint": "OFF: LOWEST INPUT DELAY, MAY TEAR"},
 		{"id": "scan", "label": "SCANLINES (1999)", "values": ["OFF", "ON"], "index": 1 if Game.scanlines else 0},
 		{"id": "reset", "label": "RESET LAP RECORDS"},
@@ -1519,6 +1745,9 @@ func _on_menu_changed(id: String, idx: int) -> void:
 			elif id == "blur":
 				Game.motion_blur = idx
 				Game.save_settings()
+			elif id == "radio":
+				Game.radio_voice = idx == 1
+				Game.save_settings()
 			elif id == "vsync":
 				Game.vsync = idx == 1
 				_apply_graphics()
@@ -1546,6 +1775,9 @@ func _on_menu_activated(id: String) -> void:
 		return
 	if id.begins_with("ch_"):
 		_start_challenge(int(id.substr(3)))
+		return
+	if id.begins_with("sheet"):
+		_on_sheet(id)
 		return
 	match id:
 		"go", "weekend":
@@ -1601,6 +1833,8 @@ func _on_menu_cancelled() -> void:
 				_return_hub()
 			else:
 				_enter_race_setup()
+		"sheets":
+			_enter_garage(menu_return)
 		"rnd", "sponsors":
 			_enter_career_hub()
 		"hub", "options":
@@ -1965,10 +2199,204 @@ func _replay_overlay() -> void:
 	var at: float = replay_t - race.rec_times[0]
 	var rate := "PAUSED" if replay_rate == 0.0 else ("x%s" % str(replay_rate))
 	var blink := "REPLAY" if int(Time.get_ticks_msec() / 500) % 2 == 0 else "      "
-	ov.text = "%s  %s / %s  %s   #%s %s   [%s]\nLEFT/RIGHT CAR   UP/DOWN SPEED   C CAMERA   START EXIT" % [blink, Game.format_time(at), Game.format_time(span), rate, c.team.num, c.team.driver, ["TV", "CHASE", "BUMPER", "HELICOPTER"][replay_cam]]
+	ov.text = "%s  %s / %s  %s   #%s %s   [%s]\nLEFT/RIGHT CAR   UP/DOWN SPEED   C CAMERA   F PHOTO   START EXIT" % [blink, Game.format_time(at), Game.format_time(span), rate, c.team.num, c.team.driver, (["DIRECTOR", "CHASE", "BUMPER", "HELICOPTER", "ROOF", "BLIMP", "TRACKSIDE"][replay_cam] + ("  " + _hl_label if _hl_label != "" else ""))]
 	synth.engine_on = true
 	synth.engine_rpm = 3000.0 + abs(c.v) * 70.0
 	synth.engine_load = 0.8
+
+
+# --- broadcast director, highlights, photo mode -------------------------------------
+
+## Director: cuts between the action like a TV truck. Incidents first, then the
+## closest battle in the top positions, then the leader, with a mix of shots.
+var _dir_timer := 0.0
+var _dir_shot := 6
+var _hl_clips: Array = []
+var _hl_index := 0
+var _hl_label := ""
+var photo_mode := false
+var _photo_orbit := Vector3(0.6, 0.25, 9.0) # yaw, pitch, distance
+var _photo_prev_rate := 1.0
+
+
+func _replay_order() -> Array:
+	var o: Array = race.cars.filter(func(c): return c.visible)
+	o.sort_custom(func(a, b): return a.dist > b.dist)
+	return o
+
+
+func _director(delta: float) -> void:
+	_dir_timer -= delta * max(abs(replay_rate), 0.5)
+	# An incident on screen right now takes priority.
+	for h in race.highlights:
+		if abs(float(h.t) - replay_t) < 1.0 and int(h.car) != replay_focus and int(h.car) >= 0 and _dir_timer < 3.0:
+			replay_focus = int(h.car)
+			_dir_shot = [6, 5, 3][rng.randi() % 3]
+			_dir_timer = 5.0
+			tv_anchor = Vector3.ZERO
+			return
+	if _dir_timer > 0.0:
+		return
+	_dir_timer = rng.randf_range(4.0, 8.0)
+	var o := _replay_order()
+	var pick: Node3D = o[0] if not o.is_empty() else race.cars[0]
+	# The closest fight in the top ten.
+	var best := 1e9
+	for i in range(0, min(10, o.size() - 1)):
+		var gap: float = o[i].dist - o[i + 1].dist
+		if gap < best and gap < 12.0:
+			best = gap
+			pick = o[i + 1]
+	if rng.randf() < 0.2 and race.player:
+		pick = race.player
+	replay_focus = max(race.cars.find(pick), 0)
+	_dir_shot = [6, 6, 1, 3, 4, 5, 2][rng.randi() % 7]
+	tv_anchor = Vector3.ZERO
+
+
+func _roof_camera(car: Node3D) -> void:
+	var tr: Transform3D = car.global_transform
+	cam.global_transform = tr * Transform3D(Basis().rotated(Vector3.RIGHT, -0.12), Vector3(0, 1.75, 0.9))
+	cam.fov = 72.0
+
+
+func _blimp_camera(car: Node3D, delta: float) -> void:
+	var tr: Transform3D = car.global_transform
+	var target := tr.origin + Vector3(0, 140, 0) + tr.basis.z * 120.0
+	cam_pos = cam_pos.lerp(target, 1.0 - exp(-1.5 * delta))
+	cam.global_position = cam_pos
+	cam.look_at(tr.origin, Vector3.UP)
+	cam.fov = 38.0
+
+
+## Highlights: every incident, big hit and lead change, three seconds either side,
+## the moment itself in slow motion.
+func _enter_highlights() -> void:
+	_enter_replay()
+	_hl_clips.clear()
+	var last_t := -100.0
+	for h in race.highlights:
+		if float(h.t) - last_t < 4.0:
+			continue
+		last_t = float(h.t)
+		_hl_clips.append(h)
+	if _hl_clips.is_empty():
+		_hl_label = "NO HIGHLIGHTS - FULL REPLAY"
+		return
+	_hl_index = 0
+	_start_clip()
+
+
+func _start_clip() -> void:
+	var h: Dictionary = _hl_clips[_hl_index]
+	replay_t = max(float(h.t) - 3.0, race.rec_times[0])
+	replay_focus = max(int(h.car), 0)
+	replay_cam = 0
+	_dir_timer = 6.0
+	_dir_shot = [6, 5, 3][_hl_index % 3]
+	tv_anchor = Vector3.ZERO
+	var car_name: String = race.cars[replay_focus].team.num
+	_hl_label = "HIGHLIGHT %d/%d: %s #%s" % [_hl_index + 1, _hl_clips.size(), h.kind, car_name]
+
+
+func _highlight_tick(delta: float) -> void:
+	var h: Dictionary = _hl_clips[_hl_index]
+	var t0: float = float(h.t)
+	var rate := 0.35 if abs(replay_t - t0) < 1.2 else 1.0
+	replay_t += delta * rate
+	if replay_t > t0 + 3.5 or replay_t >= race.rec_times[race.rec_times.size() - 1]:
+		_hl_index += 1
+		if _hl_index >= _hl_clips.size():
+			_hl_clips.clear()
+			_hl_label = ""
+			screen.visible = true
+			_set_state(State.RESULTS)
+			hud.visible = false
+			return
+		_start_clip()
+
+
+## Photo mode: freeze the moment, fly the camera round the car, take the shot.
+func _enter_photo() -> void:
+	photo_mode = true
+	_photo_prev_rate = replay_rate
+	replay_rate = 0.0
+	hud.visible = false
+	telemetry.visible = false
+	var ov: Node = ui_layer.get_node_or_null("ReplayOverlay")
+	if ov:
+		ov.visible = false
+	_sub("PHOTO MODE: ARROWS ORBIT  W/S ZOOM  E/Q HEIGHT  ENTER SNAP  BACKSPACE EXIT", 4.0)
+	if Game.forward_plus:
+		var ca := CameraAttributesPractical.new()
+		ca.dof_blur_far_enabled = true
+		ca.dof_blur_amount = 0.08
+		cam.attributes = ca
+
+
+func _exit_photo() -> void:
+	photo_mode = false
+	replay_rate = _photo_prev_rate
+	cam.attributes = null
+	if state != State.REPLAY:
+		hud.visible = true
+		paused = false
+	var ov: Node = ui_layer.get_node_or_null("ReplayOverlay")
+	if ov:
+		ov.visible = true
+
+
+func _photo_focus() -> Node3D:
+	return race.cars[replay_focus] if state == State.REPLAY else race.player
+
+
+func _photo_camera(delta: float) -> void:
+	var car := _photo_focus()
+	if car == null:
+		return
+	if Input.is_action_pressed("steer_left"):
+		_photo_orbit.x -= delta * 1.2
+	if Input.is_action_pressed("steer_right"):
+		_photo_orbit.x += delta * 1.2
+	if Input.is_action_pressed("accelerate"):
+		_photo_orbit.z = max(_photo_orbit.z - delta * 6.0, 3.0)
+	if Input.is_action_pressed("brake"):
+		_photo_orbit.z = min(_photo_orbit.z + delta * 6.0, 40.0)
+	if Input.is_action_pressed("shift_up"):
+		_photo_orbit.y = min(_photo_orbit.y + delta * 0.6, 1.4)
+	if Input.is_action_pressed("shift_down"):
+		_photo_orbit.y = max(_photo_orbit.y - delta * 0.6, -0.05)
+	var p: Vector3 = car.global_position + Vector3(0, 0.8, 0)
+	var dir := Vector3(sin(_photo_orbit.x) * cos(_photo_orbit.y), sin(_photo_orbit.y), cos(_photo_orbit.x) * cos(_photo_orbit.y))
+	cam.global_position = p + dir * _photo_orbit.z
+	cam.look_at(p, Vector3.UP)
+	cam.fov = 45.0
+	if cam.attributes is CameraAttributesPractical:
+		(cam.attributes as CameraAttributesPractical).dof_blur_far_distance = _photo_orbit.z * 1.6
+		(cam.attributes as CameraAttributesPractical).dof_blur_far_transition = _photo_orbit.z * 2.0
+
+
+func _photo_input(event: InputEvent) -> void:
+	if event.is_action_pressed("back") or event.is_action_pressed("photo"):
+		_exit_photo()
+	elif event.is_action_pressed("start"):
+		_take_photo()
+
+
+func _take_photo() -> void:
+	await RenderingServer.frame_post_draw
+	var img: Image = get_viewport().get_texture().get_image()
+	if img == null:
+		return
+	var fname := "speedway_%s.png" % Time.get_datetime_string_from_system().replace(":", "-")
+	if OS.has_feature("web"):
+		JavaScriptBridge.download_buffer(img.save_png_to_buffer(), fname, "image/png")
+		_sub("PHOTO SAVED TO YOUR DOWNLOADS", 2.0)
+	else:
+		DirAccess.make_dir_recursive_absolute("user://photos")
+		img.save_png("user://photos/" + fname)
+		_sub("PHOTO SAVED: " + ProjectSettings.globalize_path("user://photos/" + fname), 3.0)
+	synth.beep(1500.0, 0.05)
 
 
 # --- split screen -------------------------------------------------------------------

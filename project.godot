@@ -15,6 +15,10 @@ config/description="A late-90s style stock car arcade racer."
 run/main_scene="res://scenes/main.tscn"
 config/features=PackedStringArray("4.3", "Forward Plus")
 
+[audio]
+
+general/text_to_speech=true
+
 [autoload]
 
 Game="*res://scripts/game.gd"

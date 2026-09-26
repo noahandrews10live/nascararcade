@@ -21,6 +21,7 @@ var enabled := true
 var pits_enabled := true
 var cautions_enabled := true
 var debris_rate := 0.012 # chance per green lap of a debris caution
+var weather_hold := false # ovals: keep the field under caution while it's wet
 
 # caution state
 var caution_count := 0
@@ -254,6 +255,12 @@ func _caution_tick(delta: float) -> void:
 	if pl > _pace_last_lap and not restart_armed:
 		_pace_last_lap = pl
 		caution_laps += 1
+		if weather_hold:
+			# Rain: circle behind the pace car until the track is dry.
+			caution_needed_laps = max(caution_needed_laps, caution_laps + 2)
+			one_to_go = false
+			if caution_laps > 1:
+				message.emit("HOLDING FOR RAIN - JET DRYERS ON TRACK", "flag")
 		if caution_laps == 1:
 			# Tow the wrecks, open pit road, award the free pass.
 			for c in race.cars:
@@ -495,6 +502,11 @@ func _start_service(c: Node3D) -> void:
 	c.pitted_this_caution = true
 	var tyre_t := 0.0
 	var corners: Array = []
+	var compound := ""
+	if c.pit_plan == "W" or (c.tyre_compound == "wet" and c.pit_plan in ["4", "2"]):
+		# Switching compound means all four.
+		compound = "wet" if c.pit_plan == "W" else "slick"
+		c.pit_plan = "4"
 	match c.pit_plan:
 		"4":
 			tyre_t = 10.0 + randf() * 1.6
@@ -507,7 +519,7 @@ func _start_service(c: Node3D) -> void:
 		if c.tyre_air[i] < 0.95 and not corners.has(i):
 			corners.append(i)
 			tyre_t = max(tyre_t, 5.8 if corners.size() <= 2 else 10.0)
-	c.change_tyres(corners)
+	c.change_tyres(corners, compound)
 	c.grille_block = 0.0 # the crew pulls the debris off
 	var fuel_add: float = Car.FUEL_CAPACITY - c.fuel
 	var fuel_t: float = fuel_add / 7.5

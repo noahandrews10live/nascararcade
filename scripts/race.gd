@@ -32,6 +32,10 @@ var _tick_count := 0
 # Replay recording: per frame, for every car (and the pace car): dist, d, yaw, v, visible.
 const REC_HZ := 10.0
 const REC_MAX := 6000 # frames kept (10 minutes)
+const REC_STRIDE := 9 # dist, d, yaw, v, visible, roll, pitch, heave, flags
+## Moments worth a highlight: {t (recording clock), car (index), kind}.
+var highlights: Array = []
+var _leader_rec: Node3D
 var rec_times := PackedFloat32Array()
 var rec_data := PackedFloat32Array()
 var rec_clock := 0.0
@@ -42,6 +46,7 @@ var wear_scale := 1.0 # fuel burn / tyre wear multiplier so short races still ne
 
 ## `grid` (optional) is the starting order as team indices, e.g. from qualifying.
 var skids: MultiMeshInstance3D
+var weather: Node = null # weather.gd, when the race has time and weather running
 ## Debris on the track from wrecks: [{s, d, age}]. Running over it can cut a tyre
 ## or block the grille; a lot of it brings out the caution.
 var debris: Array = []
@@ -193,6 +198,8 @@ func tick(delta: float) -> void:
 	_record(delta)
 	_build_neighbors()
 	_update_detail()
+	if weather and running:
+		weather.tick(delta)
 	if control:
 		control.tick(delta)
 	_aero(delta)
@@ -224,14 +231,24 @@ func tick(delta: float) -> void:
 		if c.has_flat() and c.ai and not c.is_player and c.pit_state == 0 and control and control.enabled and not c.out:
 			c.want_pit = true
 			c.pit_plan = "4"
+		elif weather and c.ai and not c.is_player and c.pit_state == 0 and control and control.enabled and track.cfg.get("road", false):
+			var w: float = weather.average_wet()
+			if c.tyre_compound == "slick" and w > 0.35:
+				c.want_pit = true
+				c.pit_plan = "W"
+			elif c.tyre_compound == "wet" and w < 0.12:
+				c.want_pit = true
+				c.pit_plan = "4"
 		if c.pit_state == 3: # in the pit box
 			c.v = 0.0
 			c.vy = 0.0
 			c.r = 0.0
 		if c.out and not was_out:
 			incident.emit(c, "out")
+			highlights.append({"t": rec_clock, "car": ci, "kind": "OUT: %s" % c.out_reason})
 		elif c.spinning and not was_spin:
 			incident.emit(c, "spin")
+			highlights.append({"t": rec_clock, "car": ci, "kind": "FLIP" if c.tumbling else "SPIN"})
 	_collide()
 	if not debris.is_empty():
 		_debris_tick(delta)
@@ -253,6 +270,8 @@ func tick(delta: float) -> void:
 				c.last_lap = lt
 				if c.best_lap <= 0.0 or lt < c.best_lap:
 					c.best_lap = lt
+				if c.is_player:
+					c.end_lap_trace(lt)
 				lap_completed.emit(c, li, lt)
 				if li >= laps:
 					if finish_count == 0 and control:
@@ -283,10 +302,30 @@ func _record(delta: float) -> void:
 		rec_data.append(c.yaw)
 		rec_data.append(c.v)
 		rec_data.append(1.0 if c.visible else 0.0)
+		var roll: float = c.chassis_roll
+		var pitch: float = c.chassis_pitch
+		var z: float = c.chassis_z
+		if c.tumbling:
+			# Flips replay as big roll / pitch / height on the normal pose.
+			var tr: Transform3D = track.car_transform(c.s(), c.d, c.yaw)
+			var e: Vector3 = (tr.basis.inverse() * c.t_basis).get_euler()
+			pitch = e.x
+			roll = e.z
+			var su: Array = c._surface_under(c.t_pos, c.s())
+			z = (c.t_pos - (su[2] as Vector3)).dot(su[3]) - Car.CG_H
+		rec_data.append(roll)
+		rec_data.append(pitch)
+		rec_data.append(z)
+		rec_data.append(float(int(c.spinning) | (int(c.total_damage() > 0.3 or c.out) << 1) | (int(c.scraping) << 2)))
+	# Lead changes are highlights too.
+	if not order.is_empty() and order[0] != _leader_rec:
+		if _leader_rec != null and running:
+			highlights.append({"t": rec_clock, "car": cars.find(order[0]), "kind": "LEAD CHANGE"})
+		_leader_rec = order[0]
 	if rec_times.size() > REC_MAX + 600:
 		var drop := 600
 		rec_times = rec_times.slice(drop)
-		rec_data = rec_data.slice(drop * rec_cars.size() * 5)
+		rec_data = rec_data.slice(drop * rec_cars.size() * REC_STRIDE)
 
 
 ## Puts every car where it was at recording time t (interpolated).
@@ -312,20 +351,26 @@ func replay_apply(t: float) -> void:
 		else:
 			hi = mid
 	var f: float = (t - rec_times[lo]) / max(rec_times[hi] - rec_times[lo], 0.0001)
-	var stride := rec_cars.size() * 5
+	var stride := rec_cars.size() * REC_STRIDE
 	for k in rec_cars.size():
 		var c: Node3D = rec_cars[k]
-		var a := lo * stride + k * 5
-		var b := hi * stride + k * 5
+		var a := lo * stride + k * REC_STRIDE
+		var b := hi * stride + k * REC_STRIDE
+		c.tumbling = false
 		c.dist = lerp(rec_data[a], rec_data[b], f)
 		c.d = lerp(rec_data[a + 1], rec_data[b + 1], f)
 		c.yaw = lerp_angle(rec_data[a + 2], rec_data[b + 2], f)
 		c.v = lerp(rec_data[a + 3], rec_data[b + 3], f)
 		c.visible = rec_data[a + 4] > 0.5
+		c.chassis_roll = lerp_angle(rec_data[a + 5], rec_data[b + 5], f)
+		c.chassis_pitch = lerp_angle(rec_data[a + 6], rec_data[b + 6], f)
+		c.chassis_z = lerp(rec_data[a + 7], rec_data[b + 7], f)
+		var flags := int(rec_data[a + 8])
+		c.spinning = flags & 1
 		c.r = 0.0
-		c.slide = 0.0
+		c.slide = 1.0 if flags & 1 else 0.0
 		c.scrub = 0.0
-		c.scraping = false
+		c.scraping = (flags & 4) != 0
 		c.sync_visual(false)
 
 
@@ -881,6 +926,8 @@ func _contact(a: Node3D, b: Node3D, rel: Vector2) -> void:
 	b.bump = max(b.bump, hit)
 	if vn > 7.0:
 		spawn_debris(a.s() + cp.x, a.d + cp.y, 1 + int(vn > 14.0))
+		if highlights.is_empty() or rec_clock - float(highlights[-1].t) > 3.0:
+			highlights.append({"t": rec_clock, "car": cars.find(b), "kind": "CONTACT"})
 	# Big hits can climb one car over another: the struck car gets lifted and
 	# rolled (how cars get airborne in real wrecks).
 	if vn > 11.0:

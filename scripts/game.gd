@@ -450,6 +450,7 @@ var auto_quality := 2 if OS.has_feature("web") else 3
 var smoothing := true
 var vsync := true
 var motion_blur := 1 # 0 off, 1 low, 2 high (desktop Modern only)
+var radio_voice := true # spoken spotter and crew chief calls
 
 signal graphics_changed
 
@@ -464,12 +465,12 @@ const FIELDS := [20, 30, 40]
 const WEEKENDS := ["RACE ONLY", "QUALIFY + RACE", "PRACTICE + QUALIFY + RACE"]
 var settings := {
 	# Browsers get a 20-car field by default (GDScript runs slower there).
-	"length": 1, "difficulty": 1, "field": 0 if OS.has_feature("web") else 2, "cautions": 1, "damage": 1, "wear": 1,
+	"length": 1, "difficulty": 1, "field": 0 if OS.has_feature("web") else 2, "cautions": 1, "damage": 1, "wear": 1, "weather": 0,
 	"assists": 2, "manual": 0, "weekend": 1,
 }
 ## Garage setup (applied to the player's car): -3..3 balance (tight..loose),
 ## tyre pressure 0 low / 1 std / 2 high, gearing 0 short / 1 std / 2 long.
-var setup := {"balance": 0, "pressure": 1, "gearing": 1}
+var setup := {"balance": 0, "pressure": 1, "gearing": 1, "springs_f": 1, "springs_r": 1, "bar_f": 1, "bump": 1, "stagger": 1, "psi_l": 1, "psi_r": 1, "bias": 2}
 ## Season in progress (empty = none).
 var season := {}
 
@@ -513,6 +514,7 @@ func load_settings() -> void:
 		smoothing = cf.get_value("video", "smoothing", smoothing)
 		vsync = cf.get_value("video", "vsync", vsync)
 		motion_blur = cf.get_value("video", "motion_blur", motion_blur)
+		radio_voice = cf.get_value("audio", "radio_voice", radio_voice)
 		# Assists used to be OFF / ON; ON is now FULL (OFF / MILD / FULL).
 		if not cf.get_value("settings", "assists_v2", false) and int(settings.assists) == 1:
 			settings.assists = 2
@@ -541,6 +543,7 @@ func save_settings() -> void:
 	cf.set_value("video", "smoothing", smoothing)
 	cf.set_value("video", "vsync", vsync)
 	cf.set_value("video", "motion_blur", motion_blur)
+	cf.set_value("audio", "radio_voice", radio_voice)
 	cf.save(SETTINGS_PATH)
 
 
@@ -558,17 +561,63 @@ func apply_setup(c: Node3D) -> void:
 	var bal: float = setup.balance # + = looser
 	c.grip_front = 0.98 + bal * 0.012
 	c.grip_rear = 1.07 - bal * 0.014
-	# Real setup pieces: wedge (cross weight) and front bar stiffness.
+	# Real setup pieces: wedge (cross weight), springs, sway bar, bump stops,
+	# stagger, pressures per side, brake bias and gearing.
 	c.wedge = -bal * 250.0
-	c.k_arb_f = 35000.0 * (1.0 - 0.06 * bal)
-	match int(setup.pressure):
-		0:
-			c.mu *= 1.025
-			c.wear_mult = 1.3
-		2:
-			c.mu *= 0.98
-			c.wear_mult = 0.75
+	c.k_front = 90000.0 * [0.8, 1.0, 1.25][int(setup.springs_f)]
+	c.k_rear = 75000.0 * [0.8, 1.0, 1.25][int(setup.springs_r)]
+	c.k_arb_f = 35000.0 * [0.7, 1.0, 1.4][int(setup.bar_f)] * (1.0 - 0.06 * bal)
+	c.bump_gap = [0.045, 0.06, 0.075][int(setup.bump)]
+	c.stagger *= [0.7, 1.0, 1.3][int(setup.stagger)]
+	c.psi_l = [0.92, 1.0, 1.08][int(setup.psi_l)]
+	c.psi_r = [0.92, 1.0, 1.08][int(setup.psi_r)]
+	c.brake_bias = [0.54, 0.56, 0.58, 0.60, 0.62][int(setup.bias)]
 	c.gear_scale = [1.08, 1.0, 0.93][int(setup.gearing)]
+
+
+const SETUPS_DIR := "user://setups"
+
+
+## Saved setup sheets for a track: name -> setup dictionary.
+func setup_sheets(track_idx: int) -> Dictionary:
+	var cf := ConfigFile.new()
+	if cf.load(SETUPS_DIR + "/track_%d.cfg" % track_idx) != OK:
+		return {}
+	var out := {}
+	for k in cf.get_section_keys("setups") if cf.has_section("setups") else []:
+		out[k] = cf.get_value("setups", k)
+	return out
+
+
+func save_setup_sheet(track_idx: int, sheet_name: String) -> void:
+	DirAccess.make_dir_recursive_absolute(SETUPS_DIR)
+	var cf := ConfigFile.new()
+	cf.load(SETUPS_DIR + "/track_%d.cfg" % track_idx)
+	cf.set_value("setups", sheet_name, setup.duplicate())
+	cf.save(SETUPS_DIR + "/track_%d.cfg" % track_idx)
+
+
+func load_setup(d: Dictionary) -> void:
+	for k in setup:
+		if d.has(k):
+			setup[k] = int(d[k])
+	save_settings()
+
+
+## A setup as a short code you can paste to a friend ("ST1:..."), and back.
+func setup_code() -> String:
+	return "ST1:" + Marshalls.utf8_to_base64(JSON.stringify(setup))
+
+
+func setup_from_code(code: String) -> bool:
+	code = code.strip_edges()
+	if not code.begins_with("ST1:"):
+		return false
+	var parsed = JSON.parse_string(Marshalls.base64_to_utf8(code.substr(4)))
+	if not (parsed is Dictionary):
+		return false
+	load_setup(parsed)
+	return true
 
 
 # --- season ------------------------------------------------------------------------
@@ -932,6 +981,9 @@ func _setup_input() -> void:
 		"p2_right": [KEY_L, "p2btn:%d" % JOY_BUTTON_DPAD_RIGHT, "p2axis:%d+" % JOY_AXIS_LEFT_X],
 		"p2_pit": [KEY_U, "p2btn:%d" % JOY_BUTTON_X],
 		"toggle_scanlines": [KEY_F2],
+		"telemetry": [KEY_T, "btn:%d" % JOY_BUTTON_LEFT_STICK],
+		"highlights": [KEY_H, "btn:%d" % JOY_BUTTON_MISC1],
+		"photo": [KEY_F, "btn:%d" % JOY_BUTTON_TOUCHPAD],
 		"toggle_graphics": [KEY_F3],
 		"toggle_fullscreen": [KEY_F11],
 	}

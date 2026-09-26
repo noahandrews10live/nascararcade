@@ -31,10 +31,7 @@ const FUEL_CAPACITY := 75.0 # litres (20 US gal)
 const TW := 0.80 # half the track width
 const IX := 550.0 # roll inertia
 const IY := 2400.0 # pitch inertia
-const K_FRONT := 90000.0
-const K_REAR := 75000.0
 const C_DAMP := 5500.0
-const BUMP_GAP := 0.06 # travel to the bump stops (the car rides on them in the banking)
 const K_BUMP := 600000.0
 const ROLL_ARM := 0.40 # CG height above the roll centre
 const Y_CG := -0.035 # left-side weight (about 52%)
@@ -200,6 +197,13 @@ var locked_wheels := 0 # bitmask of wheels locked under braking
 var assist_level := 1.0 # 0 off, 0.5 mild, 1 full
 var far_away := false # set by the race: well away from any player (cheaper physics)
 var stagger := 0.01 # right rear bigger than left rear (fraction of circumference)
+# Setup (the garage): wheel rates, bump stop gap, brake bias, cold pressures per side
+var k_front := 90000.0
+var k_rear := 75000.0
+var bump_gap := 0.06 # travel to the bump stops (the car rides on them in the banking)
+var brake_bias := 0.58 # share of braking on the front
+var psi_l := 1.0 # cold pressure, left / right side (1 = standard)
+var psi_r := 1.0
 var k_arb_f := 35000.0
 var k_arb_r := 6000.0
 var wedge := 0.0 # cross weight, N (+ = more on LF/RR: tighter)
@@ -220,6 +224,8 @@ var tyre_temp := PackedFloat32Array([60, 60, 60, 60])
 var tyre_psi := PackedFloat32Array([0, 0, 0, 0])
 var tyre_wear4 := PackedFloat32Array([0, 0, 0, 0])
 var cold_psi := 1.0 # garage pressure setting (1 = standard)
+var tyre_compound := "slick" # or "wet" (road courses in the rain)
+var _wet := 0.0 # how wet the track is under the car
 # Tyre failures: air left in each tyre (1 = full), how fast it's leaking (per s),
 # and flat spots worn in by locking a wheel.
 var tyre_air := PackedFloat32Array([1, 1, 1, 1])
@@ -233,6 +239,15 @@ var _overheat_time := 0.0
 var dvp_clock := -1.0 # damaged vehicle policy: repair time left (s); -1 = not on the clock
 signal tyre_failed(car: Node3D, wheel: int, kind: String)
 var _wear_avg := 0.0
+# Telemetry: tread temperature spread per tyre (inside/outside), and this lap's
+# time and speed at 100 points round the lap (plus the best lap's, for a delta).
+var tread_bias := PackedFloat32Array([0, 0, 0, 0])
+var lap_clock := 0.0
+var lap_trace := PackedFloat32Array()
+var lap_speed := PackedFloat32Array()
+var best_trace := PackedFloat32Array()
+var best_speed := PackedFloat32Array()
+var _trace_bucket := -1
 var r_max_now := 1.0 # yaw rate the grip allows right now (for the AI)
 var _fy_f_prev := 0.0
 var _fy_r_prev := 0.0
@@ -306,10 +321,13 @@ func _update_tyres_before() -> void:
 		var dt: float = (t - 100.0) / 70.0
 		var temp_f: float = 1.0 - 0.12 * min(dt * dt, 1.0)
 		# Hot air raises the pressure; past its sweet spot the contact patch shrinks.
-		var psi: float = 22.0 * cold_psi * (t + 273.0) / (track.track_temp() + 273.0 if track else 303.0)
+		var side_psi: float = psi_l if i % 2 == 0 else psi_r
+		var psi: float = 22.0 * cold_psi * side_psi * (t + 273.0) / (track.track_temp() + 273.0 if track else 303.0)
 		tyre_psi[i] = psi
 		var over: float = max(psi / (22.0 * 1.2) - 1.0, 0.0)
 		_tyre_factor[i] = temp_f * (1.0 - 0.14 * clamp(tyre_wear4[i], 0.0, 1.5)) * (1.0 - 2.0 * over * over)
+		# Lower pressure: a bigger contact patch (more grip) that wears faster.
+		_tyre_factor[i] *= 1.0 + (1.0 - side_psi) * 0.3
 		# A tyre going down loses nearly everything; a flat spot costs a little.
 		_tyre_factor[i] *= (0.12 + 0.88 * tyre_air[i]) * (1.0 - 0.04 * flat_spot[i])
 
@@ -323,10 +341,13 @@ func _update_tyres_after(delta: float, travelled: float) -> void:
 		var p_roll: float = 0.004 * _nw[i] * abs(v)
 		var t: float = tyre_temp[i]
 		# Fronts run bigger slip angles for the same work, so less of it is heat.
-		t += (p_slip * (0.000125 if i < 2 else 0.00021) + p_roll * 0.00012 - (t - amb) * cool) * delta
+		# Wets cook themselves on a dry track; water cools any tyre.
+		var heat_mult: float = 1.0 + 2.0 * (1.0 - _wet) if tyre_compound == "wet" else 1.0
+		t += ((p_slip * (0.000125 if i < 2 else 0.00021) + p_roll * 0.00012) * heat_mult - (t - amb) * cool * (1.0 + 2.0 * _wet)) * delta
 		tyre_temp[i] = clamp(t, amb - 5.0, 260.0)
 		var hot: float = 1.0 + max(t - 115.0, 0.0) / 20.0
-		tyre_wear4[i] += (travelled / 1000.0 * 0.004 + _slip_power[i] * 2.2e-8 * hot) * burn_scale * wear_mult
+		var psi_wear: float = 1.0 + (1.0 - (psi_l if i % 2 == 0 else psi_r)) * 3.5
+		tyre_wear4[i] += (travelled / 1000.0 * 0.004 + _slip_power[i] * 2.2e-8 * hot) * burn_scale * wear_mult * psi_wear
 		_slip_power[i] = 0.0
 		total += tyre_wear4[i]
 		# Locking a wheel at speed grinds a flat spot into it.
@@ -341,6 +362,10 @@ func _update_tyres_after(delta: float, travelled: float) -> void:
 			tyre_air[i] = max(tyre_air[i] - tyre_leak[i] * delta, 0.0)
 	tyre_wear = total * 0.25
 	_wear_avg = tyre_wear
+	for i in 4:
+		var side: float = -1.0 if i % 2 == 0 else 1.0
+		tread_bias[i] = lerp(tread_bias[i], clamp(-_fy_prev[i] / max(_cap[i], 1.0), -1.0, 1.0) * side, 0.05)
+	_trace(delta)
 	# Bent sheet metal rubbing a front tyre can cut it; a caved-in nose blocks the
 	# grille.
 	for i in 2:
@@ -350,6 +375,33 @@ func _update_tyres_after(delta: float, travelled: float) -> void:
 	grille_block = max(grille_block, clamp((damage.front - 0.3) * 0.7, 0.0, 0.45))
 	flat_time = flat_time + delta if has_flat() else 0.0
 	_update_engine(delta)
+
+
+func _trace(delta: float) -> void:
+	if lap_trace.is_empty():
+		lap_trace.resize(100)
+		lap_speed.resize(100)
+	lap_clock += delta
+	var b := int(s() / track.length * 100.0) % 100
+	if b != _trace_bucket:
+		_trace_bucket = b
+		lap_trace[b] = lap_clock
+		lap_speed[b] = abs(v)
+
+
+## Called by the race at the line: keep the trace of a new best lap.
+func end_lap_trace(lap_time: float) -> void:
+	if best_trace.is_empty() or (lap_time > 0.0 and lap_time <= best_lap + 0.001):
+		best_trace = lap_trace.duplicate()
+		best_speed = lap_speed.duplicate()
+	lap_clock = 0.0
+
+
+## Seconds up (-) or down (+) on the best lap at this point of the lap.
+func lap_delta() -> float:
+	if best_trace.is_empty() or _trace_bucket < 0:
+		return 0.0
+	return lap_clock - best_trace[_trace_bucket]
 
 
 ## A tyre starts losing air: "blowout" (gone in half a second) or "cut" (a slow
@@ -363,8 +415,10 @@ func fail_tyre(i: int, kind: String) -> void:
 
 ## New tyres on the given corners (0 FL, 1 FR, 2 RL, 3 RR): no wear, full air, no
 ## flat spots, and cold.
-func change_tyres(corners: Array) -> void:
+func change_tyres(corners: Array, compound := "") -> void:
 	var amb: float = track.track_temp() if track else 30.0
+	if compound != "":
+		tyre_compound = compound
 	for i in corners:
 		tyre_wear4[i] = 0.0
 		tyre_air[i] = 1.0
@@ -535,6 +589,11 @@ func step(delta: float) -> void:
 	_update_static_loads()
 	_update_tyres_before()
 	_track_grip = track.grip_at(ss, d)
+	_wet = track.wet_at(d)
+	if tyre_compound == "wet":
+		_track_grip *= 0.9 - 0.08 * (1.0 - _wet) # grooved: fine in the wet, soft in the dry
+	else:
+		_track_grip *= 1.0 - 0.42 * _wet # slicks aquaplane
 	# Your car integrates at 240 Hz, cars around you at 120 Hz, distant ones at 60 Hz.
 	var steps: int = 4 if is_player else (1 if far_away and slide < 0.2 and bump < 1.0 else 2)
 	var h := delta / steps
@@ -630,9 +689,9 @@ func _integrate(h: float) -> void:
 	for i in 4:
 		var defl: float = -(chassis_z + WX[i] * chassis_pitch + WY[i] * chassis_roll) + _road[i]
 		var rate: float = -(chassis_vz + WX[i] * pitch_rate + WY[i] * roll_rate) + _road_rate[i]
-		var f: float = _f_static[i] + (K_FRONT if i < 2 else K_REAR) * defl + C_DAMP * rate
-		if defl > BUMP_GAP:
-			f += K_BUMP * (defl - BUMP_GAP)
+		var f: float = _f_static[i] + (k_front if i < 2 else k_rear) * defl + C_DAMP * rate
+		if defl > bump_gap:
+			f += K_BUMP * (defl - bump_gap)
 		_defl[i] = defl
 		_nw[i] = f
 	var arb_f: float = k_arb_f * (_defl[0] - _defl[1])
@@ -690,10 +749,10 @@ func _integrate(h: float) -> void:
 	# (both rears turn together; stagger lets the bigger right rear roll round the
 	# turn, otherwise the spool pushes the car wide)
 	var fx := _fx
-	fx[0] = -fx_brake * 0.29
-	fx[1] = -fx_brake * 0.29
-	fx[2] = fx_drive * 0.5 - fx_brake * 0.21
-	fx[3] = fx_drive * 0.5 - fx_brake * 0.21
+	fx[0] = -fx_brake * brake_bias * 0.5
+	fx[1] = -fx_brake * brake_bias * 0.5
+	fx[2] = fx_drive * 0.5 - fx_brake * (1.0 - brake_bias) * 0.5
+	fx[3] = fx_drive * 0.5 - fx_brake * (1.0 - brake_bias) * 0.5
 	# A flat tyre drags (rim and rubber on the ground), pulling the car that way.
 	for i in 4:
 		if tyre_air[i] < 0.9:
@@ -1173,7 +1232,8 @@ func _update_visual(delta: float) -> void:
 			_haze_s = hs
 			_haze.set_instance_shader_parameter("strength", hs)
 	if tyre_smoke:
-		_set_emitting(tyre_smoke, (slide > 0.4 or scrub > 0.6 or (spinning and speed() > 6.0)) and speed() > 6.0)
+		# Tyre smoke when sliding, spray off the tyres on a wet track.
+		_set_emitting(tyre_smoke, ((slide > 0.4 or scrub > 0.6 or (spinning and speed() > 6.0)) and speed() > 6.0) or (_wet > 0.25 and speed() > 25.0))
 	if smoke:
 		_set_emitting(smoke, total_damage() > 0.3 or out)
 

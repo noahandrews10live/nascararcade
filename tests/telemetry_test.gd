@@ -72,7 +72,7 @@ func _run() -> void:
 				outside_share += right / max(left + right, 1.0)
 				corner_samples += 1
 			for i in 4:
-				if c._defl[i] > c.BUMP_GAP:
+				if c._defl[i] > c.bump_gap:
 					bump_frames += 1
 					break
 		var share: float = outside_share / max(corner_samples, 1)

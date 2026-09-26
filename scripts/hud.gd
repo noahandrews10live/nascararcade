@@ -229,6 +229,9 @@ func _draw() -> void:
 	var dm := Rect2(Vector2(W - 162, H - 12), Vector2(150, 6))
 	draw_rect(dm, Color(0, 0, 0, 0.6))
 	draw_rect(Rect2(dm.position, Vector2(dm.size.x * p.draft, dm.size.y)), Color(0.3, 1.0, 1.0))
+	# Time of day, track temperature and the weather.
+	if race.weather and control:
+		draw_string(Game.arcade_font, Vector2(W * 0.5 - 120, 44), race.weather.summary(), HORIZONTAL_ALIGNMENT_CENTER, 240, 10, Color(0.85, 0.9, 1.0))
 	# Car condition: damage by corner, tyres and fuel.
 	var cc := Vector2(160, H - 104)
 	var dmg: Dictionary = p.damage

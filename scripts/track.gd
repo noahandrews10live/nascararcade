@@ -335,9 +335,20 @@ func turns_both_ways() -> bool:
 	return lo < -0.004 and hi > 0.004
 
 
-## Track temperature (C): hot in the day, cooler under the lights.
+## Weather for the current race (weather.gd), or null.
+var weather: Node = null
+
+
+## Track temperature (C): follows the sun (and rain) when there's weather running;
+## otherwise hot in the day, cooler under the lights.
 func track_temp() -> float:
+	if weather:
+		return weather.track_temp()
 	return 24.0 if cfg.get("night", false) else 38.0
+
+
+func wet_at(d: float) -> float:
+	return weather.wet_at(d) if weather else 0.0
 
 
 ## Grip of the racing surface across the track: the rubbered-in groove is fastest,
