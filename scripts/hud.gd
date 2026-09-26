@@ -3,6 +3,7 @@ extends Control
 
 var race: Node3D
 var track: Node3D
+var control: Node = null # race_control.gd in Single Race mode
 var time_left := 0.0
 var show_timer := true
 
@@ -22,6 +23,9 @@ var l_msg: Label
 var l_sub: Label
 var l_board: Label
 
+var l_spot: Label
+var l_flag: Label
+var spot_time := 0.0
 var msg_time := 0.0
 var msg_scale_t := 0.0
 var sub_time := 0.0
@@ -51,6 +55,16 @@ func _ready() -> void:
 	l_msg.position = Vector2(0, 150)
 	l_msg.pivot_offset = Vector2(320, 40)
 	add_child(l_msg)
+	l_spot = Game.make_label("", 20, Color(1.0, 0.95, 0.5), 6)
+	l_spot.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	l_spot.size = Vector2(640, 30)
+	l_spot.position = Vector2(0, 392)
+	add_child(l_spot)
+	l_flag = Game.make_label("", 18, Color.BLACK, 0)
+	l_flag.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	l_flag.size = Vector2(240, 24)
+	l_flag.position = Vector2(200, 4)
+	add_child(l_flag)
 	l_sub = Game.make_label("", 22, Color.WHITE, 6)
 	l_sub.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	l_sub.size = Vector2(640, 30)
@@ -91,6 +105,11 @@ func sub_message(text: String, seconds := 2.0) -> void:
 	sub_time = seconds
 
 
+func spotter(text: String) -> void:
+	l_spot.text = "SPOTTER:  " + text
+	spot_time = 1.8
+
+
 func clear_messages() -> void:
 	msg_time = 0.0
 	sub_time = 0.0
@@ -113,9 +132,31 @@ func _process(delta: float) -> void:
 		l_sub.visible = int(blink * 4.0) % 2 == 0 or sub_time > 1.0
 	else:
 		l_sub.visible = false
+	if spot_time > 0.0:
+		spot_time -= delta
+		l_spot.visible = true
+	else:
+		l_spot.visible = false
 	if race == null or race.player == null:
 		return
 	var p: Node3D = race.player
+	# Flag / race-control strip (Single Race mode)
+	l_flag.visible = control != null
+	if control:
+		var names := ["GREEN", "CAUTION", "WHITE FLAG", "CHECKERED"]
+		var txt: String = names[control.flag]
+		if control.flag == control.Flag.YELLOW:
+			if control.one_to_go:
+				txt = "ONE TO GO"
+			elif control.pit_open:
+				txt = "CAUTION - PITS OPEN"
+		elif control.flag == control.Flag.GREEN and control.stage <= control.stage_ends.size():
+			txt = "STAGE %d  ENDS LAP %d" % [control.stage, control.stage_ends[control.stage - 1]]
+		elif control.flag == control.Flag.GREEN:
+			txt = "FINAL STAGE"
+		if p.want_pit and p.pit_state == 0:
+			txt += "   PIT: " + {"4": "4T", "2": "2T", "F": "FUEL"}[p.pit_plan]
+		l_flag.text = txt
 	l_time.text = "%d" % ceil(max(time_left, 0.0))
 	var low := time_left < 10.0
 	l_time.label_settings.font_color = Color(1, 0.2, 0.15) if low else Color(1, 0.9, 0.2)
@@ -133,9 +174,22 @@ func _process(delta: float) -> void:
 	l_draft.visible = p.draft > 0.35 and int(blink * 6.0) % 2 == 0
 	# mini leaderboard of the top 5
 	var lines := PackedStringArray()
+	var show: Array[int] = []
 	for i in min(5, race.order.size()):
+		show.append(i)
+	var ppos: int = race.position_of(p) - 1
+	if control and ppos > 4:
+		show = [0, 1, 2]
+		for i in range(ppos - 1, min(ppos + 2, race.order.size())):
+			show.append(i)
+	for i in show:
 		var c: Node3D = race.order[i]
-		lines.append("%d  #%-3s %s" % [i + 1, c.team.num, "YOU" if c.is_player else c.team.driver.get_slice(" ", 1)])
+		var tag := ""
+		if control and c.pit_state != 0:
+			tag = " PIT"
+		elif control and c.out:
+			tag = " OUT"
+		lines.append("%d  #%-3s %s%s" % [i + 1, c.team.num, "YOU" if c.is_player else c.team.driver.get_slice(" ", 1), tag])
 	l_board.text = "\n".join(lines)
 	queue_redraw()
 
@@ -144,6 +198,14 @@ func _draw() -> void:
 	if race == null or race.player == null or track == null:
 		return
 	var p: Node3D = race.player
+	if control:
+		var fc: Color = [Color(0.1, 0.8, 0.2), Color(1.0, 0.85, 0.05), Color(0.95, 0.95, 0.95), Color(0.9, 0.9, 0.9)][control.flag]
+		draw_rect(Rect2(200, 4, 240, 24), fc)
+		if control.flag == control.Flag.CHECKERED:
+			for i in 24:
+				for j in 2:
+					if (i + j) % 2 == 0:
+						draw_rect(Rect2(200 + i * 10, 4 + j * 12, 10, 12), Color(0.05, 0.05, 0.05))
 	# Tachometer arc (LED segments)
 	var center := Vector2(575, 425)
 	var radius := 58.0

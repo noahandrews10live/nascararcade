@@ -8,7 +8,7 @@ const Car := preload("res://scripts/car.gd")
 const Hud := preload("res://scripts/hud.gd")
 const Synth := preload("res://scripts/audio.gd")
 
-enum State { TITLE, TRACK_SELECT, CAR_SELECT, COUNTDOWN, RACE, FINISHED, RESULTS }
+enum State { TITLE, MODE_SELECT, TRACK_SELECT, CAR_SELECT, COUNTDOWN, RACE, FINISHED, RESULTS }
 
 const PACE_SPEED := 32.0
 const SELECT_TIME := 20.0
@@ -58,6 +58,14 @@ var rng := RandomNumberGenerator.new()
 
 ## Set by automated tests: drive the player car with the AI.
 var autopilot := false
+
+## "arcade" = the 1999 cabinet game (clock, 16 cars). "race" = full NASCAR rules.
+var mode := "arcade"
+const MODES := [
+	["ARCADE", "BEAT THE CLOCK. 16 CARS, SHORT RACES, NO CAUTIONS."],
+	["SINGLE RACE", "40 CARS, CAUTIONS, PIT STOPS, STAGES AND POINTS."],
+]
+var mode_idx := 0
 
 
 func _ready() -> void:
@@ -267,8 +275,15 @@ func _new_race(player_team: int) -> void:
 	race = Race.new()
 	race.name = "Race"
 	add_child(race)
-	race.setup(track, player_team, int(track.cfg.laps), 16 if player_team >= 0 else 24)
-	race.arcade = true
+	var sim := mode == "race" and player_team >= 0
+	if sim:
+		race.setup(track, player_team, int(track.cfg.race_laps), Game.FIELD_SIZE)
+		race.enable_rules()
+		race.control.message.connect(_on_control_message)
+		race.control.flag_changed.connect(_on_flag)
+	else:
+		race.setup(track, player_team, int(track.cfg.laps), 16 if player_team >= 0 else 24)
+		race.arcade = true
 	race.lap_completed.connect(_on_lap)
 	race.car_finished.connect(_on_finished)
 
@@ -347,6 +362,26 @@ func _enter_title() -> void:
 	_label("", "(C)1999  THUNDER ARCADE WORKS", 11, Color(0.8, 0.8, 0.8), Vector2(0, 462), HORIZONTAL_ALIGNMENT_CENTER, 3)
 
 
+func _enter_mode_select() -> void:
+	_set_state(State.MODE_SELECT)
+	synth.beep(1320.0, 0.08)
+	_clear_screen()
+	_label("", "SELECT MODE", 34, Color(1.0, 0.85, 0.1), Vector2(0, 30), HORIZONTAL_ALIGNMENT_CENTER, 8)
+	_panel(Rect2(80, 120, 480, 260), Color(0, 0, 0, 0.6))
+	for i in MODES.size():
+		_label("mode%d" % i, MODES[i][0], 30, Color.WHITE, Vector2(0, 140 + i * 70), HORIZONTAL_ALIGNMENT_CENTER, 7)
+		_label("mdesc%d" % i, MODES[i][1], 12, Color(0.7, 0.8, 0.9), Vector2(0, 178 + i * 70), HORIZONTAL_ALIGNMENT_CENTER, 3)
+	_label("", "UP / DOWN   CHOOSE        START  SELECT", 14, Color(0.85, 0.85, 0.85), Vector2(0, 420))
+	_refresh_mode_select()
+
+
+func _refresh_mode_select() -> void:
+	for i in MODES.size():
+		var l: Label = menu_labels["mode%d" % i]
+		l.label_settings.font_color = Color(1.0, 0.85, 0.1) if i == mode_idx else Color(0.6, 0.6, 0.65)
+		l.text = ("> %s <" % MODES[i][0]) if i == mode_idx else MODES[i][0]
+
+
 func _enter_track_select() -> void:
 	_set_state(State.TRACK_SELECT)
 	sel_timer = SELECT_TIME
@@ -370,7 +405,8 @@ func _refresh_track_select() -> void:
 	menu_labels.name.text = cfg.name
 	menu_labels.kind.text = cfg.kind
 	var miles: float = track.length / 1609.34
-	menu_labels.info.text = "%.2f MILES     %d LAPS     BANKING %d DEG" % [miles, cfg.laps, cfg.bank_turn]
+	var lap_count: int = cfg.race_laps if mode == "race" else cfg.laps
+	menu_labels.info.text = "%.2f MILES     %d LAPS     BANKING %d DEG" % [miles, lap_count, cfg.bank_turn]
 	menu_labels.rec.text = "BEST LAP %s      BEST RACE %s" % [Game.format_time(Game.get_record(Game.selected_track, "lap")), Game.format_time(Game.get_record(Game.selected_track, "race"))]
 
 
@@ -429,7 +465,8 @@ func _enter_countdown() -> void:
 	hud.race = race
 	hud.track = track
 	hud.time_left = time_left
-	hud.show_timer = true
+	hud.show_timer = mode == "arcade"
+	hud.control = race.control
 	hud.visible = true
 	hud.clear_messages()
 	hud.message("GET READY!", 2.0, Color(1, 0.9, 0.2))
@@ -450,7 +487,19 @@ func _enter_results() -> void:
 	_label("", track.cfg.name, 14, Color(0.5, 0.9, 1.0), Vector2(0, 58), HORIZONTAL_ALIGNMENT_CENTER, 4)
 	var y := 84
 	var leader_time := 0.0
+	var sim := race.control != null
+	var rows: Array[int] = []
 	for i in race.order.size():
+		if rows.size() < 13 or race.order[i].is_player:
+			rows.append(i)
+	rows = rows.slice(0, 14)
+	var row_h := 24
+	if sim:
+		_label("", "POS  CAR  DRIVER                         LED  STG  PTS", 11, Color(0.6, 0.7, 0.8), Vector2(60, 72), HORIZONTAL_ALIGNMENT_LEFT, 3)
+		y = 86
+	for i in race.order.size():
+		if i not in rows:
+			continue
 		var c: Node3D = race.order[i]
 		var col := Color(1, 0.9, 0.2) if c.is_player else Color.WHITE
 		var gap := ""
@@ -465,8 +514,18 @@ func _enter_results() -> void:
 		_label("", "%2d" % (i + 1), 16, col, Vector2(60, y), HORIZONTAL_ALIGNMENT_LEFT, 4)
 		_label("", "#" + c.team.num, 16, c.team.c1.lightened(0.3), Vector2(100, y), HORIZONTAL_ALIGNMENT_LEFT, 4)
 		_label("", ("%s  (YOU)" % c.team.driver) if c.is_player else c.team.driver, 16, col, Vector2(160, y), HORIZONTAL_ALIGNMENT_LEFT, 4)
-		_label("", gap, 16, col, Vector2(430, y), HORIZONTAL_ALIGNMENT_LEFT, 4)
-		y += 25
+		if sim:
+			if c.out:
+				gap = "OUT"
+			elif c.finished and i > 0 and c.lap() < race.order[0].lap():
+				gap = "-%d LAP" % (race.order[0].lap() - c.lap())
+			_label("", "%d" % c.laps_led, 14, col, Vector2(380, y + 2), HORIZONTAL_ALIGNMENT_LEFT, 3)
+			_label("", "%d" % c.stage_points, 14, col, Vector2(420, y + 2), HORIZONTAL_ALIGNMENT_LEFT, 3)
+			_label("", "%d" % race.control.finishing_points(i + 1, c), 16, Color(1, 0.85, 0.3), Vector2(460, y), HORIZONTAL_ALIGNMENT_LEFT, 4)
+			_label("", gap if gap == "OUT" or gap.ends_with("LAP") else "", 12, col, Vector2(510, y + 3), HORIZONTAL_ALIGNMENT_LEFT, 3)
+		else:
+			_label("", gap, 16, col, Vector2(430, y), HORIZONTAL_ALIGNMENT_LEFT, 4)
+		y += row_h
 	var y2 := y + 4
 	if game_over_reason != "":
 		_label("", game_over_reason, 18, Color(1, 0.3, 0.2), Vector2(0, y2), HORIZONTAL_ALIGNMENT_CENTER, 5)
@@ -485,6 +544,8 @@ func _on_lap(car: Node3D, laps_done: int, lap_time: float) -> void:
 	if Game.submit_record(Game.selected_track, "lap", lap_time):
 		if not new_records.has("NEW LAP RECORD!"):
 			new_records.append("NEW LAP RECORD!")
+	if mode != "arcade":
+		return
 	if laps_done < race.laps:
 		time_left += lap_bonus
 		synth.beep(1568.0, 0.1)
@@ -532,7 +593,17 @@ func _unhandled_input(event: InputEvent) -> void:
 	match state:
 		State.TITLE:
 			if event.is_action_pressed("start"):
+				_enter_mode_select()
+		State.MODE_SELECT:
+			if event.is_action_pressed("menu_up") or event.is_action_pressed("menu_down"):
+				mode_idx = posmod(mode_idx + (1 if event.is_action_pressed("menu_down") else -1), MODES.size())
+				synth.beep(880.0, 0.05)
+				_refresh_mode_select()
+			elif event.is_action_pressed("start"):
+				mode = ["arcade", "race"][mode_idx]
 				_enter_track_select()
+			elif event.is_action_pressed("back"):
+				_enter_title()
 		State.TRACK_SELECT:
 			if event.is_action_pressed("steer_left") or event.is_action_pressed("steer_right"):
 				var dir := -1 if event.is_action_pressed("steer_left") else 1
@@ -568,7 +639,7 @@ func _physics_process(delta: float) -> void:
 		return
 	state_time += delta
 	match state:
-		State.TITLE, State.TRACK_SELECT, State.CAR_SELECT:
+		State.TITLE, State.MODE_SELECT, State.TRACK_SELECT, State.CAR_SELECT:
 			_loop_attract()
 			race.tick(delta)
 		State.COUNTDOWN:
@@ -577,6 +648,8 @@ func _physics_process(delta: float) -> void:
 		State.RACE:
 			_player_input()
 			race.tick(delta)
+			if mode != "arcade":
+				return
 			time_left -= delta
 			hud.time_left = time_left
 			if time_left <= 0.0:
@@ -634,7 +707,27 @@ func _player_input() -> void:
 	var p: Node3D = race.player
 	if autopilot:
 		p.ai = true
+		p.autopilot_forced = true
 		return
+	var ctl: Node = race.control
+	if ctl:
+		if Input.is_action_just_pressed("pit"):
+			p.want_pit = not p.want_pit
+			hud.sub_message("PIT THIS LAP: %s" % _plan_name(p.pit_plan) if p.want_pit else "PIT CANCELLED", 2.0)
+		if Input.is_action_just_pressed("pit_option"):
+			p.pit_plan = {"4": "2", "2": "F", "F": "4"}[p.pit_plan]
+			hud.sub_message("PIT PLAN: %s" % _plan_name(p.pit_plan), 2.0)
+		if ctl.choosing and Input.is_action_just_pressed("steer_left"):
+			ctl.player_lane_choice = 0
+			hud.sub_message("RESTART: INSIDE LANE", 2.0)
+		elif ctl.choosing and Input.is_action_just_pressed("steer_right"):
+			ctl.player_lane_choice = 1
+			hud.sub_message("RESTART: OUTSIDE LANE", 2.0)
+		# The car drives itself under caution and on pit road (auto pit / auto caution).
+		var auto: bool = ctl.flag == ctl.Flag.YELLOW or p.pit_state != 0 or (p.want_pit and _near_pit_entry(p))
+		p.ai = auto
+		if auto:
+			return
 	p.throttle = Input.get_action_strength("accelerate")
 	p.brake = Input.get_action_strength("brake")
 	p.steer_in = Input.get_action_strength("steer_right") - Input.get_action_strength("steer_left")
@@ -642,6 +735,41 @@ func _player_input() -> void:
 		p.shift_request = 1
 	elif Input.is_action_just_pressed("shift_down"):
 		p.shift_request = -1
+
+
+func _plan_name(plan: String) -> String:
+	return {"4": "4 TIRES + FUEL", "2": "2 TIRES + FUEL", "F": "FUEL ONLY"}[plan]
+
+
+func _near_pit_entry(p: Node3D) -> bool:
+	var to_entry: float = fposmod(track.pit_in_s() - p.s(), track.length)
+	return to_entry < 500.0
+
+
+func _on_control_message(text: String, kind: String) -> void:
+	match kind:
+		"flag":
+			hud.message(text, 2.5, Color(1, 0.9, 0.2) if text.begins_with("CAUTION") or text == "ONE TO GO" else (Color(0.3, 1.0, 0.3) if text.begins_with("GREEN") else Color.WHITE))
+			if text == "ONE TO GO":
+				hud.sub_message("CHOOSE YOUR LANE:  LEFT = INSIDE   RIGHT = OUTSIDE", 6.0)
+		"stage":
+			hud.message(text, 3.0, Color(0.4, 0.9, 1.0))
+		"pit":
+			hud.sub_message(text, 3.0)
+		"spotter":
+			hud.spotter(text)
+		_:
+			hud.sub_message(text, 3.0)
+
+
+func _on_flag(flag: String) -> void:
+	match flag:
+		"YELLOW":
+			synth.beep(440.0, 0.4)
+		"GREEN":
+			synth.beep(1320.0, 0.5)
+		"WHITE":
+			synth.beep(990.0, 0.3)
 
 
 func _process(delta: float) -> void:

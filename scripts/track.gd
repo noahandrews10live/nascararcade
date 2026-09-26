@@ -6,6 +6,7 @@ extends Node3D
 const STEP := 3.0 # metres between centre line samples
 const G := 9.81
 const CAR_MASS := 1600.0
+const PIT_LANE_EXT := 170.0 # entry / exit lanes beyond the pit road itself
 
 var cfg: Dictionary
 var length := 0.0
@@ -181,6 +182,40 @@ func outer_edge() -> float:
 
 func apron_edge() -> float:
 	return -width * 0.5 - apron
+
+
+## Pit road runs along the inside of the front stretch, between the apron and the
+## inner wall. Entry (commitment line) is at the end of turn 4, exit at turn 1.
+func front_length() -> float:
+	return float(cfg.get("front_mid", 0.0)) + 2.0 * float(cfg.get("front_side", 0.0)) + 2.0 * float(cfg.get("dog_r", 0.0)) * deg_to_rad(float(cfg.get("dog_phi", 0.0)))
+
+
+func pit_half() -> float:
+	return max(front_length() * 0.5 - 15.0, 60.0)
+
+
+func pit_in_s() -> float:
+	return length - pit_half()
+
+
+func pit_out_s() -> float:
+	return pit_half()
+
+
+func pit_lane_d() -> float:
+	return apron_edge() - infield * 0.5
+
+
+## Is track position s along the pit road (between entry and exit, across the line)?
+func in_pit_zone(s_pos: float) -> bool:
+	var ss := fposmod(s_pos, length)
+	return ss >= pit_in_s() or ss <= pit_out_s()
+
+
+## Pit road plus its entry and exit lanes (paved, off the racing surface).
+func in_pit_roadway(s_pos: float) -> bool:
+	var ss := fposmod(s_pos, length)
+	return ss >= pit_in_s() - PIT_LANE_EXT or ss <= pit_out_s() + PIT_LANE_EXT
 
 
 func inner_wall() -> float:
@@ -372,8 +407,19 @@ func _build_mesh() -> void:
 		var ru1 := _road_up(i2, bank[i2])
 		var au0 := _road_up(i, apron_tilt)
 		var au1 := _road_up(i2, apron_tilt)
-		# infield grass strip + inner wall
-		_quad("grass", _pt(i, iw), _pt(i, ae), _pt(i2, iw), _pt(i2, ae), grass * (1.0 if stripe else 0.93), up, up)
+		# infield grass strip (or pit road along the front stretch) + inner wall
+		var seg_s := i * (length / n)
+		if in_pit_roadway(seg_s) and in_pit_roadway(seg_s + length / n):
+			var pl := pit_lane_d()
+			var pw := infield * 0.4
+			_quad("grass", _pt(i, iw), _pt(i, pl - pw), _pt(i2, iw), _pt(i2, pl - pw), grass * 0.9, up, up)
+			_quad("asphalt", _pt(i, pl - pw), _pt(i, ae), _pt(i2, pl - pw), _pt(i2, ae), Color(0.36, 0.36, 0.38) * shade, up, up)
+			_quad("line", _pt(i, pl + pw * 0.55) + up * 0.02, _pt(i, pl + pw * 0.62) + up * 0.02, _pt(i2, pl + pw * 0.55) + up * 0.02, _pt(i2, pl + pw * 0.62) + up * 0.02, Color(0.95, 0.95, 0.95), up, up)
+			if i % 4 == 0:
+				# pit box lines
+				_quad("line", _pt(i, pl - pw) + up * 0.02, _pt(i, pl) + up * 0.02, _pt(i, pl - pw) + fwd[i] * 0.2 + up * 0.02, _pt(i, pl) + fwd[i] * 0.2 + up * 0.02, Color(1.0, 0.85, 0.1), up, up)
+		else:
+			_quad("grass", _pt(i, iw), _pt(i, ae), _pt(i2, iw), _pt(i2, ae), grass * (1.0 if stripe else 0.93), up, up)
 		_quad("concrete", _pt(i, iw) + up * 0.9, _pt(i, iw), _pt(i2, iw) + up * 0.9, _pt(i2, iw), Color(0.85, 0.85, 0.85))
 		# apron
 		_quad("asphalt", _pt(i, ae), _pt(i, -hw - 0.7), _pt(i2, ae), _pt(i2, -hw - 0.7), Color(0.42, 0.42, 0.44) * shade, au0, au1)

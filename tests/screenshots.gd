@@ -34,11 +34,28 @@ func _run() -> void:
 	main._enter_car_select()
 	await _frames(20)
 	await _shot("03_car_select")
+	if OS.get_environment("MODE") == "race":
+		main.mode = "race"
+		root.get_node("Game").tracks[int(only if only != "" else "1")].race_laps = 20
 	for idx in root.get_node("Game").tracks.size():
 		if only != "" and int(only) != idx:
 			continue
 		main._use_track(idx)
 		main._enter_countdown()
+		if main.mode == "race":
+			main.autopilot = true
+			await _frames(700)
+			await _shot("r%d_a_green" % idx)
+			main.race.control.throw_caution("DEBRIS (TEST)", null)
+			await _frames(240)
+			await _shot("r%d_b_caution" % idx)
+			main.cam_mode = 1
+			await _frames(1500)
+			await _shot("r%d_c_caution_later" % idx)
+			await _frames(1500)
+			await _shot("r%d_d_later" % idx)
+			quit(0)
+			return
 		main.autopilot = true
 		await _frames(100)
 		await _shot("t%d_a_countdown" % idx)

@@ -22,6 +22,8 @@ var lanes: Array[float] = []
 var arcade := false # rubber-banding for the arcade mode only
 var field_size := 40
 var debug_no_lane_changes := false
+var control: Node = null # race_control.gd when the full rules are on
+var wear_scale := 1.0 # fuel burn / tyre wear multiplier so short races still need pit strategy
 
 
 func setup(trk: Node3D, player_team: int, lap_count: int, size := 40) -> void:
@@ -69,6 +71,43 @@ func setup(trk: Node3D, player_team: int, lap_count: int, size := 40) -> void:
 	order = cars.duplicate()
 
 
+## Turns on cautions, pit stops, stages and points.
+func enable_rules() -> void:
+	control = load("res://scripts/race_control.gd").new()
+	control.name = "RaceControl"
+	add_child(control)
+	control.setup(self)
+	# Short races get proportionally thirstier cars and faster tyre wear so pit
+	# strategy still matters (a tank should last ~40% of the race).
+	var race_km: float = laps * track.length / 1000.0
+	wear_scale = clamp(150.0 / max(race_km * 0.4, 1.0), 1.0, 8.0)
+	for c in cars:
+		c.burn_scale = wear_scale
+
+
+func give_lap(c: Node3D) -> void:
+	c.dist += track.length
+	c.lap_idx += 1
+
+
+func tow(c: Node3D) -> void:
+	c.towed = true
+	c.visible = false
+
+
+## Final-lap caution: the running order stands as the finish.
+func freeze_finish() -> void:
+	for c in order:
+		if not c.finished:
+			finish_count += 1
+			c.finished = true
+			c.finish_time = time
+			c.finish_order = finish_count
+			if c.is_player:
+				c.ai = true
+			car_finished.emit(c, finish_count)
+
+
 ## Places the field in a two-wide rolling start with the leader at `leader_dist`.
 func grid_up(leader_dist: float, pace_speed: float) -> void:
 	for c in cars:
@@ -95,8 +134,12 @@ func go_green() -> void:
 
 func tick(delta: float) -> void:
 	time += delta if running else 0.0
+	if control:
+		control.tick(delta)
 	_aero(delta)
 	for c in cars:
+		if c.towed:
+			continue
 		if c.ai and running:
 			_drive_ai(c, delta)
 		if arcade and player and c != player and running and not player.finished:
@@ -111,6 +154,10 @@ func tick(delta: float) -> void:
 		var was_out: bool = c.out
 		var was_spin: bool = c.spinning
 		c.step(delta)
+		if c.pit_state == 3: # in the pit box
+			c.v = 0.0
+			c.vy = 0.0
+			c.r = 0.0
 		if c.out and not was_out:
 			incident.emit(c, "out")
 		elif c.spinning and not was_spin:
@@ -124,6 +171,10 @@ func tick(delta: float) -> void:
 			if li == 0:
 				c.lap_start_time = time
 			elif li >= 1 and not c.finished:
+				if c == order[0]:
+					c.laps_led += 1
+					if control:
+						control.on_leader_lap(li)
 				var lt: float = time - c.lap_start_time
 				c.lap_start_time = time
 				c.last_lap = lt
@@ -131,6 +182,8 @@ func tick(delta: float) -> void:
 					c.best_lap = lt
 				lap_completed.emit(c, li, lt)
 				if li >= laps:
+					if finish_count == 0 and control:
+						control.checkered()
 					finish_count += 1
 					c.finished = true
 					c.finish_time = time
@@ -154,6 +207,8 @@ func _update_order() -> void:
 			return a.finished
 		if a.finished:
 			return a.finish_order < b.finish_order
+		if a.towed != b.towed:
+			return b.towed
 		if a.out != b.out:
 			return b.out
 		return a.dist > b.dist)
@@ -191,6 +246,8 @@ func _aero(delta: float) -> void:
 	for ii in n:
 		var i: int = idx[ii]
 		var c: Node3D = cars[i]
+		if c.towed:
+			continue
 		var best := 0.0
 		var dirty := 0.0
 		var pushed := 0.0
@@ -199,6 +256,8 @@ func _aero(delta: float) -> void:
 			if j == i:
 				continue
 			var o: Node3D = cars[j]
+			if o.towed:
+				continue
 			var gap: float = _gap(c, o) # o ahead when > 0
 			var lat: float = abs(o.d - c.d)
 			if gap > 3.0 and gap < 45.0 and lat < 2.2:
@@ -254,13 +313,23 @@ func _drive_ai(c: Node3D, delta: float) -> void:
 	if c.out:
 		c.ai_r_des = 0.0
 		return
-	# Stuck against a wall or another car: back up and straighten out.
-	if c.v < 2.0 and not c.pace_mode:
+	# Facing the wrong way after a spin: turn it around (a driver's three-point turn).
+	if abs(c.yaw) > 1.4 and c.speed() < 7.0 and c.pit_state != 3:
+		c.ai_reverse = 0.0
+		c.throttle = 0.25
+		c.brake = 0.0
+		c.ai_r_des = 0.0
+		c.steer_in = -sign(c.yaw)
+		c.yaw = move_toward(c.yaw, 0.0, delta * 0.9)
+		c.r = 0.0
+		return
+	# Stuck nose-first against a wall or another car: back up and straighten out.
+	if c.speed() < 2.0 and not c.pace_mode and c.pit_state == 0 and c.ai_reverse <= 0.0:
 		c.ai_stuck += delta
 	else:
 		c.ai_stuck = max(c.ai_stuck - delta, 0.0)
 	if c.ai_stuck > 1.2:
-		c.ai_reverse = 1.6
+		c.ai_reverse = 1.2
 		c.ai_stuck = 0.0
 	if c.ai_reverse > 0.0:
 		c.ai_reverse -= delta
@@ -269,24 +338,48 @@ func _drive_ai(c: Node3D, delta: float) -> void:
 		c.ai_r_des = 0.0
 		c.steer_in = clamp(c.yaw * 2.0, -1.0, 1.0)
 		return
+	# Under caution or on pit road, race control says where to be.
+	var controlled := false
+	var ctl_target := 0.0
+	if control and control.enabled and (control.flag == control.Flag.YELLOW or c.pit_state != 0 or c.want_pit):
+		var tl: Array = control.caution_drive(c) if control.flag == control.Flag.YELLOW else control.green_pit(c)
+		controlled = true
+		ctl_target = tl[0]
+		c.ai_lane = tl[1]
+		c.kin_v = tl[0]
+		c.kin_d = tl[1]
+		if c.pit_state >= 2:
+			return # pit road is driven automatically
 	var ss: float = c.s()
 	var k: float = track.curvature_at(ss)
 	var look: float = max(c.v, 0.0) * 0.7
 	var grip_scale: float = sqrt(c.mu * c.tyre_grip()) * lerp(0.92, 1.0, c.df_front_mult)
 	var target: float = track.profile_at(ss + look) * grip_scale * c.ai_skill * 0.95
+	if controlled:
+		target = min(target, ctl_target)
 	# Traffic
 	c.ai_lane_timer -= delta
 	var ahead: Node3D = null
 	var ahead_gap := 1e9
+	var search: float = 160.0 if controlled else 70.0
 	for o in cars:
-		if o == c:
+		if o == c or o.towed:
 			continue
 		var gap: float = _gap(c, o)
-		if gap > 0.0 and gap < 70.0 and abs(o.d - c.d) < 2.2 and gap < ahead_gap:
+		var same_lane: bool = abs(o.d - c.d) < 2.2 or (controlled and abs(o.ai_lane - c.ai_lane) < 1.0 and abs(o.d - c.d) < 4.5)
+		if gap > 0.0 and gap < search and same_lane and gap < ahead_gap:
+			if c.pit_state >= 2 and o.pit_state < 2:
+				continue # on pit road, ignore the track
 			ahead = o
 			ahead_gap = gap
+	# Under caution the leader follows the pace car.
+	if controlled and control.flag == control.Flag.YELLOW and c.pit_state <= 1 and control.pace_car.visible:
+		var pg: float = _gap(c, control.pace_car)
+		if pg > 0.0 and pg < ahead_gap:
+			ahead = control.pace_car
+			ahead_gap = pg - 36.0
 	var drafting_track: bool = float(track.cfg.draft) > 0.8
-	if c.ai_lane_timer <= 0.0 and not debug_no_lane_changes:
+	if c.ai_lane_timer <= 0.0 and not debug_no_lane_changes and not controlled:
 		c.ai_lane_timer = rng.randf_range(0.4, 1.0)
 		if ahead and ahead_gap < 20.0 and (ahead.v < c.v + 0.8 or ahead_gap < 9.0) and not drafting_track:
 			_try_pass(c)
@@ -304,27 +397,31 @@ func _drive_ai(c: Node3D, delta: float) -> void:
 	# Side awareness: never steer into a car that is alongside, and give it racing
 	# room through the corners (a touch less speed so we don't slide into it).
 	for o in cars:
-		if o == c:
+		if o == c or o.towed or c.pit_state != 0:
 			continue
 		var g := _gap(c, o)
 		var side: float = o.d - c.d
-		if abs(g) < 6.0 and abs(side) < 3.6 and abs(k) > 0.001:
+		if abs(g) < 6.0 and not controlled and abs(side) < 3.6 and abs(k) > 0.001:
 			target = min(target, c.v - 0.3) if (side * sign(k) > 0.0) else target * 0.985
 		if abs(g) < 7.5 and abs(side) < 3.4 and abs(side) > 0.3:
 			if sign(c.ai_lane - c.d) == sign(side) and abs(c.ai_lane - c.d) > 0.3:
 				c.ai_lane = clamp(c.d, lanes[0], lanes[2]) # hold our line
 	# Following distance: time based, tighter where the draft rewards it.
 	var want_gap: float = max(7.0, c.v * (0.14 if drafting_track else 0.32))
-	if ahead and abs(c.ai_lane - ahead.d) < 2.2 and ahead_gap < want_gap * 2.0:
-		var bump_ok: bool = drafting_track and abs(k) < 0.001 and abs(ahead.yaw) < 0.08 and c.ai_aggression > 0.6
+	if controlled:
+		want_gap = 9.0
+	if ahead and (abs(c.ai_lane - ahead.d) < 2.2 or controlled) and ahead_gap < max(want_gap * 2.0, search):
+		var bump_ok: bool = drafting_track and abs(k) < 0.001 and abs(ahead.yaw) < 0.08 and c.ai_aggression > 0.6 and not controlled
 		var err: float = ahead_gap - want_gap
-		var match_v: float = ahead.v + clamp(err * 0.5, -8.0, 3.0)
+		# Never close faster than we could stop behind it.
+		var av: float = max(ahead.v, 0.0)
+		var match_v: float = sqrt(av * av + 2.0 * 4.5 * err) if err >= 0.0 else av + err * 0.6
 		if bump_ok and ahead_gap < 8.0:
 			match_v = ahead.v + 1.0
 		target = min(target, match_v)
 	# Avoid spinning cars ahead.
 	for o in cars:
-		if o != c and (o.spinning or o.out):
+		if o != c and (o.spinning or o.out) and not o.towed:
 			var g := _gap(c, o)
 			if g > 0.0 and g < 90.0:
 				if abs(o.d - c.ai_lane) < 3.5:
@@ -342,8 +439,11 @@ func _drive_ai(c: Node3D, delta: float) -> void:
 	var want_thr := 0.0
 	var want_brk := 0.0
 	if c.v > target + 2.0:
-		# Brake gently mid-corner, harder on the straights.
-		want_brk = clamp((c.v - target) / 14.0, 0.05, 0.35 if abs(k) > 0.001 else 0.8)
+		# Brake gently mid-corner (and under caution), harder on the straights.
+		var brk_cap: float = 0.35 if abs(k) > 0.001 else 0.8
+		if controlled and c.pit_state == 0:
+			brk_cap = min(brk_cap, 0.3)
+		want_brk = clamp((c.v - target) / 14.0, 0.05, brk_cap)
 	elif lifting:
 		want_thr = 0.2
 	elif c.v < target - 0.5:
@@ -359,7 +459,7 @@ func _drive_ai(c: Node3D, delta: float) -> void:
 	# track curvature fed forward.
 	var r_track: float = -k * cos(track.bank_at(ss)) * c.v / (1.0 + k * c.d)
 	# Ease across lanes: about 2.5 m/s of sideways speed at racing speed.
-	var max_psi: float = clamp(2.5 / max(c.v, 10.0), 0.03, 0.1)
+	var max_psi: float = clamp((4.0 if controlled else 2.5) / max(c.v, 10.0), 0.03, 0.14)
 	var psi_des: float = clamp((c.ai_lane - c.d) * 0.015 * (80.0 / max(c.v, 30.0)), -max_psi, max_psi)
 	# Steer by the direction of travel (heading plus slip), not just the heading.
 	var course: float = c.yaw + atan2(c.vy, max(c.v, 5.0))
@@ -394,8 +494,12 @@ func _collide() -> void:
 	var n := cars.size()
 	for i in n:
 		var a: Node3D = cars[i]
+		if a.towed:
+			continue
 		for j in range(i + 1, n):
 			var b: Node3D = cars[j]
+			if b.towed or ((a.pit_state >= 2) != (b.pit_state >= 2)):
+				continue
 			var gap: float = _gap(a, b)
 			if abs(gap) > 7.0 or abs(b.d - a.d) > 6.0:
 				continue

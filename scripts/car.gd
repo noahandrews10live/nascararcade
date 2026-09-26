@@ -93,6 +93,21 @@ var pace_mode := false
 var pace_speed := 0.0
 var pace_lane := 0.0
 
+# Race control
+var pit_state := 0 # race_control.Pit
+var pit_timer := 0.0
+var pit_plan := "4" # "4", "2" or "F"
+var want_pit := false
+var pitted_this_caution := false
+var kin_v := 0.0 # pit road target speed / lane (automatic pit road driving)
+var kin_d := 0.0
+var towed := false
+var stage_points := 0
+var laps_led := 0
+var burn_scale := 1.0
+var ai_driving_caution_choice := false
+var autopilot_forced := false
+
 # AI
 var ai := true
 var ai_lane := 0.0
@@ -208,6 +223,22 @@ func step(delta: float) -> void:
 		_update_visual(delta)
 		return
 
+	if pit_state >= 2:
+		# Pit road (automatic): follow race control's speed and lane directly.
+		v = move_toward(v, kin_v, (9.0 if kin_v < v else 5.0) * delta)
+		vy = 0.0
+		r = -k * v
+		var dd: float = clamp(kin_d - d, -3.0 * delta, 3.0 * delta)
+		d += dd
+		yaw = lerp(yaw, clamp(dd / max(v * delta, 0.01), -0.3, 0.3), min(6.0 * delta, 1.0))
+		dist += v * delta / (1.0 + k * d)
+		throttle = 0.4 if kin_v > v else 0.0
+		brake = 0.3 if kin_v < v else 0.0
+		rpm_now = clamp(v * RPM_PER_MPS[1], 2800.0, 9000.0)
+		gear = 2
+		_update_visual(delta)
+		return
+
 	if out:
 		throttle = 0.0
 		brake = 1.0
@@ -219,8 +250,8 @@ func step(delta: float) -> void:
 	_walls()
 	# Wear and fuel
 	var travelled: float = abs(v) * delta
-	tyre_wear += travelled / 1000.0 * (0.006 + 0.08 * slide * slide + 0.01 * scrub)
-	fuel = max(0.0, fuel - travelled / 1000.0 * 0.62 * (0.3 + 0.7 * throttle))
+	tyre_wear += travelled / 1000.0 * (0.006 + 0.08 * slide * slide + 0.01 * scrub) * burn_scale
+	fuel = max(0.0, fuel - travelled / 1000.0 * 0.62 * (0.3 + 0.7 * throttle) * burn_scale)
 	spinning = abs(yaw) > 0.6 and speed() > 8.0
 	if total_damage() > 0.72 and not out:
 		out = true
@@ -234,7 +265,8 @@ func _integrate(h: float) -> void:
 	var b: float = track.bank_at(ss)
 	if d < track.inner_edge():
 		b = atan(0.35 / track.apron) if d > track.apron_edge() else 0.0
-	on_grass = d < track.apron_edge()
+	var on_pit_road: bool = track.in_pit_roadway(ss) and d > track.pit_lane_d() - track.infield * 0.4
+	on_grass = d < track.apron_edge() and not on_pit_road
 	var u: float = v
 	var au: float = max(abs(u), 3.0)
 
@@ -448,7 +480,7 @@ func _walls() -> void:
 		else:
 			wall_hit = max(wall_hit, 0.5)
 			# grinding along the wall
-			v *= 1.0 - 0.15 * get_physics_process_delta_time()
+			v *= 1.0 - 0.15 / 60.0
 
 
 func sync_visual() -> void:
