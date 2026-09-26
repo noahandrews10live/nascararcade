@@ -24,6 +24,8 @@ var speed_profile: PackedFloat32Array # max comfortable speed for a nominal car
 var minimap: PackedVector2Array # normalised 0..1 outline
 
 var _st := {} # material kind -> SurfaceTool
+var _raw_bank := PackedFloat32Array() # per raw point banking (degrees) for segment layouts
+var _front_len := 0.0
 
 
 func setup(config: Dictionary) -> void:
@@ -45,7 +47,76 @@ func setup(config: Dictionary) -> void:
 ## stretch, then [front half, dog-leg arc, front side, turn, back half] twice. The
 ## path is palindromic with 360 degrees of turning, so it always closes, and every
 ## piece turns left (real tri-ovals and quad-ovals never bend the other way).
+## General layouts: a list of straights {"s": metres} and arcs {"r": radius, "a": degrees
+## (+ = the track's main turning direction, - = the other way), "b": banking degrees}.
+## Two straights can be "auto": their lengths are solved so the layout closes. The
+## first entry is the front stretch; the start/finish line sits at its middle.
+func _segments_outline() -> PackedVector2Array:
+	var segs: Array = cfg.segments
+	# Pass 1: headings, known displacement, and the directions of the auto straights.
+	var h := 0.0
+	var known := Vector2.ZERO
+	var auto_dirs := {}
+	for sg in segs:
+		if sg.has("s"):
+			var dir := Vector2(cos(h), sin(h))
+			if sg.s is String:
+				auto_dirs[sg.s] = dir
+			else:
+				known += dir * float(sg.s)
+		else:
+			var r: float = sg.r
+			var a := deg_to_rad(float(sg.a))
+			var sgn := signf(a)
+			# chord of an arc turning by a with radius r from heading h
+			var c := Vector2(sin(h + a) - sin(h), -cos(h + a) + cos(h)) * r * sgn
+			known += c
+			h += a
+	var lens := {}
+	if auto_dirs.size() == 2:
+		var u1: Vector2 = auto_dirs["auto1"]
+		var u2: Vector2 = auto_dirs["auto2"]
+		var det := u1.x * u2.y - u1.y * u2.x
+		var rhs := -known
+		lens["auto1"] = (rhs.x * u2.y - rhs.y * u2.x) / det
+		lens["auto2"] = (u1.x * rhs.y - u1.y * rhs.x) / det
+		if lens.auto1 < 20.0 or lens.auto2 < 20.0:
+			push_warning("Track %s: closure straights came out short (%.0f, %.0f)" % [cfg.name, lens.auto1, lens.auto2])
+	# Pass 2: walk it, starting from the middle of the front stretch.
+	var st := {"p": Vector2.ZERO, "h": 0.0, "pts": PackedVector2Array(), "bank": PackedFloat32Array()}
+	var bs: float = cfg.bank_straight
+	var straight := func(length: float) -> void:
+		var steps: int = max(1, int(length / 0.5))
+		for i in steps:
+			st.pts.append(st.p)
+			st.bank.append(bs)
+			st.p += Vector2(cos(st.h), sin(st.h)) * (length / steps)
+	var arc := func(radius: float, angle: float, bank_deg: float) -> void:
+		var steps: int = max(1, int(radius * abs(angle) / 0.5))
+		var da := angle / steps
+		for i in steps:
+			st.pts.append(st.p)
+			st.bank.append(bank_deg)
+			var mid: float = st.h + da * 0.5
+			st.p += Vector2(cos(mid), sin(mid)) * (2.0 * radius * sin(abs(da) * 0.5))
+			st.h += da
+	var first_len: float = lens.get(segs[0].s, 0.0) if segs[0].s is String else float(segs[0].s)
+	_front_len = first_len
+	straight.call(first_len * 0.5)
+	for i in range(1, segs.size()):
+		var sg: Dictionary = segs[i]
+		if sg.has("s"):
+			straight.call(lens.get(sg.s, 0.0) if sg.s is String else float(sg.s))
+		else:
+			arc.call(float(sg.r), deg_to_rad(float(sg.a)), float(sg.get("b", cfg.bank_turn)))
+	straight.call(first_len * 0.5)
+	_raw_bank = st.bank
+	return st.pts
+
+
 func _raw_outline() -> PackedVector2Array:
+	if cfg.has("segments"):
+		return _segments_outline()
 	var S: float = cfg.back # back stretch
 	var R: float = cfg.radius
 	var phi := deg_to_rad(float(cfg.get("dog_phi", 0.0)))
@@ -93,6 +164,22 @@ func _raw_outline() -> PackedVector2Array:
 
 func _build_centerline() -> void:
 	var raw := _raw_outline()
+	# Race counter-clockwise seen from above (left turns): reverse the raw outline if needed.
+	var raw_area := 0.0
+	for i in raw.size():
+		var a0 := raw[i]
+		var a1 := raw[(i + 1) % raw.size()]
+		raw_area += a0.x * a1.y - a1.x * a0.y
+	if raw_area > 0.0:
+		var rr := PackedVector2Array()
+		var rb := PackedFloat32Array()
+		for i in raw.size():
+			rr.append(raw[(raw.size() - i) % raw.size()])
+			if _raw_bank.size() == raw.size():
+				rb.append(_raw_bank[(raw.size() - i) % raw.size()])
+		raw = rr
+		if _raw_bank.size() == raw.size():
+			_raw_bank = rb
 	# Cumulative length of the dense polyline.
 	var cum := PackedFloat32Array()
 	cum.resize(raw.size() + 1)
@@ -104,6 +191,7 @@ func _build_centerline() -> void:
 	length = total
 	var seg_len := total / n
 	pos.resize(n)
+	var seg_bank := PackedFloat32Array()
 	var j := 0
 	for i in n:
 		var target := i * seg_len
@@ -112,6 +200,8 @@ func _build_centerline() -> void:
 		var t: float = (target - cum[j]) / max(cum[j + 1] - cum[j], 0.0001)
 		var p := raw[j].lerp(raw[(j + 1) % raw.size()], t)
 		pos[i] = Vector3(p.x, 0.0, p.y)
+		if _raw_bank.size() == raw.size():
+			seg_bank.append(_raw_bank[j])
 	# Make sure we race counter-clockwise seen from above (left turns): shoelace sign.
 	var area := 0.0
 	for i in n:
@@ -151,6 +241,16 @@ func _build_centerline() -> void:
 	var bs := deg_to_rad(cfg.bank_straight)
 	for i in n:
 		bank[i] = lerp(bs, bt, clamp(abs(curv[i]) / k_turn, 0.0, 1.0))
+	if seg_bank.size() == n:
+		# Segment layouts: each corner has its own banking; ease it in and out, and
+		# tilt it the right way for right-hand corners.
+		var bw := int(40.0 / seg_len)
+		for i in n:
+			var acc := 0.0
+			for o in range(-bw, bw + 1):
+				acc += seg_bank[(i + o + n) % n]
+			var mag := deg_to_rad(acc / (2 * bw + 1))
+			bank[i] = mag * (-1.0 if curv[i] < -0.0005 else 1.0)
 
 
 ## Returns index and fraction for distance s.
@@ -187,6 +287,8 @@ func apron_edge() -> float:
 ## Pit road runs along the inside of the front stretch, between the apron and the
 ## inner wall. Entry (commitment line) is at the end of turn 4, exit at turn 1.
 func front_length() -> float:
+	if _front_len > 0.0:
+		return _front_len
 	return float(cfg.get("front_mid", 0.0)) + 2.0 * float(cfg.get("front_side", 0.0)) + 2.0 * float(cfg.get("dog_r", 0.0)) * deg_to_rad(float(cfg.get("dog_phi", 0.0)))
 
 
