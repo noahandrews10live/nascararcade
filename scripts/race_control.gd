@@ -6,6 +6,10 @@ extends Node
 
 signal flag_changed(flag: String)
 signal message(text: String, kind: String) # kind: flag, spotter, pit, stage, info
+## Quick cautions: the player's pit call is needed (main pauses and asks).
+signal pit_call(info: Dictionary)
+## Quick cautions: the stops are done and the field is lined up (for the board).
+signal pit_report(lines: Array)
 
 enum Flag { GREEN, YELLOW, WHITE, CHECKERED }
 enum Pit { NONE, APPROACH, LANE, SERVICE, EXIT }
@@ -47,6 +51,23 @@ var stage_results: Array = [] # per stage: array of car nums top 10
 
 # overtime
 var overtime := false
+
+# Quick cautions (the default): about 15 seconds from the yellow to the green.
+# The field slows for a moment, every team makes its pit call (the player on a
+# pause screen), the stops are worked out, and the field is lined up double file
+# in the right order just before the restart zone. FULL cautions run the real
+# laps behind the pace car instead.
+const QUICK_SLOW_TIME := 3.5 # seconds of yellow before the pit calls
+const QUICK_RESTART_BEFORE := 520.0 # leader's distance before the line when lined up (about 15 s in all)
+const PIT_ROAD_LOSS := 4.0 # extra seconds pit road costs over staying on track
+var quick := true
+var quick_phase := "" # "", "slow", "decide", "roll"
+var _quick_t := 0.0
+var _freeze: Array = [] # running order when the caution came out (scoring freeze)
+var _calls := {} # car -> "4", "2", "F", "W", "S" (slicks) or "" (stay out)
+var _adjust := {} # car -> wedge change asked for
+var _cause: Node3D = null
+var player_pending := false
 var final_lap_caution := false
 
 # pit road
@@ -164,7 +185,7 @@ func on_leader_lap(lap_done: int) -> void:
 		throw_caution("DEBRIS", null)
 
 
-func _end_stage() -> void:
+func _end_stage(caution := true) -> void:
 	var top: Array = []
 	var i := 0
 	for c in race.order:
@@ -177,7 +198,8 @@ func _end_stage() -> void:
 	stage_results.append(top.map(func(c): return c.team.num))
 	message.emit("STAGE %d WINNER  #%s %s" % [stage, top[0].team.num, top[0].team.driver], "stage")
 	stage += 1
-	throw_caution("STAGE %d END" % (stage - 1), null)
+	if caution:
+		throw_caution("STAGE %d END" % (stage - 1), null)
 
 
 func throw_caution(reason: String, who: Node3D) -> void:
@@ -222,6 +244,14 @@ func throw_caution(reason: String, who: Node3D) -> void:
 	# Overtime: a late caution guarantees a green-white-checkered finish.
 	if lead.lap() >= race.laps - 2:
 		overtime = true
+	if quick:
+		quick_phase = "slow"
+		_quick_t = 0.0
+		_cause = who
+		_calls.clear()
+		_adjust.clear()
+		player_pending = false
+		_freeze = race.order.filter(func(c): return not c.towed and not c.finished)
 
 
 func pace_speed() -> float:
@@ -251,8 +281,12 @@ func _caution_tick(delta: float) -> void:
 			c.set_meta("out_time", c.get_meta("out_time", race.time))
 			if race.time - float(c.get_meta("out_time")) > 6.0:
 				race.tow(c)
+	if quick_phase != "":
+		_quick_tick(delta)
+		if quick_phase != "roll":
+			return
 	var pl: int = pace_car.lap()
-	if pl > _pace_last_lap and not restart_armed:
+	if pl > _pace_last_lap and not restart_armed and quick_phase == "":
 		_pace_last_lap = pl
 		caution_laps += 1
 		if weather_hold:
@@ -295,6 +329,7 @@ func _caution_tick(delta: float) -> void:
 
 func _go_green() -> void:
 	flag = Flag.GREEN
+	quick_phase = ""
 	one_to_go = false
 	restart_armed = false
 	pit_open = false
@@ -500,6 +535,13 @@ func _start_service(c: Node3D) -> void:
 	c.vy = 0.0
 	c.r = 0.0
 	c.pitted_this_caution = true
+	c.pit_timer = _service(c)
+	message_for(c, "PIT STOP  %s  %.1fs" % [{"4": "4 TIRES + FUEL", "2": "2 TIRES + FUEL", "F": "FUEL ONLY"}.get(c.pit_plan, "FUEL"), c.pit_timer], "pit")
+
+
+## Does the work of a stop on c (tyres, fuel, repairs, the damaged vehicle
+## policy) and returns how long it took.
+func _service(c: Node3D) -> float:
 	var tyre_t := 0.0
 	var corners: Array = []
 	var compound := ""
@@ -547,8 +589,325 @@ func _start_service(c: Node3D) -> void:
 				message_for(c, "TOO MUCH DAMAGE TO MAKE MINIMUM SPEED - PARKED", "pit")
 			else:
 				message_for(c, "DAMAGED VEHICLE POLICY: %d:%02d OF REPAIRS LEFT" % [int(c.dvp_clock) / 60, int(c.dvp_clock) % 60], "pit")
-	c.pit_timer = max(tyre_t, fuel_t) * c.pit_crew_mult + repair
-	message_for(c, "PIT STOP  %s  %.1fs" % [{"4": "4 TIRES + FUEL", "2": "2 TIRES + FUEL", "F": "FUEL ONLY"}.get(c.pit_plan, "FUEL"), c.pit_timer], "pit")
+	return max(tyre_t, fuel_t) * c.pit_crew_mult + repair
+
+
+# --- quick cautions ------------------------------------------------------------------
+
+const PLAN_NAMES := {"4": "4 TIRES + FUEL", "2": "2 TIRES + FUEL", "F": "FUEL ONLY", "W": "WET TIRES + FUEL", "": "STAY OUT"}
+
+
+func _quick_tick(delta: float) -> void:
+	if quick_phase == "slow":
+		_quick_t += delta
+		if _quick_t >= QUICK_SLOW_TIME:
+			_quick_decide()
+	# "decide": waiting for the player's call (the game is paused meanwhile).
+	# "roll": lined up; the normal restart logic takes it from here.
+
+
+func _is_human(c: Node3D) -> bool:
+	return c != null and c == race.player and not c.autopilot_forced
+
+
+## Every team makes its call; the player is asked (main pauses the game).
+func _quick_decide() -> void:
+	for c in race.cars:
+		if c.out and not c.towed:
+			race.tow(c)
+	_freeze = _freeze.filter(func(c): return is_instance_valid(c) and not c.towed and not c.out)
+	if _freeze.is_empty():
+		quick_phase = ""
+		return
+	for c in _freeze:
+		c.set_meta("crew_var", randf_range(-0.6, 0.6)) # this stop's crew speed, good or bad
+		if not pits_enabled:
+			_calls[c] = ""
+		elif not _is_human(c):
+			_calls[c] = ai_pit_call(c)
+	var p: Node3D = race.player
+	if pits_enabled and _is_human(p) and _freeze.has(p):
+		quick_phase = "decide"
+		player_pending = true
+		pit_call.emit(player_info())
+	else:
+		_quick_apply()
+
+
+## What the player's pit call screen shows: the choices, the crew chief's advice,
+## the car's state and where each choice would put them for the restart.
+func player_info() -> Dictionary:
+	var p: Node3D = race.player
+	var lead: Node3D = _freeze[0]
+	var laps_left: int = max(race.laps - lead.lap(), 0)
+	var options: Array = ["4", "2", "F", ""]
+	if track.cfg.get("road", false) and race.weather and race.weather.mode > 0:
+		options.insert(2, "W")
+	var est := {}
+	for o in options:
+		_calls[p] = o
+		est[o] = _compute_order().find(p) + 1
+	_calls.erase(p)
+	var per_lap: float = track.length / 1000.0 * 0.5 * max(p.burn_scale, 0.01)
+	return {
+		"options": options,
+		"names": options.map(func(o): return PLAN_NAMES[o]),
+		"advice": ai_pit_call(p, true),
+		"estimate": est,
+		"position": _freeze.find(p) + 1,
+		"field": _freeze.size(),
+		"laps_left": laps_left,
+		"wear": clamp(p.tyre_wear, 0.0, 1.5),
+		"grip": p.tyre_grip(),
+		"fuel_laps": p.fuel / max(per_lap, 0.001),
+		"damage": p.total_damage(),
+		"reason": _last_caution_reason,
+	}
+
+
+## The player's answer: the stop to make ("" stays out) and a wedge change.
+func resolve_player(call: String, wedge_change: float) -> void:
+	if quick_phase != "decide":
+		return
+	_calls[race.player] = call
+	if wedge_change != 0.0:
+		_adjust[race.player] = wedge_change
+	player_pending = false
+	_quick_apply()
+
+
+## A team's pit call from the car's state, the race situation and the driver's
+## character. Tyres are worth positions over the run that's left; a stop costs the
+## places of the cars behind that stay out. Crew chiefs of smart drivers weigh it
+## well; aggressive ones value track position; inconsistent ones guess.
+func ai_pit_call(c: Node3D, advice := false) -> String:
+	var lead: Node3D = _freeze[0] if not _freeze.is_empty() else leader()
+	var laps_left: int = max(race.laps - lead.lap(), 0)
+	var pos: int = max(_freeze.find(c) + 1, 1)
+	var field: int = max(_freeze.size(), 1)
+	var per_lap: float = track.length / 1000.0 * 0.5 * max(c.burn_scale, 0.01)
+	var fuel_laps: float = c.fuel / max(per_lap, 0.001)
+	# Running dry within a few laps makes a stop compulsory. Otherwise topping up is
+	# worth what it saves later: nothing if it'll make the finish, and in proportion
+	# to how much of the tank has gone if it won't.
+	var need_fuel: bool = fuel_laps < min(float(laps_left), 6.0) + 1.0
+	var used: float = 1.0 - c.fuel / c.FUEL_CAPACITY
+	var fuel_gain: float = used * 9.0 if fuel_laps < laps_left + 1.0 else 0.0
+	# Stops that aren't a choice.
+	if c.has_flat() or c.total_damage() > 0.08:
+		return "4"
+	if track.cfg.get("road", false) and race.weather:
+		var wet: float = race.weather.average_wet()
+		if c.tyre_compound == "slick" and wet > 0.35:
+			return "W"
+		if c.tyre_compound == "wet" and wet < 0.12:
+			return "4"
+	if laps_left <= 2:
+		return "F" if need_fuel else ""
+	# Positions fresh tyres are worth over the run (worn tyres lose grip, and the
+	# run to the flag or the next stop is what they're good for).
+	var horizon: float = min(float(laps_left), 35.0)
+	var right_wear: float = (c.tyre_wear4[1] + c.tyre_wear4[3]) * 0.5
+	var gain4: float = c.tyre_wear * horizon * 0.9
+	var gain2: float = right_wear * horizon * 0.62
+	# Positions a stop costs: the share of the cars behind that will stay out,
+	# more of them late in a race; the lead is worth extra.
+	var stay_share: float = 0.3 if laps_left > 40 else (0.45 if laps_left > 15 else 0.6)
+	var cost: float = float(field - pos) * stay_share + (2.5 if pos <= 3 else 0.0)
+	cost = min(cost, 12.0)
+	gain4 *= lerp(0.85, 1.15, c.ai_racecraft) * lerp(0.9, 1.1, c.ai_patience)
+	gain2 *= lerp(0.85, 1.15, c.ai_racecraft)
+	cost *= lerp(0.8, 1.3, c.ai_aggression)
+	if not advice:
+		var guess: float = (1.0 - c.ai_consistency) * 0.8
+		gain4 *= 1.0 + randf_range(-guess, guess)
+		gain2 *= 1.0 + randf_range(-guess, guess)
+		cost *= 1.0 + randf_range(-guess, guess)
+	var scores := {"4": gain4 + fuel_gain - cost, "2": gain2 + fuel_gain - cost * 0.8, "F": fuel_gain - cost * 0.65}
+	if not need_fuel:
+		scores[""] = 0.0
+	var best := ""
+	var best_score := -1e9
+	for k in scores:
+		if scores[k] > best_score:
+			best_score = scores[k]
+			best = k
+	return best
+
+
+func _laps_down(c: Node3D, lead: Node3D) -> int:
+	return max(0, int(floor((lead.dist - c.dist) / track.length + 0.0001)))
+
+
+## Seconds a stop takes (the same figure predicts and decides the pit road order).
+func _stop_time(c: Node3D, call: String) -> float:
+	var t := 0.0
+	match call:
+		"4", "W":
+			t = 10.8
+		"2":
+			t = 6.4
+		"F":
+			t = (c.FUEL_CAPACITY - c.fuel) / 7.5
+	t = max(t, (c.FUEL_CAPACITY - c.fuel) / 7.5)
+	if c.total_damage() > 0.05:
+		t += 6.0 + c.total_damage() * 40.0
+	return t * c.pit_crew_mult + float(c.get_meta("crew_var", 0.0))
+
+
+## The restart order. Scoring freezes when the caution comes out; cars that stay
+## out keep their places, cars that pit come off pit road in the order they get
+## out (where they went in plus how long the stop took) behind them. Then the free
+## pass car, the other lapped cars, and the wave-arounds at the back.
+func _compute_order() -> Array:
+	var lead: Node3D = _freeze[0]
+	var stay: Array = []
+	var pitters: Array = []
+	var lapped: Array = []
+	var waved: Array = []
+	var lucky: Node3D = null
+	var entry := 0
+	for c in _freeze:
+		var call: String = _calls.get(c, "")
+		var down: int = _laps_down(c, lead)
+		if down == 0:
+			if call == "":
+				stay.append(c)
+			else:
+				pitters.append([c, entry * 0.45 + PIT_ROAD_LOSS + _stop_time(c, call)])
+				entry += 1
+		elif lucky == null and down == 1 and c != _cause:
+			lucky = c
+		elif call == "":
+			waved.append(c)
+		else:
+			lapped.append(c)
+	pitters.sort_custom(func(a, b): return a[1] < b[1])
+	var out: Array = stay.duplicate()
+	for pp in pitters:
+		out.append(pp[0])
+	if lucky:
+		out.append(lucky)
+	out.append_array(lapped)
+	out.append_array(waved)
+	return out
+
+
+## Makes the stops and lines the field up for the restart.
+func _quick_apply() -> void:
+	var L: float = track.length
+	var lead: Node3D = _freeze[0]
+	var order := _compute_order()
+	# Laps down, worked out before anyone moves; the free pass and wave-arounds get one back.
+	var down := {}
+	var gifted := {}
+	for c in order:
+		down[c] = _laps_down(c, lead)
+	var pitted := 0
+	var lines: Array = []
+	var lucky: Node3D = _lucky(down)
+	for c in order:
+		var call: String = _calls.get(c, "")
+		if down[c] > 0 and (call == "" or c == lucky):
+			down[c] -= 1
+			gifted[c] = true
+		c.want_pit = false
+		c.pit_state = Pit.NONE
+		c.pitted_this_caution = call != ""
+		if call != "":
+			c.pit_plan = call
+			_service(c)
+			pitted += 1
+		if _adjust.has(c):
+			c.wedge = clamp(c.wedge + float(_adjust[c]), -900.0, 900.0)
+	# Line up double file, the leader QUICK_RESTART_BEFORE short of the line.
+	var base: float = ceil((lead.dist + 250.0 + QUICK_RESTART_BEFORE) / L) * L - QUICK_RESTART_BEFORE
+	if overtime:
+		race.laps = max(race.laps, int(floor(base / L)) + 2)
+	lane_choice.clear()
+	for k in order.size():
+		var c: Node3D = order[k]
+		var row: int = k / 2
+		var lane: int = k % 2
+		c.dist = base - row * 9.0 - lane * 1.0 - down[c] * L
+		c.lap_idx = c.lap()
+		c.set_meta("lap_void", true) # the lap the field was lined up in isn't a real lap time
+		c.tumbling = false
+		c.v = pace_speed()
+		c.vy = 0.0
+		c.r = 0.0
+		c.yaw = 0.0
+		c.d = race.lanes[lane]
+		c.ai_lane = c.d
+		c.pace_lane = c.d
+		c.kin_d = c.d
+		c.kin_v = c.v
+		c.ai_reverse = 0.0
+		c.reset_chassis()
+		c.sync_visual()
+		lane_choice[c] = lane
+	race._update_order()
+	# Stages the leader passed while the field was lined up still count.
+	var lead_now: Node3D = order[0]
+	while stage <= stage_ends.size() and lead_now.lap() >= stage_ends[stage - 1]:
+		_end_stage(false)
+	# The pace car leads them to the restart zone, then peels off.
+	pace_car.dist = base + 45.0
+	pace_car.d = race.lanes[0]
+	pace_car.pace_lane = race.lanes[0]
+	pace_car.v = pace_speed()
+	pace_car.visible = true
+	pace_car.sync_visual()
+	race.clear_debris()
+	one_to_go = true
+	choosing = false
+	pit_open = false
+	quick_phase = "roll"
+	if weather_hold:
+		# Wet oval: circle behind the pace car until it's dry (the full caution logic).
+		restart_armed = false
+		one_to_go = false
+		quick_phase = ""
+		caution_laps = 1
+		_pace_last_lap = pace_car.lap()
+	else:
+		restart_armed = true
+	# The board: who pitted, who stayed out, and how it came out for the player.
+	var p: Node3D = race.player
+	var stay_out := 0
+	for c in order:
+		if _calls.get(c, "") == "" and down[c] == 0 and not gifted.has(c):
+			stay_out += 1
+	lines.append("PIT STOPS: %d PITTED, %d STAYED OUT" % [pitted, stay_out])
+	if lead_now:
+		lines.append("LEADER: #%s %s (%s)" % [lead_now.team.num, lead_now.team.driver, PLAN_NAMES[_calls.get(lead_now, "")]])
+	if p and order.has(p):
+		var before: int = _freeze.find(p) + 1
+		var after: int = order.find(p) + 1
+		var delta: int = before - after
+		var call: String = _calls.get(p, "")
+		lines.append("YOU: %s - RESTART %s %s" % [PLAN_NAMES[call], _ordinal(after), ("(+%d)" % delta) if delta > 0 else (("(%d)" % delta) if delta < 0 else "")])
+		if gifted.has(p):
+			lines.append("YOU GET YOUR LAP BACK")
+	pit_report.emit(lines)
+	message.emit("RESTART COMING UP - DOUBLE FILE", "pit")
+
+
+func _lucky(down: Dictionary) -> Node3D:
+	for c in _freeze:
+		if down.get(c, 0) == 1 and c != _cause:
+			return c
+	return null
+
+
+func _ordinal(n: int) -> String:
+	if n % 100 >= 11 and n % 100 <= 13:
+		return "%dTH" % n
+	match n % 10:
+		1: return "%dST" % n
+		2: return "%dND" % n
+		3: return "%dRD" % n
+	return "%dTH" % n
 
 
 func message_for(c: Node3D, text: String, kind: String) -> void:

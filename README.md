@@ -88,9 +88,12 @@ Motion smoothing), and Options → VSync off gives the lowest input delay.
   - Pack wrecks collect several cars.
   - Damage reduces aero, power and alignment, and heavy damage retires the car.
 - **Race rules.**
-  - **Cautions:** the pace car comes out and scoring freezes. The field slows and forms single file, and wrecked cars are towed off.
-  - **Pit road:** opens after a lap under caution. The free pass (lucky dog) and wave-arounds apply.
-  - **Restarts:** "one to go", then double-file restarts with the choose rule.
+  - **Quick cautions** (the default: race setting CAUTIONS → QUICK) take about 15 seconds from yellow to green:
+    - Scoring freezes and the field slows for a few seconds.
+    - **Your pit call:** the race pauses and asks you. Choose 4 tyres, 2 tyres, fuel only, wet tyres (road courses in changeable weather) or stay out, plus an optional chassis change (a round of wedge in or out). The screen shows your tyres, fuel laps, damage, the crew chief's call (*) and roughly where each choice restarts you.
+    - **The AI decides for itself.** Tyres are worth positions over the run that's left; a stop costs the places of the cars behind that stay out. Fuel, damage, flats and the weather force stops. Each driver's racecraft, aggression, patience and consistency colour the call, so the field splits on strategy.
+    - **Restart order:** cars that stayed out keep their order from the caution. The cars that pitted follow, in the order they get off pit road: where they went in plus how long their stop took. Then come the free pass car, the lapped cars that pitted, and the wave-arounds. The field lines up double file behind the pace car and goes green at the restart zone.
+  - **Full cautions** (CAUTIONS → FULL): the pace car picks up the leader and the field runs the real caution laps single file. Pit road opens after a lap, with the free pass and wave-arounds, then "one to go" and double-file restarts with the choose rule.
   - **Stages:** stage points go to the top 10 at the end of each stage.
   - **Finish:** overtime (green-white-checkered), and a caution on the final lap ends the race.
 - **Pit stops.** Choose 4 tyres, 2 tyres or fuel only; stops also repair damage. Pit road is driven automatically, and the AI runs its own pit strategy.
@@ -200,7 +203,7 @@ godot --headless --path . --export-release Web build/web/index.html
 - The Modern look fills any screen shape: laptops, ultrawides, and phones in landscape. The race view widens, and menus stay centred. The 1999 look keeps its 4:3 picture.
 - In the browser, Start goes full screen (untick it to play in the page). On Android it also locks landscape. A full screen button appears when you move the mouse or touch the bottom middle of the screen. iPhone Safari has no full screen for web pages; the game still fills the page.
 - **Touch controls** appear on phones and tablets, and on a touchscreen laptop as soon as you touch it. Using a keyboard or gamepad hides them again.
-  - Steer by tilting the device like a wheel. Wherever you hold it at the start counts as straight ahead. You can also drag a thumb anywhere on the left side, where a full lock is about a thumb's width. TILT/DRAG switches between the two.
+  - Steer by tilting the device like a wheel. Full lock takes only 12° of tilt (Options → TILT STEERING: 18°, 12°, 9° or 6°). A gentle curve gives fine control near the centre, a small dead zone ignores wobble, and the sensor is smoothed. Wherever you hold it at the start counts as straight ahead; it re-centres after a pause or pit call, or when you tap CTR. You can also drag a thumb anywhere on the left side, where a full lock is about a thumb's width. TILT/DRAG switches between the two.
   - GAS and BRAKE pedals are on the right. Small buttons: II pause, CAM, PIT.
   - Menus, results and replays show a D-pad with A (select) and B (back). The pause screen adds RESUME and QUIT.
   - Tilt needs the motion sensor: iPhone asks permission when you tap Start. The page reads the accelerometer, or the orientation sensor where that's all there is. It works out each phone's sign convention from which edge of the screen is higher. Where the browser or an embedding page blocks the sensor, the game says so and uses drag steering. The installed app isn't embedded, so tilt works there.
@@ -300,6 +303,7 @@ All tests run headless (`godot --headless --fixed-fps 60 --path . -s <script>`):
 | `tests/physics_test.gd` | Solo lap speeds, draft gain and a 40-car race per track |
 | `tests/field_test.gd` | Full-field AI race with incident tracing (`TRACK=n SECS=s TRACE=car#`) |
 | `tests/rules_test.gd` | A full rules race: cautions, pits, stages and points |
+| `tests/caution_test.gd` | Quick cautions: the pit call screen, AI pit calls, the restart order, about 15 s yellow to green |
 | `tests/race_mode_test.gd` | Single Race through the real game flow |
 | `tests/weekend_test.gd` | Practice → qualifying → race, plus a season round |
 | `tests/career_test.gd` | Career money, R&D, season rollover |

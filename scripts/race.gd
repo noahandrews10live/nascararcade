@@ -158,7 +158,8 @@ func enable_rules() -> void:
 		wear_scale = 0.0
 	for c in cars:
 		c.burn_scale = wear_scale
-	control.cautions_enabled = Game.settings.cautions == 1
+	control.cautions_enabled = Game.settings.cautions >= 1
+	control.quick = Game.settings.cautions != 2 # QUICK (about 15 s) or FULL (real caution laps)
 
 
 func give_lap(c: Node3D) -> void:
@@ -295,7 +296,10 @@ func tick(delta: float) -> void:
 				var lt: float = time - c.lap_start_time
 				c.lap_start_time = time
 				c.last_lap = lt
-				if c.best_lap <= 0.0 or lt < c.best_lap:
+				# (A lap the field was lined up in under a quick caution isn't a real time.)
+				var void_lap: bool = c.get_meta("lap_void", false)
+				c.set_meta("lap_void", false)
+				if not void_lap and (c.best_lap <= 0.0 or lt < c.best_lap):
 					c.best_lap = lt
 				if c.is_player:
 					c.end_lap_trace(lt)

@@ -66,6 +66,9 @@ var atmosphere: Node # haze, sun shafts, lingering smoke, focus, glare
 var rain_fx: Node3D # water film and dry line, spray, drops on the glass
 var race_day: Node3D # pit crews, the flagman, the crowd, fireworks (a child of the race)
 var touch: Control # on-screen controls for phones and tablets
+var pit_menu: Control # the pit call screen under a quick caution (the race waits)
+var _pit_info := {}
+var _pit_board: Label
 var tv_mode := 0
 var tv_target: Node3D
 var tv_timer := 0.0
@@ -688,6 +691,9 @@ func _new_race(player_team: int) -> void:
 		race.setup(track, player_team, int(track.cfg.laps), 16 if player_team >= 0 else 24)
 		race.arcade = true
 	race.lap_completed.connect(_on_lap)
+	if race.control:
+		race.control.pit_call.connect(_on_pit_call)
+		race.control.pit_report.connect(_on_pit_report)
 	race.car_finished.connect(_on_finished)
 	if mode == "online":
 		net.attach(race)
@@ -1083,6 +1089,9 @@ func _unhandled_input(event: InputEvent) -> void:
 	if event.is_action_pressed("toggle_scanlines"):
 		Game.scanlines = not Game.scanlines
 		scan_rect.visible = Game.scanlines and not Game.modern
+	if pit_menu and is_instance_valid(pit_menu):
+		pit_menu.handle(event)
+		return
 	if state in [State.COUNTDOWN, State.RACE, State.FINISHED]:
 		if event.is_action_pressed("pause"):
 			paused = not paused
@@ -1464,6 +1473,84 @@ func _player_input() -> void:
 		p.shift_request = -1
 
 
+## Quick caution: the race waits while the player makes the pit call.
+func _on_pit_call(info: Dictionary) -> void:
+	_pit_info = info
+	if pit_menu and is_instance_valid(pit_menu):
+		pit_menu.queue_free()
+	paused = true
+	pause_layer.visible = false
+	synth.beep(660.0, 0.2)
+	var options: Array = info.options
+	var names: Array = []
+	for i in options.size():
+		names.append(String(info.names[i]) + ("  *" if options[i] == info.advice else ""))
+	pit_menu = Menu.new()
+	pit_menu.top = 250
+	pit_menu.width = 540
+	ui_root.add_child(pit_menu)
+	pit_menu.build("CAUTION - %s" % String(info.reason), [
+		{"id": "plan", "label": "PIT CALL", "values": names, "index": max(options.find(info.advice), 0)},
+		{"id": "chassis", "label": "CHASSIS", "values": ["NO CHANGE", "TIGHTEN (ROUND OF WEDGE IN)", "LOOSEN (ROUND OF WEDGE OUT)"], "index": 0,
+			"hint": "TIGHT: THE FRONT PUSHES UP THE TRACK.  LOOSE: THE REAR WANTS TO COME AROUND"},
+		{"id": "go", "label": "CONFIRM", "hint": "START TO SEND IT"},
+	])
+	var lines := [
+		"RUNNING %s OF %d  -  %d LAPS TO GO" % [Game.ordinal(int(info.position)), int(info.field), int(info.laps_left)],
+		"TIRES %d%% WORN (GRIP %d%%)   FUEL %d LAPS   DAMAGE %s" % [int(round(float(info.wear) * 100.0)), int(round(float(info.grip) * 100.0)), int(info.fuel_laps), "NONE" if float(info.damage) < 0.02 else ("LIGHT" if float(info.damage) < 0.1 else "HEAVY")],
+		"CREW CHIEF: %s" % String(info.names[max(options.find(info.advice), 0)]),
+	]
+	for i in lines.size():
+		var l := Game.make_label(lines[i], 18 if i < 2 else 16, Color.WHITE if i < 2 else Color(1.0, 0.85, 0.2), 5)
+		l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		l.size = Vector2(640, 24)
+		l.position = Vector2(0, 90 + i * 30)
+		pit_menu.add_child(l)
+	_pit_hint()
+	pit_menu.changed.connect(func(_id, _i): _pit_hint())
+	pit_menu.activated.connect(func(_id): _close_pit_menu())
+
+
+## The pit call row's hint: where that choice would put you for the restart.
+func _pit_hint() -> void:
+	var options: Array = _pit_info.options
+	var o: String = options[pit_menu.value("plan")]
+	var est: int = int(_pit_info.estimate.get(o, 0))
+	var now: int = int(_pit_info.position)
+	var diff := now - est
+	pit_menu.rows[0].hint = "RESTART ABOUT %s %s    * = CREW CHIEF'S CALL" % [Game.ordinal(est), ("(+%d)" % diff) if diff > 0 else (("(%d)" % diff) if diff < 0 else "(SAME)")]
+	pit_menu._refresh()
+
+
+func _close_pit_menu() -> void:
+	if pit_menu == null or not is_instance_valid(pit_menu):
+		return
+	var call: String = _pit_info.options[pit_menu.value("plan")]
+	var wedge: float = [0.0, 120.0, -120.0][pit_menu.value("chassis")]
+	pit_menu.queue_free()
+	pit_menu = null
+	paused = false
+	synth.beep(1320.0, 0.08)
+	if race and race.control:
+		race.control.resolve_player(call, wedge)
+
+
+## After the stops: who pitted and where you'll restart, for a few seconds.
+func _on_pit_report(lines: Array) -> void:
+	if _pit_board and is_instance_valid(_pit_board):
+		_pit_board.queue_free()
+	_pit_board = Game.make_label("\n".join(lines), 16, Color.WHITE, 5)
+	_pit_board.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_pit_board.size = Vector2(640, 90)
+	_pit_board.position = Vector2(0, 76) # under the flag banner, clear of the messages below
+	ui_root.add_child(_pit_board)
+	var t := get_tree().create_timer(5.0)
+	var board := _pit_board
+	t.timeout.connect(func():
+		if is_instance_valid(board):
+			board.queue_free())
+
+
 func _plan_name(plan: String) -> String:
 	return {"4": "4 TIRES + FUEL", "2": "2 TIRES + FUEL", "F": "FUEL ONLY", "W": "WET TIRES + FUEL"}.get(plan, plan)
 
@@ -1777,7 +1864,7 @@ func _enter_race_setup(return_to := "") -> void:
 		{"id": "difficulty", "label": "DIFFICULTY", "values": diffs, "index": Game.settings.difficulty, "hint": "HOW FAST AND SHARP THE OTHER DRIVERS ARE"},
 		{"id": "field", "label": "FIELD SIZE", "values": Game.FIELDS.map(func(f): return "%d CARS" % f), "index": Game.settings.field},
 		{"id": "weekend", "label": "WEEKEND", "values": Game.WEEKENDS, "index": Game.settings.weekend, "hint": "QUALIFY TO SET YOUR STARTING SPOT"},
-		{"id": "cautions", "label": "CAUTIONS", "values": ["OFF", "ON"], "index": Game.settings.cautions},
+		{"id": "cautions", "label": "CAUTIONS", "values": ["OFF", "QUICK", "FULL"], "index": Game.settings.cautions, "hint": "QUICK: ABOUT 15 S FROM YELLOW TO GREEN. FULL: REAL CAUTION LAPS BEHIND THE PACE CAR"},
 		{"id": "weather", "label": "WEATHER", "values": ["CLEAR", "CHANGEABLE", "RAIN"], "index": int(Game.settings.get("weather", 0)), "hint": "RAIN HOLDS OVALS UNDER CAUTION.  ROAD COURSES RACE ON WET TIRES"},
 		{"id": "damage", "label": "DAMAGE", "values": ["OFF", "ON"], "index": Game.settings.damage, "hint": "DAMAGE HURTS SPEED, HANDLING AND CAN END YOUR RACE"},
 		{"id": "wear", "label": "FUEL + TIRE WEAR", "values": ["OFF", "ON"], "index": Game.settings.wear, "hint": "SCALED TO RACE LENGTH SO PIT STRATEGY MATTERS"},
@@ -1897,6 +1984,7 @@ func _enter_options() -> void:
 		{"id": "smooth", "label": "MOTION SMOOTHING", "values": ["OFF", "ON"], "index": 1 if Game.smoothing else 0, "hint": "SMOOTH MOTION ON 120/144 HZ SCREENS (ADDS UNDER 1 FRAME OF DELAY)"},
 		{"id": "blur", "label": "MOTION BLUR", "values": ["OFF", "LOW", "HIGH"], "index": Game.motion_blur, "hint": "DESKTOP MODERN LOOK ONLY"},
 		{"id": "wheel_setup", "label": "WHEEL SETUP", "hint": "STEERING WHEEL, PEDALS AND FORCE FEEDBACK"},
+		{"id": "tilt_sens", "label": "TILT STEERING", "values": ["GENTLE", "NORMAL", "QUICK", "VERY QUICK"], "index": int(Game.settings.get("tilt_sens", 1)), "hint": "PHONES: HOW FAR YOU TILT FOR FULL LOCK (18 / 12 / 9 / 6 DEGREES)"},
 		{"id": "radio", "label": "RADIO VOICE", "values": ["OFF", "ON"], "index": 1 if Game.radio_voice else 0, "hint": "SPOKEN SPOTTER AND CREW CHIEF CALLS"},
 		{"id": "vsync", "label": "VSYNC", "values": ["OFF", "ON"], "index": 1 if Game.vsync else 0, "hint": "OFF: LOWEST INPUT DELAY, MAY TEAR"},
 		{"id": "scan", "label": "SCANLINES (1999)", "values": ["OFF", "ON"], "index": 1 if Game.scanlines else 0},
@@ -1962,6 +2050,9 @@ func _on_menu_changed(id: String, idx: int) -> void:
 				Game.save_settings()
 			elif id == "radio":
 				Game.radio_voice = idx == 1
+				Game.save_settings()
+			elif id == "tilt_sens":
+				Game.settings["tilt_sens"] = idx
 				Game.save_settings()
 			elif id == "vsync":
 				Game.vsync = idx == 1

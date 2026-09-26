@@ -13,7 +13,12 @@ extends Control
 ## can't tell a thumb from a key or a gamepad button.
 
 const DRAG_RANGE := 70.0 # thumb travel (in 640x480 units) for full lock
-const TILT_RANGE := 28.0 # degrees of wheel-like rotation for full lock
+## Degrees of wheel-like rotation for full lock, per TILT STEERING setting
+## (GENTLE / NORMAL / QUICK / VERY QUICK). Small, so nobody has to twist an arm.
+const TILT_RANGES := [18.0, 12.0, 9.0, 6.0]
+const TILT_DEAD := 0.8 # degrees of dead zone round straight ahead
+const TILT_CURVE := 1.35 # >1: finer control round the centre, still full lock at the range
+const TILT_SMOOTH := 0.045 # seconds: takes the jitter out of the sensor
 
 var main: Node
 var active := false # shown once the screen has been touched
@@ -25,6 +30,8 @@ var _steer := 0.0
 var _tilt_value := 0.0
 var _tilt_ok := false
 var _tilt_center := 0.0
+var _tilt_smooth := 0.0 # filtered steering from the tilt
+var _was_paused := false
 var _js_window = null
 var _last_racing := false
 var _font: Font
@@ -84,6 +91,8 @@ func _layout() -> void:
 		if main.race.control:
 			_buttons.append([Rect2(x, 176, 48, 34), "PIT", "pit", "tap"])
 		_buttons.append([Rect2(x - 56, 96, 50, 34), "TILT" if tilt else "DRAG", "_toggle_tilt", "tap"])
+		if tilt and _tilt_ok:
+			_buttons.append([Rect2(x - 56, 136, 50, 34), "CTR", "_recenter", "tap"])
 	else:
 		# D-pad bottom left, A/B bottom right.
 		var c := Vector2(78, H - 82)
@@ -93,9 +102,26 @@ func _layout() -> void:
 		_buttons.append([Rect2(c + Vector2(24, -24), Vector2(48, 48)), ">", "steer_right", "tap"])
 		_buttons.append([Rect2(W - 96, H - 124, 72, 72), "A", "start", "tap"])
 		_buttons.append([Rect2(W - 176, H - 84, 60, 60), "B", "back", "tap"])
-		if main and main.paused:
+		if main and main.paused and main.pit_menu == null:
 			_buttons.append([Rect2(W - 116, H - 180, 92, 44), "RESUME", "pause", "tap"])
 			_buttons.append([Rect2(W - 176, H - 150, 60, 44), "QUIT", "quit_race", "tap"])
+
+
+## Steering (-1..1) for the phone turned `a` degrees from straight: a small dead
+## zone, a gentle curve for precision round the centre, full lock at the range the
+## TILT STEERING option sets.
+static func tilt_steer(a: float) -> float:
+	a = wrapf(a, -180.0, 180.0)
+	var range_deg: float = TILT_RANGES[clamp(int(Game.settings.get("tilt_sens", 1)), 0, TILT_RANGES.size() - 1)]
+	var x: float = clamp((abs(a) - TILT_DEAD) / (range_deg - TILT_DEAD), 0.0, 1.0)
+	return sign(a) * pow(x, TILT_CURVE)
+
+
+## Whatever angle the phone is at now becomes straight ahead.
+func _recenter() -> void:
+	_tilt_center = _tilt_value
+	_tilt_smooth = 0.0
+	main._sub("STEERING CENTRED", 1.2)
 
 
 func _toggle_tilt() -> void:
@@ -178,6 +204,12 @@ func _process(delta: float) -> void:
 		return
 	var racing := _racing()
 	_race_time += delta
+	# Coming back from a pause or the pit call: however the phone's held now is straight.
+	var paused_now: bool = main != null and main.paused
+	if _was_paused and not paused_now:
+		_tilt_center = _tilt_value
+		_tilt_smooth = 0.0
+	_was_paused = paused_now
 	if racing != _last_racing:
 		_release_all()
 		_last_racing = racing
@@ -207,10 +239,11 @@ func _process(delta: float) -> void:
 					dragging = true
 					drag = clamp((f.pos.x - f.start.x) / DRAG_RANGE, -1.0, 1.0)
 		if tilt and _tilt_ok and not dragging:
-			var a: float = _tilt_value - _tilt_center
-			a = sign(a) * max(abs(a) - 2.0, 0.0) # a small dead zone
-			_steer = clamp(a / TILT_RANGE, -1.0, 1.0)
+			var target: float = tilt_steer(_tilt_value - _tilt_center)
+			_tilt_smooth += (target - _tilt_smooth) * (1.0 - exp(-delta / TILT_SMOOTH))
+			_steer = _tilt_smooth
 		else:
+			_tilt_smooth = drag
 			_steer = drag
 		_send("accelerate", gas)
 		_send("brake", brake)
@@ -249,4 +282,4 @@ func _draw() -> void:
 		draw_line(Vector2(W * 0.5 - 60, y), Vector2(W * 0.5 + 60, y), Color(1, 1, 1, 0.2), 4.0)
 		draw_line(Vector2(W * 0.5, y), Vector2(W * 0.5 + _steer * 60.0, y), Color(1, 0.85, 0.2, 0.8), 4.0)
 		if tilt and not _tilt_ok and _race_time < 6.0:
-			draw_string(_font, Vector2(0, get_viewport_rect().size.y * 0.3), "NO TILT SENSOR HERE: DRAG ON THE LEFT TO STEER", HORIZONTAL_ALIGNMENT_CENTER, W, 12, Color(1, 1, 1, 0.75))
+			draw_string(_font, Vector2(0, y - 16.0), "NO TILT SENSOR HERE: DRAG ON THE LEFT TO STEER", HORIZONTAL_ALIGNMENT_CENTER, W, 12, Color(1, 1, 1, 0.75))

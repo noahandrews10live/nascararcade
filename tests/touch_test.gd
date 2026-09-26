@@ -112,6 +112,21 @@ func _run() -> void:
 	_check(right > 0.9, "dragging right steers right (full lock at the end of the travel)")
 	_check(left < -0.6 and left > -0.8, "dragging left steers left in proportion")
 	_check(abs(centre) < 0.01, "letting go centres the steering")
+	# Tilt: full lock at a small angle, finer near the centre, a dead zone at straight.
+	var TC = t.get_script()
+	var game := root.get_node("Game")
+	game.settings["tilt_sens"] = 1
+	var s12: float = TC.tilt_steer(12.0)
+	var s6: float = TC.tilt_steer(6.0)
+	var s05: float = TC.tilt_steer(0.5)
+	var sm12: float = TC.tilt_steer(-12.0)
+	print("   tilt (NORMAL): 0.5 deg %.2f, 6 deg %.2f, 12 deg %.2f, -12 deg %.2f" % [s05, s6, s12, sm12])
+	_check(is_equal_approx(s12, 1.0) and is_equal_approx(sm12, -1.0), "12 degrees of tilt is full lock (NORMAL)")
+	_check(s6 > 0.3 and s6 < 0.5, "half the tilt gives less than half the lock (precise round the centre)")
+	_check(s05 == 0.0, "a tiny wobble does nothing")
+	game.settings["tilt_sens"] = 3
+	_check(is_equal_approx(TC.tilt_steer(6.0), 1.0), "VERY QUICK: 6 degrees is full lock")
+	game.settings["tilt_sens"] = 1
 	# A key press hands control back to the keyboard.
 	var k := InputEventKey.new()
 	k.keycode = KEY_UP
