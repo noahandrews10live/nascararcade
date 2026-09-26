@@ -3,6 +3,11 @@ extends Control
 
 var race: Node3D
 var track: Node3D
+## Layout size in HUD units (the HUD is scaled to fit its view; split screen uses a
+## wide, short layout). Set before the HUD enters the tree.
+var W := 640.0
+var H := 480.0
+var player_idx := 1 # 1 = race.player, 2 = race.player2
 var control: Node = null # race_control.gd in Single Race mode
 var time_left := 0.0
 var show_timer := true
@@ -51,24 +56,24 @@ func _ready() -> void:
 	l_msg = Game.make_label("", 48, Color(1, 0.9, 0.2), 8)
 	l_msg.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	l_msg.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	l_msg.size = Vector2(640, 80)
-	l_msg.position = Vector2(0, 150)
-	l_msg.pivot_offset = Vector2(320, 40)
+	l_msg.size = Vector2(W, 80)
+	l_msg.position = Vector2(0, H * 0.31)
+	l_msg.pivot_offset = Vector2(W * 0.5, 40)
 	add_child(l_msg)
 	l_spot = Game.make_label("", 20, Color(1.0, 0.95, 0.5), 6)
 	l_spot.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	l_spot.size = Vector2(640, 30)
-	l_spot.position = Vector2(0, 392)
+	l_spot.size = Vector2(W, 30)
+	l_spot.position = Vector2(0, H - 88)
 	add_child(l_spot)
 	l_flag = Game.make_label("", 18, Color.BLACK, 0)
 	l_flag.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	l_flag.size = Vector2(240, 24)
-	l_flag.position = Vector2(200, 4)
+	l_flag.position = Vector2(W * 0.5 - 120, 4)
 	add_child(l_flag)
 	l_sub = Game.make_label("", 22, Color.WHITE, 6)
 	l_sub.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	l_sub.size = Vector2(640, 30)
-	l_sub.position = Vector2(0, 222)
+	l_sub.size = Vector2(W, 30)
+	l_sub.position = Vector2(0, H * 0.46)
 	add_child(l_sub)
 
 
@@ -80,16 +85,16 @@ func _add(l: Label, p: Vector2, corner: int) -> Label:
 			l.position = p
 		1:
 			l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-			l.size = Vector2(640, 0)
+			l.size = Vector2(W, 0)
 			l.position = Vector2(0, p.y)
 		2:
 			l.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 			l.size = Vector2(200, 0)
-			l.position = Vector2(640 - 200 + p.x, p.y)
+			l.position = Vector2(W - 200 + p.x, p.y)
 		3:
 			l.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 			l.size = Vector2(120, 0)
-			l.position = Vector2(640 - 120 + p.x, 480 + p.y)
+			l.position = Vector2(W - 120 + p.x, H + p.y)
 	return l
 
 
@@ -139,7 +144,8 @@ func _process(delta: float) -> void:
 		l_spot.visible = false
 	if race == null or race.player == null:
 		return
-	var p: Node3D = race.player
+	var p: Node3D = race.player if player_idx == 1 or race.player2 == null else race.player2
+	l_board.visible = H > 440.0
 	# Flag / race-control strip (Single Race mode)
 	l_flag.visible = control != null
 	if control:
@@ -197,17 +203,17 @@ func _process(delta: float) -> void:
 func _draw() -> void:
 	if race == null or race.player == null or track == null:
 		return
-	var p: Node3D = race.player
+	var p: Node3D = race.player if player_idx == 1 or race.player2 == null else race.player2
 	if control:
 		var fc: Color = [Color(0.1, 0.8, 0.2), Color(1.0, 0.85, 0.05), Color(0.95, 0.95, 0.95), Color(0.9, 0.9, 0.9)][control.flag]
-		draw_rect(Rect2(200, 4, 240, 24), fc)
+		draw_rect(Rect2(W * 0.5 - 120, 4, 240, 24), fc)
 		if control.flag == control.Flag.CHECKERED:
 			for i in 24:
 				for j in 2:
 					if (i + j) % 2 == 0:
-						draw_rect(Rect2(200 + i * 10, 4 + j * 12, 10, 12), Color(0.05, 0.05, 0.05))
+						draw_rect(Rect2(W * 0.5 - 120 + i * 10, 4 + j * 12, 10, 12), Color(0.05, 0.05, 0.05))
 	# Tachometer arc (LED segments)
-	var center := Vector2(575, 425)
+	var center := Vector2(W - 65, H - 55)
 	var radius := 58.0
 	var segs := 24
 	var frac: float = clamp((p.rpm() - 2000.0) / 7600.0, 0.0, 1.0)
@@ -220,11 +226,11 @@ func _draw() -> void:
 			col = Color(0.15, 0.15, 0.2, 0.7)
 		draw_arc(center, radius, a0, a1, 3, col, 9.0)
 	# Draft meter
-	var dm := Rect2(Vector2(478, 468), Vector2(150, 6))
+	var dm := Rect2(Vector2(W - 162, H - 12), Vector2(150, 6))
 	draw_rect(dm, Color(0, 0, 0, 0.6))
 	draw_rect(Rect2(dm.position, Vector2(dm.size.x * p.draft, dm.size.y)), Color(0.3, 1.0, 1.0))
 	# Car condition: damage by corner, tyres and fuel.
-	var cc := Vector2(160, 400)
+	var cc := Vector2(160, H - 80)
 	var dmg: Dictionary = p.damage
 	var dc := func(x: float) -> Color:
 		return Color(0.3, 1.0, 0.4).lerp(Color(1.0, 0.85, 0.2), clamp(x * 2.0, 0.0, 1.0)).lerp(Color(1.0, 0.2, 0.15), clamp(x * 2.0 - 1.0, 0.0, 1.0))
@@ -239,8 +245,8 @@ func _draw() -> void:
 	draw_string(f, cc + Vector2(36, 44), "FUEL", HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color(0.8, 0.9, 1.0))
 	draw_string(f, cc + Vector2(36, 58), "%.1f" % (p.fuel / 3.785), HORIZONTAL_ALIGNMENT_LEFT, -1, 12, dc.call(1.0 - p.fuel / 75.0))
 	# Minimap
-	var mm_pos := Vector2(12, 360)
-	var mm_size := 110.0
+	var mm_size: float = min(110.0, H * 0.3)
+	var mm_pos := Vector2(12, H - mm_size - 10)
 	draw_rect(Rect2(mm_pos - Vector2(4, 4), Vector2(mm_size + 8, mm_size + 8)), Color(0, 0, 0, 0.35))
 	var pts: PackedVector2Array = track.minimap
 	var poly := PackedVector2Array()

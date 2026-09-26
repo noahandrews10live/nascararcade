@@ -821,6 +821,11 @@ func _setup_input() -> void:
 		"shift_down": [KEY_Q, "btn:%d" % JOY_BUTTON_LEFT_SHOULDER],
 		"pause": [KEY_ESCAPE, KEY_P, "btn:%d" % JOY_BUTTON_BACK],
 		"quit_race": [KEY_Q],
+		"p2_accelerate": [KEY_I, "p2btn:%d" % JOY_BUTTON_A, "p2axis:%d+" % JOY_AXIS_TRIGGER_RIGHT],
+		"p2_brake": [KEY_K, "p2btn:%d" % JOY_BUTTON_B, "p2axis:%d+" % JOY_AXIS_TRIGGER_LEFT],
+		"p2_left": [KEY_J, "p2btn:%d" % JOY_BUTTON_DPAD_LEFT, "p2axis:%d-" % JOY_AXIS_LEFT_X],
+		"p2_right": [KEY_L, "p2btn:%d" % JOY_BUTTON_DPAD_RIGHT, "p2axis:%d+" % JOY_AXIS_LEFT_X],
+		"p2_pit": [KEY_U, "p2btn:%d" % JOY_BUTTON_X],
 		"toggle_scanlines": [KEY_F2],
 		"toggle_graphics": [KEY_F3],
 		"toggle_fullscreen": [KEY_F11],
@@ -830,6 +835,10 @@ func _setup_input() -> void:
 			InputMap.add_action(action, 0.25)
 		for b in binds[action]:
 			var ev: InputEvent
+			var dev := -1
+			if b is String and b.begins_with("p2"):
+				dev = 1 # second gamepad
+				b = b.substr(2)
 			if b is String and b.begins_with("axis:"):
 				var jm := InputEventJoypadMotion.new()
 				jm.axis = int(b.substr(5, b.length() - 6)) as JoyAxis
@@ -843,6 +852,7 @@ func _setup_input() -> void:
 				var k := InputEventKey.new()
 				k.physical_keycode = b as Key
 				ev = k
+			ev.device = dev
 			InputMap.action_add_event(action, ev)
 
 
@@ -852,6 +862,16 @@ func _unhandled_input(event: InputEvent) -> void:
 	if event.is_action_pressed("toggle_fullscreen"):
 		var w := get_window()
 		w.mode = Window.MODE_WINDOWED if w.mode == Window.MODE_FULLSCREEN else Window.MODE_FULLSCREEN
+
+
+## In split screen, player 1's gamepad bindings listen to the first pad only.
+func set_two_player_input(on: bool) -> void:
+	for action in ["accelerate", "brake", "steer_left", "steer_right", "pit", "pit_option", "shift_up", "shift_down", "camera"]:
+		if not InputMap.has_action(action):
+			continue
+		for ev in InputMap.action_get_events(action):
+			if ev is InputEventJoypadButton or ev is InputEventJoypadMotion:
+				ev.device = 0 if on else -1
 
 
 func track() -> Dictionary:

@@ -13,6 +13,7 @@ var track: Node3D
 var cars: Array[Node3D] = []
 var order: Array[Node3D] = [] # current running order
 var player: Node3D = null
+var player2: Node3D = null # split-screen second player
 var laps := 3
 var time := 0.0
 var running := false
@@ -38,7 +39,7 @@ var wear_scale := 1.0 # fuel burn / tyre wear multiplier so short races still ne
 
 
 ## `grid` (optional) is the starting order as team indices, e.g. from qualifying.
-func setup(trk: Node3D, player_team: int, lap_count: int, size := 40, grid: Array = []) -> void:
+func setup(trk: Node3D, player_team: int, lap_count: int, size := 40, grid: Array = [], player2_team := -1) -> void:
 	track = trk
 	laps = lap_count
 	field_size = size
@@ -54,7 +55,7 @@ func setup(trk: Node3D, player_team: int, lap_count: int, size := 40, grid: Arra
 		Game._fill_teams()
 	var team_ids: Array[int] = []
 	for i in Game.teams.size():
-		if i != player_team:
+		if i != player_team and i != player2_team:
 			team_ids.append(i)
 	team_ids.shuffle()
 	var grid_player: int = min(int(track.cfg.grid_player), field_size - 1)
@@ -69,12 +70,16 @@ func setup(trk: Node3D, player_team: int, lap_count: int, size := 40, grid: Arra
 				roster.append(player_team)
 			else:
 				roster.append(team_ids.pop_back())
+	var grid_p2 := -1
+	if player2_team >= 0:
+		grid_p2 = grid_player + 1 if grid_player + 1 < field_size else grid_player - 1
+		roster[grid_p2] = player2_team
 	for p in roster.size():
 		var c: Node3D = Car.new()
 		c.name = "Car%s" % Game.teams[roster[p]].num
 		add_child(c)
 		c.setup(Game.teams[roster[p]], track)
-		c.is_player = player_team >= 0 and p == grid_player
+		c.is_player = (player_team >= 0 and p == grid_player) or p == grid_p2
 		c.ai = not c.is_player
 		c.assisted = true
 		c.manual = Game.manual_shift
@@ -83,7 +88,11 @@ func setup(trk: Node3D, player_team: int, lap_count: int, size := 40, grid: Arra
 		c.ai_aggression = rng.randf_range(0.2, 0.9)
 		c.set_meta("grid", p)
 		cars.append(c)
-		if c.is_player:
+		if p == grid_p2:
+			player2 = c
+			c.assisted = Game.assists
+			Game.apply_setup(c)
+		elif c.is_player:
 			player = c
 			c.assisted = Game.assists or arcade_setup
 			if not arcade_setup:
