@@ -547,6 +547,9 @@ func apply_setup(c: Node3D) -> void:
 	var bal: float = setup.balance # + = looser
 	c.grip_front = 0.98 + bal * 0.012
 	c.grip_rear = 1.07 - bal * 0.014
+	# Real setup pieces: wedge (cross weight) and front bar stiffness.
+	c.wedge = -bal * 250.0
+	c.k_arb_f = 35000.0 * (1.0 - 0.06 * bal)
 	match int(setup.pressure):
 		0:
 			c.mu *= 1.025
