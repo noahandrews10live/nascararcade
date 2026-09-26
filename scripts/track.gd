@@ -666,7 +666,7 @@ func _build_scenery() -> void:
 			spot.position = lp + up * 33.0 - right[i] * 1.0
 			spot.look_at(pos[i] - right[i] * 6.0, up)
 			spot.light_color = Color(1.0, 0.95, 0.85)
-			spot.light_energy = 9.0
+			spot.light_energy = 6.0
 			spot.spot_range = 150.0
 			spot.spot_angle = 50.0
 			spot.spot_attenuation = 0.6
