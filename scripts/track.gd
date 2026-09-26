@@ -470,7 +470,7 @@ func _build_profile() -> void:
 	var cla_v: float = cfg.get("cla", 2.2)
 	for i in n:
 		speed_profile[i] = corner_speed(i, 1.0, cla_v)
-	var decel := 13.0
+	var decel := 10.5 # what the cars can really brake at (four-tyre model), with margin
 	for _pass in 2:
 		for idx in range(n - 1, -1, -1):
 			var nxt := speed_profile[(idx + 1) % n]
