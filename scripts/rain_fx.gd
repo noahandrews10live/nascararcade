@@ -129,7 +129,7 @@ func _refresh_film() -> void:
 ## Mist behind the rear tyres: a pool of emitters handed to the nearest cars.
 func _build_spray() -> void:
 	var quad := QuadMesh.new()
-	quad.size = Vector2(1.6, 1.6)
+	quad.size = Vector2(2.2, 2.2)
 	var m := StandardMaterial3D.new()
 	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
@@ -139,7 +139,7 @@ func _build_spray() -> void:
 	quad.material = m
 	var ramp := Gradient.new()
 	ramp.offsets = PackedFloat32Array([0.0, 0.2, 1.0])
-	ramp.colors = PackedColorArray([Color(0.85, 0.87, 0.9, 0.0), Color(0.85, 0.87, 0.9, 0.35), Color(0.85, 0.87, 0.9, 0.0)])
+	ramp.colors = PackedColorArray([Color(0.85, 0.87, 0.9, 0.0), Color(0.85, 0.87, 0.9, 0.55), Color(0.85, 0.87, 0.9, 0.0)])
 	for k in SPRAY_POOL:
 		if Game.forward_plus:
 			var p := GPUParticles3D.new()
@@ -272,7 +272,8 @@ func update(delta: float, race: Node3D, cam: Camera3D, view: String, focus: Node
 				_refill = 0.0
 	else:
 		_wipe_t = -1.0
-	_refill = min(_refill + delta / 1.8, 1.0)
+	# Heavy rain covers the glass again almost as soon as the blade has passed.
+	_refill = min(_refill + delta / lerp(2.0, 0.5, clamp(on_glass, 0.0, 1.0)), 1.0)
 	glass_mat.set_shader_parameter("amount", clamp(on_glass, 0.0, 1.0))
 	glass_mat.set_shader_parameter("speed", clamp(focus.speed() / 90.0 if focus else 0.0, 0.0, 1.2))
 	glass_mat.set_shader_parameter("wipe", _wipe_t)
