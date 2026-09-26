@@ -291,6 +291,12 @@ func _apply_graphics() -> void:
 		sun.directional_shadow_max_distance = 320.0
 		sun.shadow_blur = 1.2
 		sun.light_angular_distance = 0.6
+		if not Game.forward_plus:
+			# The browser renderer has no SSAO and lights in a flatter space, so the
+			# sky fill washes everything out; pull it back.
+			env.ambient_light_energy *= 0.5
+			env.tonemap_exposure *= 0.85
+			sun.light_energy *= 1.1
 		_apply_quality(night)
 	else:
 		env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
