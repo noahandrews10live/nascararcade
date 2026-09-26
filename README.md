@@ -1,4 +1,4 @@
-# Speedway Thunder '99 — Stock Car Arcade
+# Speedway Thunder '99
 
 Modern mode:
 
@@ -8,7 +8,9 @@ Modern mode:
 
 ![Title screen](docs/title.png) ![Racing](docs/race.png)
 
-A late-90s arcade stock car racer, like the NASCAR arcade cabinets of 1999, built in **Godot 4.3**.
+A stock car racing game built in **Godot 4.3**. It has the feature set of the classic
+NASCAR console games of the early 2000s, with racing modelled on 2026 Next Gen Cup cars.
+It also keeps its roots as a 1999 arcade cabinet racer.
 
 Everything is generated at runtime: tracks, grandstands, cars, the HUD and the synth
 audio. The project has no imported assets.
@@ -19,33 +21,69 @@ audio. The project has no imported assets.
   - clear-coat car paint and glossy glass;
   - procedurally generated asphalt, grass and concrete textures with normal maps;
   - soft real-time sun shadows, ambient occlusion and screen-space reflections;
-  - a physically based sky, bloom, and aerial haze;
-  - volumetric fog with light-tower beams on the night track.
-  Each track has its own time of day: midday, golden hour or night.
-- **1999** is the original look: 640×480 upscaled, vertex colours, per-vertex lighting,
-  blob shadows and CRT scanlines (F2). The web build always uses this mode, because
-  browsers only get Godot's Compatibility renderer.
+  - a physically based sky, bloom and aerial haze;
+  - volumetric fog with light-tower beams at night.
+- **1999** is the original look: 640×480 upscaled, vertex colours, blob shadows and
+  CRT scanlines (F2). The web build always uses this mode.
 
-## Features
+## Game modes
 
-- **Arcade flow.** Attract-mode demo race, then course select, car select (each with a
-  20-second timer), a rolling two-wide start with a 3-2-1 green flag, the race, and results.
-  After the results you return to the title screen.
-- **Arcade clock.** A countdown timer gets **EXTENDED TIME** each lap. If it runs out,
-  it's **GAME OVER**.
-- **Three ovals:**
-  - *Thunder Beach* is a 2.15 mi superspeedway tri-oval with 31° banking. Drafting matters most here (Beginner).
-  - *Lone Star* is a 1.46 mi quad-oval. You have to lift in the turns (Advanced).
-  - *Thunder Valley* is a 0.54 mi night short track with 36° banking and heavy braking (Expert).
-- **12-car field** of fictional teams. The AI changes lanes to pass, brakes for traffic and
-  rubber-bands to keep the pack close.
-- **Drafting.** Tuck in behind a car for extra top speed. The DRAFT meter lights up when you're in it.
-- **Contact.** You can bump-draft, trade paint side by side and scrape the wall (sparks, speed loss, camera shake).
-- **Banking.** Banked turns increase grip, and the cars and camera tilt with the banking.
-- **Three cameras:** far chase, near chase and bumper.
-- **Procedural audio.** The V8 engine note follows RPM through a 4-speed automatic.
-  There are also pass-by whooshes, tyre squeal, crunches and countdown beeps.
-- **Records.** Best lap and best race time for each track are saved to `user://records.cfg`.
+| Mode | What it is |
+|---|---|
+| **Arcade** | The 1999 cabinet game: 16 cars, a short race and a countdown clock with EXTENDED TIME each lap. |
+| **Single Race** | A full race weekend (practice, qualifying, race) with 20–40 cars and the full rules below. |
+| **Season** | A 6-, 12- or 36-race championship with points, wins and top 5s. Standings are saved between sessions. |
+| **Career** | Rookie to champion. Start underfunded, then earn prize money and reputation, sign sponsors and buy engine, aero, chassis and pit-crew R&D. It runs season after season with a career record. |
+| **2 Player** | Split-screen racing. Player 2 uses I/J/K/L (U to pit) or a second gamepad. |
+| **Lightning Challenges** | Eight race-defining scenarios, such as a last-lap draft, a charge from the back or saving fuel. Completing five unlocks the #00 Thunderbolt legend car. |
+| **Paint Shop** | Create your own car: number, driver name, sponsor and colours. You can race it in every mode. |
+
+## Racing: how it models 2026 Next Gen racing
+
+- **Car physics.** Each car is a rigid body on the banked track, with:
+  - tyres that have a grip peak and fall-off, and grip that changes with load;
+  - downforce and drag;
+  - a 5-speed sequential gearbox;
+  - fuel burn and tyre wear.
+
+  Cars can get loose or tight, spin, and wreck.
+- **Packages.** Each track uses a real rules package:
+  - 510 hp, low downforce at the superspeedways;
+  - 670 hp on the intermediates;
+  - 750 hp at the short tracks and on the road course.
+- **Drafting.**
+  - Superspeedways: pack drafting worth about 8 mph that builds through a line of cars. A car on your bumper pushes you, and a car alongside your rear quarter slows you down (side-drafting).
+  - Other tracks: the draft is smaller, and a car close behind another loses front downforce in its dirty air and pushes up the track.
+- **Contact and wrecks.** Car-to-car and wall contact is resolved as physical impulses at the contact point:
+  - A tap in the right rear can hook a car into a spin.
+  - Pack wrecks collect several cars.
+  - Damage reduces aero, power and alignment, and heavy damage retires the car.
+- **Race rules.**
+  - **Cautions:** the pace car comes out and scoring freezes. The field slows and forms single file, and wrecked cars are towed off.
+  - **Pit road:** opens after a lap under caution. The free pass (lucky dog) and wave-arounds apply.
+  - **Restarts:** "one to go", then double-file restarts with the choose rule.
+  - **Stages:** stage points go to the top 10 at the end of each stage.
+  - **Finish:** overtime (green-white-checkered), and a caution on the final lap ends the race.
+- **Pit stops.** Choose 4 tyres, 2 tyres or fuel only; stops also repair damage. Pit road is driven automatically, and the AI runs its own pit strategy.
+- **Spotter.** Callouts for car high, car low, three wide and clear.
+- **Garage.** Adjust handling balance (tight or loose), tyre pressure (grip versus wear) and gearing.
+- **Replays.** After any race, press R to watch it with TV, chase, bumper or helicopter cameras.
+
+## Tracks (11, all fictional)
+
+| Track | Type |
+|---|---|
+| Thunder Beach | 2.1-mile tri-oval superspeedway, 31° banking |
+| Big Sky | 2.6-mile superspeedway, 33° banking |
+| Lone Star | 1.4-mile quad-oval, sunset |
+| Gulf Coast | 1.6-mile oval at dusk |
+| Motor City | 2.3-mile D-oval |
+| Keystone Triangle | 2.8-mile triangle, a different banking in each corner |
+| Palmetto | 1.2-mile egg-shaped oval |
+| Desert Sun | 1.3-mile dog-leg oval |
+| Thunder Valley | 0.5-mile high-banked night short track |
+| Magnolia | 0.5-mile flat paperclip |
+| Canyon Ridge | 3.2-mile road course with left and right turns |
 
 ## Running
 
@@ -83,6 +121,10 @@ godot --headless --path . --export-release Web build/web/index.html
 | Change camera | C | Y |
 | Pause | Esc / P | Back |
 | Quit race (while paused) | Q | — |
+| Pit this lap / change pit plan (Single Race, Season, Career) | Tab / O | X / D-pad up |
+| Choose restart lane at "one to go" | ← / → | Left stick |
+| Shift up / down (manual gearbox) | E / Q | RB / LB |
+| Watch replay (results screen) | R | Right stick click |
 | Graphics: Modern / 1999 | F3 | — |
 | Toggle scanlines (1999 mode) | F2 | — |
 | Fullscreen | F11 | — |
@@ -90,39 +132,57 @@ godot --headless --path . --export-release Web build/web/index.html
 ## Project layout
 
 ```
-project.godot          Forward+ on desktop, Compatibility on web; 640x480 base UI
-scenes/main.tscn       single scene; everything else is built in code
-scripts/game.gd        autoload: tracks, teams, input map, records, font, retro/modern materials
-scripts/main.gd        state machine, menus, cameras, arcade clock
-scripts/track.gd       oval generator: centre line, banking, speed profile, meshes, scenery
-scripts/race.gd        field spawn, AI drivers, drafting, contact, laps, running order
-scripts/car.gd         car model + arcade physics in track space (s, d, yaw)
-scripts/hud.gd         time / lap / position / tach / minimap / messages
-scripts/audio.gd       AudioStreamGenerator software synth
-tests/smoke_test.gd    headless: runs a full autopilot race on every track
-tests/screenshots.gd   captures screenshots of each screen (needs a renderer)
-tests/screenshots_modern.sh  same, using the Forward+ renderer under xvfb
+project.godot              Forward+ on desktop, Compatibility on web; 640x480 base UI
+scenes/main.tscn           single scene; everything else is built in code
+scripts/game.gd            autoload: tracks, teams, input, settings, season, career,
+                           paint shop, challenges, records, retro/modern materials
+scripts/main.gd            state machine, menus, race weekends, cameras, replays, split screen
+scripts/menu.gd            reusable arcade-style list menu
+scripts/track.gd           track builder (ovals + segment layouts), banking, pit road,
+                           AI speed profile, meshes and scenery
+scripts/car.gd             Next Gen car: rigid-body physics on the banked surface, tyres,
+                           gearbox, damage, fuel/wear, assists, model
+scripts/race.gd            field, AI drivers, drafting / dirty air, contact, laps, recording
+scripts/race_control.gd    flags, cautions, pace car, pit stops, restarts, stages, points
+scripts/hud.gd             HUD (scales to any view size, used twice in split screen)
+scripts/audio.gd           AudioStreamGenerator software synth
+tests/                     headless test benches and screenshot scripts (see below)
 ```
 
 ### How the physics works
 
-Each car's state is kept in *track space*: distance along the centre line `s`, lateral
-offset `d` and a yaw angle relative to the track. Every frame, the track's curvature turns
-the ground under the car, so you have to steer into each turn. How much you can steer
-depends on a grip limit that includes the banking:
-`g·(sinθ + μcosθ)/(cosθ − μsinθ)`. If you turn harder than that, the tyres scrub off speed.
-The walls, apron, grass, drafting and car-to-car contact are all simple 1D/2D checks in
-this space. That keeps the handling stable and predictable, the way an arcade racer should feel.
+Each car's position is kept in *track space*: distance along the centre line and offset
+across the track. Its heading, body-frame velocities and yaw rate are then integrated like
+a real vehicle:
+- **Tyres:** front and rear forces from slip angles, using a Pacejka-style curve inside a
+  friction circle, with load sensitivity.
+- **Banking:** the banked surface adds normal load, its slope pulls the car toward the
+  inside, and the turn curves less within the tilted road plane.
+- **Aero:** downforce and drag, adjusted by the cars around you.
+
+The AI and the optional player assists steer by requesting a yaw rate, which lets them
+catch small slides. Hard hits switch that help off, so real wrecks still happen.
 
 ## Tests
 
-```sh
-# Full race on each track with the player on autopilot (~20 s)
-godot --headless --fixed-fps 60 --path . -s tests/smoke_test.gd
+All tests run headless (`godot --headless --fixed-fps 60 --path . -s <script>`):
 
-# Screenshots of each screen (Linux without a display: wrap in xvfb-run)
-OUT=/tmp/shots godot --rendering-driver opengl3 --fixed-fps 60 --path . -s tests/screenshots.gd
-```
+| Script | What it checks |
+|---|---|
+| `tests/smoke_test.gd` | Arcade game flow on every track |
+| `tests/physics_test.gd` | Solo lap speeds, draft gain and a 40-car race per track |
+| `tests/field_test.gd` | Full-field AI race with incident tracing (`TRACK=n SECS=s TRACE=car#`) |
+| `tests/rules_test.gd` | A full rules race: cautions, pits, stages and points |
+| `tests/race_mode_test.gd` | Single Race through the real game flow |
+| `tests/weekend_test.gd` | Practice → qualifying → race, plus a season round |
+| `tests/career_test.gd` | Career money, R&D, season rollover |
+| `tests/challenge_test.gd` | Every Lightning Challenge reaches a verdict |
+| `tests/tracks_test.gd` | Every track builds and laps cleanly |
+| `tests/split_shots.gd` | Two-player race (screenshot with `OUT=dir` and a renderer) |
+
+`tests/screenshots.gd`, `tests/menu_shots.gd` and `tests/replay_shots.gd` capture
+screenshots when run with a renderer (for example under `xvfb-run`).
+`tests/screenshots_modern.sh` does the same with the Forward+ renderer.
 
 In headless mode, Godot's dummy renderer prints `mesh_get_surface_count` errors.
 They're harmless and don't appear with a real renderer.
