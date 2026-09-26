@@ -86,6 +86,7 @@ var rpm_now := 3000.0
 # Aero from other cars (set by the race each frame)
 var drag_mult := 1.0
 var df_front_mult := 1.0
+var df_rear_mult := 1.0 # a car tucked in behind takes air off the spoiler
 var draft := 0.0 # 0..1, for the HUD
 
 # Condition
@@ -186,10 +187,17 @@ var _fx := PackedFloat32Array([0, 0, 0, 0])
 var _fy_prev := PackedFloat32Array([0, 0, 0, 0])
 var _alpha := PackedFloat32Array([0, 0, 0, 0])
 var _road := PackedFloat32Array([0, 0, 0, 0])
+var _road_rate := PackedFloat32Array([0, 0, 0, 0])
 var _f_static := PackedFloat32Array([0, 0, 0, 0])
 var _tyre_factor := PackedFloat32Array([1, 1, 1, 1]) # temperature x wear, per tyre
 var _slip_power := PackedFloat32Array([0, 0, 0, 0]) # energy put into each tyre this tick
 var _track_grip := 1.0
+# Tyres, per corner (FL, FR, RL, RR): temperature (C), pressure (psi), wear (0 = new)
+var tyre_temp := PackedFloat32Array([60, 60, 60, 60])
+var tyre_psi := PackedFloat32Array([0, 0, 0, 0])
+var tyre_wear4 := PackedFloat32Array([0, 0, 0, 0])
+var cold_psi := 1.0 # garage pressure setting (1 = standard)
+var _wear_avg := 0.0
 var r_max_now := 1.0 # yaw rate the grip allows right now (for the AI)
 var _fy_f_prev := 0.0
 var _fy_r_prev := 0.0
@@ -232,8 +240,58 @@ func total_damage() -> float:
 	return (damage.front + damage.rear + damage.left + damage.right) * 0.25
 
 
+## Average grip left in the tyres (temperature and wear), for the HUD and the AI.
 func tyre_grip() -> float:
-	return 1.0 - 0.14 * clamp(tyre_wear, 0.0, 1.5)
+	return (_tyre_factor[0] + _tyre_factor[1] + _tyre_factor[2] + _tyre_factor[3]) * 0.25
+
+
+## Picks up tyre changes made from outside (pit stops, challenges) and works out
+## each tyre's grip from its temperature, pressure and wear.
+func _update_tyres_before() -> void:
+	if abs(tyre_wear - _wear_avg) > 0.00001:
+		if tyre_wear <= 0.0001:
+			# Fresh sticker tyres: no wear, and cold (pit stops cost grip for a lap).
+			var amb: float = track.track_temp() if track else 30.0
+			for i in 4:
+				tyre_wear4[i] = 0.0
+				tyre_temp[i] = amb + 12.0
+		elif _wear_avg > 0.0:
+			var f: float = tyre_wear / _wear_avg
+			for i in 4:
+				tyre_wear4[i] *= f
+		else:
+			for i in 4:
+				tyre_wear4[i] = tyre_wear
+		_wear_avg = tyre_wear
+	for i in 4:
+		var t: float = tyre_temp[i]
+		# Grip peaks around 100 C: cold tyres are slick, overheated ones go greasy.
+		var dt: float = (t - 100.0) / 60.0
+		var temp_f: float = 1.0 - 0.12 * min(dt * dt, 1.0)
+		# Hot air raises the pressure; past its sweet spot the contact patch shrinks.
+		var psi: float = 22.0 * cold_psi * (t + 273.0) / (track.track_temp() + 273.0 if track else 303.0)
+		tyre_psi[i] = psi
+		var over: float = max(psi / (22.0 * 1.2) - 1.0, 0.0)
+		_tyre_factor[i] = temp_f * (1.0 - 0.14 * clamp(tyre_wear4[i], 0.0, 1.5)) * (1.0 - 2.0 * over * over)
+
+
+func _update_tyres_after(delta: float, travelled: float) -> void:
+	var amb: float = track.track_temp()
+	var cool: float = 0.004 + 0.0004 * abs(v)
+	var total := 0.0
+	for i in 4:
+		var p_slip: float = _slip_power[i] / max(delta, 0.001)
+		var p_roll: float = 0.004 * _nw[i] * abs(v)
+		var t: float = tyre_temp[i]
+		# Fronts run bigger slip angles for the same work, so less of it is heat.
+		t += (p_slip * (0.000125 if i < 2 else 0.00021) + p_roll * 0.00012 - (t - amb) * cool) * delta
+		tyre_temp[i] = clamp(t, amb - 5.0, 260.0)
+		var hot: float = 1.0 + max(t - 115.0, 0.0) / 20.0
+		tyre_wear4[i] += (travelled / 1000.0 * 0.004 + _slip_power[i] * 2.2e-8 * hot) * burn_scale * wear_mult
+		_slip_power[i] = 0.0
+		total += tyre_wear4[i]
+	tyre_wear = total * 0.25
+	_wear_avg = tyre_wear
 
 
 func _engine_power(rpm_v: float) -> float:
@@ -337,17 +395,16 @@ func step(delta: float) -> void:
 		steer_in = 0.0
 
 	_update_static_loads()
-	var tg := tyre_grip()
-	for i in 4:
-		_tyre_factor[i] = tg
+	_update_tyres_before()
+	_track_grip = track.grip_at(ss, d)
 	var steps: int = 4 if is_player else 2 # AI cars integrate at 120 Hz, yours at 240 Hz
 	var h := delta / steps
 	for _i in steps:
 		_integrate(h)
 	_walls()
-	# Wear and fuel
+	# Tyres heat up and wear from the work they do; fuel burns with throttle.
 	var travelled: float = abs(v) * delta
-	tyre_wear += travelled / 1000.0 * (0.006 + 0.08 * slide * slide + 0.01 * scrub) * burn_scale * wear_mult
+	_update_tyres_after(delta, travelled)
 	fuel = max(0.0, fuel - travelled / 1000.0 * 0.62 * (0.3 + 0.7 * throttle) * burn_scale)
 	spinning = abs(yaw) > 0.6 and speed() > 8.0
 	if total_damage() > 0.72 and not out:
@@ -410,7 +467,15 @@ func _integrate(h: float) -> void:
 		lift_side *= 0.4
 		lift_back *= 0.35
 	var df_f: float = df * 0.45 * df_front_mult
-	var df_r: float = df * 0.55
+	var df_r: float = df * 0.55 * df_rear_mult
+
+	# --- road under each tyre (seams, bumps)
+	var cy := cos(yaw)
+	var sy := sin(yaw)
+	for i in 4:
+		var rh: float = track.road_height(ss + WX[i] * cy - WY[i] * sy, d + WY[i] * cy + WX[i] * sy)
+		_road_rate[i] = clamp((rh - _road[i]) / h, -2.0, 2.0)
+		_road[i] = rh
 
 	# --- suspension: spring + damper + bump stop per corner, anti-roll bars
 	var n_eff: float = max(MASS * (G * cos(b) + u * u * k * sin(b)), MASS * 2.0)
@@ -419,7 +484,7 @@ func _integrate(h: float) -> void:
 	var mr := 0.0
 	for i in 4:
 		var defl: float = -(chassis_z + WX[i] * chassis_pitch + WY[i] * chassis_roll) + _road[i]
-		var rate: float = -(chassis_vz + WX[i] * pitch_rate + WY[i] * roll_rate)
+		var rate: float = -(chassis_vz + WX[i] * pitch_rate + WY[i] * roll_rate) + _road_rate[i]
 		var f: float = _f_static[i] + (K_FRONT if i < 2 else K_REAR) * defl + C_DAMP * rate
 		if defl > BUMP_GAP:
 			f += K_BUMP * (defl - BUMP_GAP)

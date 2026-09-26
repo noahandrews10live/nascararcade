@@ -45,6 +45,7 @@ var skids: MultiMeshInstance3D
 
 func setup(trk: Node3D, player_team: int, lap_count: int, size := 40, grid: Array = [], player2_team := -1) -> void:
 	track = trk
+	track.rubber_laps = 0.0
 	skids = SkidMarks.new()
 	add_child(skids)
 	laps = lap_count
@@ -217,6 +218,7 @@ func tick(delta: float) -> void:
 		var li: int = c.lap()
 		if li > c.lap_idx:
 			c.lap_idx = li
+			track.rubber_laps = max(track.rubber_laps, float(li))
 			if li == 0:
 				c.lap_start_time = time
 			elif li >= 1 and not c.finished:
@@ -429,6 +431,7 @@ func _aero(delta: float) -> void:
 		var dirty := 0.0
 		var pushed := 0.0
 		var side_pen := 0.0
+		var loosen := 0.0
 		var nbl: Array = c.nb
 		for q in range(0, nbl.size(), 2):
 			var o: Node3D = nbl[q]
@@ -445,6 +448,10 @@ func _aero(delta: float) -> void:
 			elif gap < -3.0 and gap > -9.0 and lat < 1.8:
 				# A car right on the bumper pushes air under this one.
 				pushed = max(pushed, 1.0)
+			if gap < -2.0 and gap > -10.0 and lat > 0.5 and lat < 2.4:
+				# A car tucked in off our rear quarter takes the air off the spoiler:
+				# the rear gets light and the car goes loose.
+				loosen = max(loosen, clamp(1.0 - (-gap - 2.0) / 8.0, 0.0, 1.0))
 			if abs(gap) < 5.0 and lat > 1.9 and lat < 3.6 and gap > 0.0 and gap < 4.0:
 				# Side draft: a car alongside our rear quarter slows us down.
 				side_pen = max(side_pen, 1.0 - abs(gap - 2.0) / 3.0)
@@ -454,10 +461,12 @@ func _aero(delta: float) -> void:
 		drag[i] = (1.0 - reduction) * (1.0 + side_pen * 0.07 * strength)
 		# Dirty air matters most where the draft doesn't dominate.
 		front[i] = 1.0 - dirty * 0.38 * (1.2 - strength)
+		c.set_meta("loosen", loosen)
 	for i in n:
 		var c: Node3D = cars[i]
 		c.drag_mult = drag[i]
 		c.df_front_mult = move_toward(c.df_front_mult, front[i], delta * 3.0)
+		c.df_rear_mult = move_toward(c.df_rear_mult, 1.0 - 0.28 * float(c.get_meta("loosen", 0.0)), delta * 3.0)
 		c.draft = move_toward(c.draft, clamp(draft_amt[i], 0.0, 1.0), delta * 2.0)
 
 

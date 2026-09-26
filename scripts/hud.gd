@@ -239,6 +239,14 @@ func _draw() -> void:
 	draw_rect(Rect2(cc + Vector2(8, 56), Vector2(14, 6)), dc.call(dmg.rear))
 	draw_rect(Rect2(cc + Vector2(0, 8), Vector2(6, 46)), dc.call(dmg.left))
 	draw_rect(Rect2(cc + Vector2(24, 8), Vector2(6, 46)), dc.call(dmg.right))
+	# Tyre temperatures at the four corners: blue cold, green in the window, red hot.
+	var tt: PackedFloat32Array = p.tyre_temp
+	var corners := [Vector2(0, 0), Vector2(24, 0), Vector2(0, 56), Vector2(24, 56)]
+	for i in 4:
+		var t: float = tt[i]
+		var tc := Color(0.3, 0.55, 1.0).lerp(Color(0.3, 1.0, 0.4), clamp((t - 55.0) / 35.0, 0.0, 1.0))
+		tc = tc.lerp(Color(1.0, 0.25, 0.15), clamp((t - 115.0) / 30.0, 0.0, 1.0))
+		draw_rect(Rect2(cc + corners[i], Vector2(6, 6)), tc)
 	var f := Game.arcade_font
 	draw_string(f, cc + Vector2(36, 14), "TIRE", HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color(0.8, 0.9, 1.0))
 	draw_string(f, cc + Vector2(36, 28), "%d%%" % int(p.tyre_grip() * 100.0), HORIZONTAL_ALIGNMENT_LEFT, -1, 12, dc.call(p.tyre_wear * 0.7))

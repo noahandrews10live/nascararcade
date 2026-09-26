@@ -35,6 +35,7 @@ func setup(config: Dictionary) -> void:
 	infield = cfg.infield
 	_build_centerline()
 	_build_profile()
+	_build_bumps()
 	_build_minimap()
 	_build_mesh()
 	_build_scenery()
@@ -322,6 +323,56 @@ func in_pit_zone(s_pos: float) -> bool:
 func in_pit_roadway(s_pos: float) -> bool:
 	var ss := fposmod(s_pos, length)
 	return ss >= pit_in_s() - PIT_LANE_EXT or ss <= pit_out_s() + PIT_LANE_EXT
+
+
+## Track temperature (C): hot in the day, cooler under the lights.
+func track_temp() -> float:
+	return 24.0 if cfg.get("night", false) else 38.0
+
+
+## Grip of the racing surface across the track: the rubbered-in groove is fastest,
+## and marbles build up high as the race goes on. Cooler night tracks grip more.
+var rubber_laps := 0.0
+
+
+func grip_at(_s: float, d: float) -> float:
+	var x: float = (d + width * 0.5) / width # 0 bottom .. 1 top
+	var g := 1.0
+	var groove: float = 0.5 + 0.5 * clamp(rubber_laps / 30.0, 0.0, 1.0)
+	g += 0.025 * groove * clamp(1.0 - abs(x - 0.37) / 0.2, 0.0, 1.0)
+	if x > 0.78:
+		var marbles: float = clamp(rubber_laps / 40.0, 0.15, 1.0)
+		g -= 0.07 * marbles * clamp((x - 0.78) / 0.17, 0.0, 1.0)
+	if cfg.get("night", false):
+		g *= 1.02
+	return g
+
+
+## Road surface height offset (m) at (s, d): pavement seams and the bumps that
+## real tracks have going into the turns. Excites the suspension.
+func road_height(s: float, d: float) -> float:
+	var i := int(fposmod(s, length) / length * n) % n
+	var a: float = bump_amp[i]
+	if a <= 0.0:
+		return 0.0
+	return a * (sin(s * 0.9 + d * 0.35) * 0.35 + sin(s * 0.23 - d * 0.2) * 0.65)
+
+
+var bump_amp := PackedFloat32Array()
+
+
+func _build_bumps() -> void:
+	# Small everywhere, bigger at turn entries (where the braking and the heavy
+	# trucks wear the pavement), scaled by the track's own bumpiness.
+	var base: float = float(cfg.get("bumps", 0.006))
+	bump_amp.resize(n)
+	var rng := RandomNumberGenerator.new()
+	rng.seed = hash(cfg.name) + 3
+	for i in n:
+		var k_now: float = abs(curv[i])
+		var k_ahead: float = abs(curv[(i + int(40.0 / (length / n))) % n])
+		var entry: float = clamp((k_ahead - k_now) * 400.0, 0.0, 1.0)
+		bump_amp[i] = base * (0.5 + 1.5 * entry) * rng.randf_range(0.7, 1.3)
 
 
 func inner_wall() -> float:

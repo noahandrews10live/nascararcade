@@ -87,6 +87,9 @@ func _run() -> void:
 		_check(max_roll > deg_to_rad(0.5) and max_roll < deg_to_rad(6.0), "body roll is realistic (0.5-6 deg)")
 		_check(share > 0.55 and share < 0.8, "the outside (right) tyres carry more load in the turns")
 		_check(not c.spinning and c.total_damage() < 0.05, "clean run")
+		var tt: PackedFloat32Array = c.tyre_temp
+		_check(tt[1] + tt[3] > tt[0] + tt[2], "right-side tyres run hotter (ovals turn left)")
+		_check(tt[1] > 70.0 and tt[1] < 150.0, "right front is in its working window (70-150 C)")
 		race.free()
 		t.free()
 	print("FAILURES: ", failures)
