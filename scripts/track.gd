@@ -356,9 +356,19 @@ func wet_at(d: float) -> float:
 var rubber_laps := 0.0
 
 
-func grip_at(_s: float, d: float) -> float:
+var wear: Node3D # track_wear.gd: where the field has actually laid rubber
+
+
+func grip_at(s: float, d: float) -> float:
 	var x: float = (d + width * 0.5) / width # 0 bottom .. 1 top
 	var g := 1.0
+	if wear:
+		# The line the cars actually use rubbers in and gets quicker; marbles
+		# outside it are like ball bearings.
+		g += 0.03 * wear.rubber_at(s, d) - 0.09 * wear.marbles_at(s, d)
+		if cfg.get("night", false):
+			g *= 1.02
+		return g
 	var groove: float = 0.5 + 0.5 * clamp(rubber_laps / 30.0, 0.0, 1.0)
 	g += 0.025 * groove * clamp(1.0 - abs(x - 0.37) / 0.2, 0.0, 1.0)
 	if x > 0.78:
@@ -923,9 +933,41 @@ func _build_fence() -> void:
 
 ## Fans in the frontstretch grandstands: one MultiMesh of little people in team
 ## colours (Modern look).
+## Length of the main grandstand along the front stretch (centred on the line).
+func stand_length() -> float:
+	var l := float(cfg.get("front_mid", 0.0)) + 2.0 * float(cfg.get("front_side", 0.0)) + 2.0 * float(cfg.get("dog_r", 0.0)) * deg_to_rad(float(cfg.get("dog_phi", 0.0)))
+	return l * 0.9
+
+
+## 0..1: how enclosed by the grandstand you are at distance s (for the echo).
+func near_stands(s: float) -> float:
+	var half := stand_length() * 0.5
+	if half <= 0.0:
+		return 0.0
+	var sd: float = min(fposmod(s, length), length - fposmod(s, length))
+	return clamp((half + 40.0 - sd) / 80.0, 0.0, 1.0)
+
+
+## Where the crowd's voices come from: spread along the grandstand, mid-height.
+func crowd_spots() -> Array:
+	var out: Array = []
+	var half := stand_length() * 0.5
+	if half <= 0.0 or pos.is_empty():
+		return out
+	for k in 4:
+		var s: float = fposmod(-half + (k + 0.5) / 4.0 * 2.0 * half, length)
+		var i: int = int(s / length * n) % n
+		var p: Vector3 = pos[i] + right[i] * (width * 0.5 + 20.0)
+		p.y = 10.0
+		out.append(p)
+	return out
+
+
+var crowd_mat: ShaderMaterial # excitement and the wave are set on this
+
+
 func _build_crowd() -> void:
-	var stand_len := float(cfg.get("front_mid", 0.0)) + 2.0 * float(cfg.get("front_side", 0.0)) + 2.0 * float(cfg.get("dog_r", 0.0)) * deg_to_rad(float(cfg.get("dog_phi", 0.0)))
-	stand_len *= 0.9
+	var stand_len := stand_length()
 	var hw := width * 0.5
 	var rows := 14
 	var rng := RandomNumberGenerator.new()
@@ -971,7 +1013,10 @@ func _build_crowd() -> void:
 	var mmi := MultiMeshInstance3D.new()
 	mmi.name = "Crowd"
 	mmi.multimesh = mm
-	mmi.material_override = Game.make_mat("crowd", Color(1, 1, 1))
+	crowd_mat = ShaderMaterial.new()
+	crowd_mat.shader = load("res://shaders/crowd.gdshader")
+	crowd_mat.set_shader_parameter("modern", 1.0 if Game.modern else 0.0)
+	mmi.material_override = crowd_mat
 	mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	mmi.add_to_group("modern_only")
 	mmi.visible = Game.modern

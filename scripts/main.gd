@@ -12,6 +12,12 @@ const Net := preload("res://scripts/net.gd")
 const Wheel := preload("res://scripts/wheel.gd")
 const Hud := preload("res://scripts/hud.gd")
 const Synth := preload("res://scripts/audio.gd")
+const Soundscape := preload("res://scripts/soundscape.gd")
+const CamFeel := preload("res://scripts/cam_feel.gd")
+const Cockpit := preload("res://scripts/cockpit.gd")
+const Atmosphere := preload("res://scripts/atmosphere.gd")
+const RainFx := preload("res://scripts/rain_fx.gd")
+const RaceDay := preload("res://scripts/race_day.gd")
 const Menu := preload("res://scripts/menu.gd")
 
 enum State { TITLE, MODE_SELECT, TRACK_SELECT, CAR_SELECT, MENU, COUNTDOWN, RACE, FINISHED, RESULTS, SESSION_RESULTS, STANDINGS, REPLAY }
@@ -30,6 +36,7 @@ var cam: Camera3D
 var env: Environment
 var sun: DirectionalLight3D
 var synth: Node
+var soundscape: Node3D
 var hud: Control
 var ui_layer: CanvasLayer
 var screen: Control
@@ -51,6 +58,11 @@ var cam_pos := Vector3.ZERO
 var cam_back := Vector3.BACK
 var cam_car: Node3D = null
 var shake := 0.0
+var feel := CamFeel.new() # the camera feels the car's accelerations and the road
+var cockpit: Node3D # the interior of the car you're riding in (cockpit view)
+var atmosphere: Node # haze, sun shafts, lingering smoke, focus, glare
+var rain_fx: Node3D # water film and dry line, spray, drops on the glass
+var race_day: Node3D # pit crews, the flagman, the crowd, fireworks (a child of the race)
 var tv_mode := 0
 var tv_target: Node3D
 var tv_timer := 0.0
@@ -128,6 +140,9 @@ func _ready() -> void:
 	add_child(cam)
 	cam.current = true
 	_build_motion_blur()
+	atmosphere = Atmosphere.new()
+	add_child(atmosphere)
+	atmosphere.setup(cam, env, sun)
 	net = Net.new()
 	net.name = "Net"
 	add_child(net)
@@ -139,6 +154,8 @@ func _ready() -> void:
 			_enter_lobby())
 	net.status.connect(func(t): _sub(t, 3.0))
 	net.race_started.connect(_net_start_race)
+	soundscape = Soundscape.new() # first: it sets up the "World" bus the synth uses
+	add_child(soundscape)
 	synth = Synth.new()
 	add_child(synth)
 
@@ -377,6 +394,8 @@ func apply_time_and_weather(w: Node) -> void:
 	if _base_fog == 0.0:
 		_base_fog = env.fog_density
 	env.fog_density = _base_fog * (1.0 + 3.0 * w.rain)
+	if atmosphere and Game.modern:
+		atmosphere.configure(true, Game.forward_plus, Game.quality_level(), dark, w.hour, max(w.rain, wet_avg * 0.5))
 	# Light towers come on when it gets dark.
 	for n in track.get_children():
 		if n is SpotLight3D and Game.forward_plus:
@@ -503,6 +522,8 @@ func _update_motion_blur() -> void:
 		_blur_mat.set_shader_parameter("prev_view", _prev_view)
 		_blur_mat.set_shader_parameter("amount", 0.35 if Game.motion_blur == 1 else 0.7)
 		_blur_mat.set_shader_parameter("samples", 6 if Game.quality_level() <= 2 else 10)
+		var riding: bool = state != State.REPLAY
+		_blur_mat.set_shader_parameter("near_sharp", [10.0, 7.0, 1.0, 1.5][cam_mode] if riding else 0.0)
 	_prev_view = view
 	_prev_cam = xf
 
@@ -558,6 +579,14 @@ func _auto_quality(delta: float) -> void:
 			_aq_good = 0.0
 
 
+## Spins and wrecks: smoke hangs in the air, the crowd gets on its feet.
+func _on_race_incident(c: Node3D, kind: String) -> void:
+	if kind != "spin" and kind != "out":
+		return
+	atmosphere.puff(c.global_position, 1.4 if kind == "out" else 1.0)
+	soundscape.cheer(1.0 if kind == "out" else 0.6)
+
+
 func _new_race(player_team: int) -> void:
 	if race:
 		race.queue_free()
@@ -565,6 +594,8 @@ func _new_race(player_team: int) -> void:
 	race = Race.new()
 	race.name = "Race"
 	add_child(race)
+	race.incident.connect(_on_race_incident)
+	atmosphere.clear_smoke()
 	var sim := mode != "arcade" and player_team >= 0
 	race.career = mode == "career" and not Game.career.is_empty()
 	if mode == "challenge":
@@ -624,6 +655,18 @@ func _new_race(player_team: int) -> void:
 	race.add_child(w)
 	w.start(track, race, self, weather_mode)
 	race.weather = w
+	# The world around the race: crowd voices, crews and flagman, rain effects.
+	soundscape.build_crowd(track)
+	race_day = RaceDay.new()
+	race.add_child(race_day)
+	race_day.setup(race, soundscape, atmosphere)
+	if rain_fx:
+		rain_fx.clear()
+	if race.weather and Game.modern:
+		if rain_fx == null:
+			rain_fx = RainFx.new()
+			add_child(rain_fx)
+		rain_fx.setup(track, race.weather, cam)
 
 
 func _clear_screen() -> void:
@@ -815,7 +858,7 @@ func _enter_countdown() -> void:
 	# (Real laps run ~25% over the ideal profile: traffic, tyre warm-up, bumps.)
 	# Road courses run further over it (braking zones, traffic in the hairpins).
 	var slack: float = 1.2 if track.cfg.get("road", false) else 1.0
-	time_left = round(ref * 1.8 * slack + 15.0)
+	time_left = round(ref * 1.8 * slack + 25.0)
 	lap_bonus = round(ref * 1.35 * slack)
 	hud.race = race
 	telemetry.car = race.player
@@ -1014,7 +1057,7 @@ func _unhandled_input(event: InputEvent) -> void:
 				_enter_title()
 			return
 		elif event.is_action_pressed("camera"):
-			cam_mode = (cam_mode + 1) % 3
+			cam_mode = (cam_mode + 1) % 4
 	if paused:
 		return
 	match state:
@@ -1298,14 +1341,38 @@ func _rumble(p: Node3D, device: int) -> void:
 	_rumble_t[device] -= get_physics_process_delta_time()
 	if _rumble_t[device] > 0.0:
 		return
-	_rumble_t[device] = 0.1
+	_rumble_t[device] = 1.0 / 30.0
+	var h := haptics(p, Time.get_ticks_msec() / 1000.0)
+	if h.weak > 0.02 or h.strong > 0.02:
+		Input.start_joy_vibration(device, h.weak, h.strong, 0.06)
+
+
+## What the car is doing, as feel: layers for the two rumble motors (the light,
+## fast "weak" one and the heavy "strong" one), shared with the wheel's force
+## feedback.
+##   engine    a hum that rises with revs and buzzes on the limiter
+##   grip      pulses that quicken as the tyres reach the limit and beyond
+##   road      texture, seams and kerbs from the suspension
+##   hits      thumps from contact and walls; a stutter from locked wheels
+func haptics(p: Node3D, t: float) -> Dictionary:
+	var rpm_f: float = clamp((p.rpm() - 2800.0) / (p.REDLINE - 2800.0), 0.0, 1.0)
+	var engine: float = 0.05 + 0.1 * rpm_f + (0.25 if p.rpm() > p.REDLINE - 150.0 else 0.0)
+	var limit: float = clamp(max(p.scrub, p.slide), 0.0, 1.5)
+	var grip := 0.0
+	if limit > 0.25:
+		var hz: float = 6.0 + limit * 14.0
+		grip = (0.35 + 0.4 * clamp(limit - 0.25, 0.0, 1.0)) * (1.0 if fmod(t * hz, 1.0) < 0.5 else 0.2)
 	var rough := 0.0
 	for i in 4:
 		rough += abs(p._road_rate[i])
-	var weak: float = clamp(p.scrub * 0.7 + abs(p.steer_feel) * 0.15 + (0.25 if p.rpm() > p.REDLINE - 150.0 else 0.0), 0.0, 1.0)
-	var strong: float = clamp(p.bump / 15.0 + p.wall_hit / 12.0 + rough * 0.25 + (0.35 if p.locked_wheels != 0 else 0.0) + (0.6 if p.tumbling else 0.0), 0.0, 1.0)
-	if weak > 0.04 or strong > 0.04:
-		Input.start_joy_vibration(device, weak, strong, 0.14)
+	var road: float = clamp(rough * 0.3, 0.0, 0.6)
+	var lock: float = (0.45 if fmod(t * 18.0, 1.0) < 0.5 else 0.0) if p.locked_wheels != 0 else 0.0
+	var hit: float = clamp(p.bump / 12.0 + p.wall_hit / 10.0 + (0.7 if p.tumbling else 0.0), 0.0, 1.0)
+	return {
+		"weak": clamp(engine + grip + road * 0.4, 0.0, 1.0),
+		"strong": clamp(road + lock + hit, 0.0, 1.0),
+		"hit": hit,
+	}
 
 
 func _player_input() -> void:
@@ -1420,6 +1487,18 @@ func _process(delta: float) -> void:
 	race.interpolate(Engine.get_physics_interpolation_fraction() if Game.smoothing else 1.0)
 	_update_camera(delta)
 	_update_motion_blur()
+	if race_day and is_instance_valid(race_day):
+		race_day.update(delta)
+	if rain_fx and race.weather:
+		var view := ""
+		if state in [State.COUNTDOWN, State.RACE, State.FINISHED] and not photo_mode and split_cams.is_empty():
+			view = "cockpit" if cam_mode == 3 else ("bumper" if cam_mode == 2 else "chase")
+		var rf: Node3D = race.player if state != State.REPLAY else tv_target
+		rain_fx.update(delta, race, cam, view, rf if rf and is_instance_valid(rf) else null)
+	if atmosphere:
+		var racing: bool = state in [State.COUNTDOWN, State.RACE, State.FINISHED, State.REPLAY] and not photo_mode and split_cams.is_empty()
+		var fc: Node3D = race.player if race and state != State.REPLAY else tv_target
+		atmosphere.update(delta, fc.speed() if fc and is_instance_valid(fc) else 0.0, cockpit != null and is_instance_valid(cockpit) and cockpit.visible, racing)
 	_auto_quality(delta)
 	_update_audio()
 	if screen:
@@ -1451,12 +1530,20 @@ func _update_audio() -> void:
 	if state in [State.COUNTDOWN, State.RACE, State.FINISHED] and race.player:
 		focus = race.player
 		synth.master = 0.8
+		soundscape.level_db = 0.0
 	else:
 		focus = tv_target
 		synth.master = 0.35
+		soundscape.level_db = -9.0
 	if focus == null or not is_instance_valid(focus):
 		synth.engine_on = false
+		synth.wind = 0.0
+		soundscape.update(null, cam, null, false, get_process_delta_time())
 		return
+	var inside: bool = cockpit != null and is_instance_valid(cockpit) and cockpit.visible
+	soundscape.update(race, cam, focus, inside, get_process_delta_time())
+	var spd_f: float = clamp(focus.speed() / 95.0, 0.0, 1.2)
+	synth.wind = spd_f * spd_f * (0.35 if inside else 0.8)
 	synth.engine_on = true
 	synth.engine_rpm = focus.rpm()
 	synth.engine_load = focus.throttle
@@ -1469,26 +1556,12 @@ func _update_audio() -> void:
 		synth.crash(focus.bump / 40.0)
 		if focus == race.player:
 			shake = max(shake, clamp(focus.bump / 30.0, 0.1, 0.6))
-	# Nearest other car for the pass-by whoosh.
-	var best := 1e9
-	var best_car: Node3D = null
-	for c in race.cars:
-		if c == focus:
-			continue
-		var dist: float = c.global_position.distance_to(cam.global_position)
-		if dist < best:
-			best = dist
-			best_car = c
-	if best_car:
-		synth.pass_volume = clamp(1.0 - best / 45.0, 0.0, 1.0) * 0.8
-		var to_cam: Vector3 = (cam.global_position - best_car.global_position).normalized()
-		var vel: Vector3 = -best_car.global_transform.basis.z * best_car.v
-		var cam_vel: Vector3 = -focus.global_transform.basis.z * focus.v
-		var closing := (vel - cam_vel).dot(to_cam)
-		synth.pass_pitch = clamp((0.6 + best_car.v / 90.0) * (1.0 + closing / 120.0), 0.3, 2.5)
+	synth.pass_volume = 0.0 # other cars are placed in 3D by the soundscape
 
 
 func _update_camera(delta: float) -> void:
+	if not (state in [State.COUNTDOWN, State.RACE, State.FINISHED] and cam_mode == 3 and not photo_mode):
+		_hide_cockpit()
 	shake = max(shake - delta * 2.5, 0.0)
 	var sh := Vector3(rng.randf_range(-1, 1), rng.randf_range(-1, 1), 0) * shake * 0.25
 	match state:
@@ -1497,6 +1570,7 @@ func _update_camera(delta: float) -> void:
 				_photo_camera(delta)
 				return
 			_chase_camera(race.player, delta, cam_mode)
+			sh = Vector3.ZERO # the chase and in-car cameras shake through the camera feel
 			if split_cams.size() == 2:
 				_split_camera(split_cams[0], split_state[0], race.player, delta)
 				_split_camera(split_cams[1], split_state[1], race.player2, delta)
@@ -1544,15 +1618,42 @@ func _update_camera(delta: float) -> void:
 	cam.global_position += cam.global_transform.basis * sh
 
 
+## Cockpit view: the camera is the driver's head, inside the car's sprung body,
+## pushed around by the g-forces and looking a little into the corner.
+func _cockpit_camera(car: Node3D, delta: float, spd: float) -> void:
+	if cockpit == null or not is_instance_valid(cockpit) or cockpit.car != car:
+		if cockpit and is_instance_valid(cockpit):
+			cockpit.queue_free()
+		cockpit = Cockpit.new()
+		car.model.add_child(cockpit)
+		cockpit.build(car, Game.modern and Game.quality_level() >= 1)
+	cockpit.show_inside(true)
+	cockpit.update(delta)
+	var look := Basis(Vector3.UP, -car.steer * 0.35)
+	cam.global_transform = cockpit.eye_transform() * Transform3D(look, Vector3.ZERO) * feel.update(car, delta, 0.35, 1.8)
+	cam.fov = 66.0 + spd * 6.0
+	cam.near = 0.03
+	cam_pos = cam.global_position
+
+
+func _hide_cockpit() -> void:
+	if cockpit and is_instance_valid(cockpit) and cockpit.visible:
+		cockpit.show_inside(false)
+		cam.near = 0.3
+
+
 func _chase_camera(car: Node3D, delta: float, mode: int) -> void:
 	var tr: Transform3D = car.global_transform
 	var back := tr.basis.z
 	var up := tr.basis.y
 	var spd: float = clamp(abs(car.v) / 85.0, 0.0, 1.2)
 	if mode == 2:
-		cam.global_transform = tr * Transform3D(Basis(), Vector3(0, 1.05, -2.3))
+		cam.global_transform = tr * Transform3D(Basis(), Vector3(0, 1.05, -2.3)) * feel.update(car, delta, 0.6)
 		cam.fov = 70.0 + spd * 10.0
 		cam_pos = cam.global_position
+		return
+	if mode == 3:
+		_cockpit_camera(car, delta, spd)
 		return
 	var dist := 7.0 if mode == 0 else 4.8
 	var height := 2.5 if mode == 0 else 1.8
@@ -1566,6 +1667,8 @@ func _chase_camera(car: Node3D, delta: float, mode: int) -> void:
 	var look := tr.origin + up * 1.0 - cam_back * 8.0
 	cam.look_at(look, up.lerp(Vector3.UP, 0.4).normalized())
 	cam.fov = 64.0 + spd * 14.0
+	# The chase camera is on a long arm: it feels the car, but softly.
+	cam.global_transform = cam.global_transform * feel.update(car, delta, 0.45, 0.35)
 
 
 func _tv_camera(delta: float, fixed := false) -> void:

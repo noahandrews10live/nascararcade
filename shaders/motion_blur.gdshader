@@ -11,6 +11,9 @@ uniform sampler2D depth_tex : hint_depth_texture, filter_nearest;
 uniform mat4 prev_view;
 uniform float amount = 0.5;
 uniform int samples = 8;
+// Everything nearer than this (your own car in a chase view, the cockpit) stays
+// sharp: it moves with the camera, which the reprojection can't know.
+uniform float near_sharp = 0.0;
 
 void vertex() {
 	POSITION = vec4(VERTEX.xy * 2.0, 1.0, 1.0);
@@ -26,6 +29,7 @@ void fragment() {
 	prev.xyz /= prev.w;
 	vec2 prev_uv = prev.xy * 0.5 + 0.5;
 	vec2 vel = (SCREEN_UV - prev_uv) * amount;
+	vel *= smoothstep(near_sharp, near_sharp * 1.8 + 0.001, -view.z);
 	// Cap the streak so fast camera swings don't smear the whole screen.
 	float len = length(vel);
 	if (len > 0.04) {

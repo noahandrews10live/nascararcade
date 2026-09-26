@@ -8,7 +8,7 @@ Modern mode:
 
 ![Title screen](docs/title.png) ![Racing](docs/race.png)
 
-A stock car racing game built in **Godot 4.3**. It has the feature set of the classic
+A stock car racing game built in **Godot 4.7**. It has the feature set of the classic
 NASCAR console games of the early 2000s, with racing modelled on 2026 Next Gen Cup cars.
 It also keeps its roots as a 1999 arcade cabinet racer.
 
@@ -132,6 +132,29 @@ Motion smoothing), and Options → VSync off gives the lowest input delay.
   - Drop teams in `user://mods/teams/*.json` (a list).
   - The Track Editor writes track mods for you.
 
+## Being there
+
+- **Sound in 3D.** Every nearby car's engine comes from where the car is, rising and falling in pitch as it passes. Walls and grandstands echo; the crowd is out in the stands and roars at wrecks, lead changes and the finish; wind noise builds with speed. In the cockpit the world outside is muffled.
+- **A camera with weight.** Views lean out in the corners, dip under braking and sink back on the throttle, like a head on a neck. Road texture, seams and the engine at high revs come through as vibration, and hits jolt the view.
+- **Cockpit view** (C to cycle to it). You get the roll cage and centre bar, the window net, a digital dash with shift lights, and a steering wheel your hands turn. The rear-view mirror shows the cars behind. The whole interior rolls and pitches with the chassis.
+- **Air and light.**
+  - Haze thickens with distance and sits low in the morning and evening.
+  - On HIGH and above, the sun throws shafts through the air, and smoke from a spin or wreck hangs there with light coming through it.
+  - The far distance softens with speed, and looking into the sun gives glare. The glare is blocked by anything in front of the sun.
+- **Rain you see.**
+  - The track carries a film of water with a dry line where the cars run.
+  - Cars in front throw up spray that hides them at speed.
+  - Beads run up the windshield, and the cockpit wiper sweeps them away.
+- **A track that remembers the race.** The line the field actually drives rubbers in: it gets darker and grippier lap by lap. Marbles collect outside it, where they're slippery. Walls keep tyre and paint scuffs, and grass keeps ruts.
+- **Feel.**
+  - Controller rumble comes in layers: an engine hum that buzzes on the limiter, pulses that quicken as the tyres reach the limit, road texture, a stutter from locked wheels, and thumps from contact.
+  - Wheels get heavier with speed, tug towards countersteer when the rear steps out, and snap on wall hits.
+- **Race day.**
+  - Pit crews come over the wall and work round the car.
+  - The flagman waves the flag that's out.
+  - Fans jump up for the action and do the wave under caution.
+  - The winner gets fireworks and does a burnout.
+
 ## Tracks (11, all fictional)
 
 | Track | Type |
@@ -157,7 +180,7 @@ SmartScreen may warn you: click **More info → Run anyway**.
 
 **Any platform, from source:**
 
-1. Install [Godot 4.3+](https://godotengine.org/download). The standard build is fine; you don't need .NET. The full Modern effects need a Vulkan (or Direct3D 12) capable GPU; on older machines, launch with `godot --path . --rendering-method gl_compatibility` for the lighter version.
+1. Install [Godot 4.7+](https://godotengine.org/download). The standard build is fine; you don't need .NET. The full Modern effects need a Vulkan (or Direct3D 12) capable GPU; on older machines, launch with `godot --path . --rendering-method gl_compatibility` for the lighter version.
 2. Open `project.godot` in the editor and press **F5**, or run from the command line:
    ```sh
    godot --path .
@@ -166,7 +189,7 @@ SmartScreen may warn you: click **More info → Run anyway**.
 ### Web build
 
 `export_presets.cfg` has a **Web** preset. It is single-threaded, so it runs on ordinary
-static hosting without cross-origin isolation headers. Install the Godot 4.3 export
+static hosting without cross-origin isolation headers. Install the Godot 4.7 export
 templates, then run:
 ```sh
 godot --headless --path . --export-release Web build/web/index.html
@@ -181,7 +204,7 @@ godot --headless --path . --export-release Web build/web/index.html
 | Brake / reverse | ↓ / S / X | LT / B |
 | Start / select | Enter / Space | Start / A |
 | Back (menus) | Backspace | B |
-| Change camera | C | Y |
+| Change camera (chase, close chase, bumper, cockpit) | C | Y |
 | Pause | Esc / P | Back |
 | Quit race (while paused) | Q | — |
 | Pit this lap / change pit plan (Single Race, Season, Career) | Tab / O | X / D-pad up |
@@ -210,7 +233,14 @@ scripts/car.gd             Next Gen car: rigid-body physics on the banked surfac
 scripts/race.gd            field, AI drivers, drafting / dirty air, contact, laps, recording
 scripts/race_control.gd    flags, cautions, pace car, pit stops, restarts, stages, points
 scripts/hud.gd             HUD (scales to any view size, used twice in split screen)
-scripts/audio.gd           AudioStreamGenerator software synth
+scripts/audio.gd           AudioStreamGenerator software synth (your own engine, wind, beeps)
+scripts/soundscape.gd      3D engines of the cars around you, crowd, echo
+scripts/cam_feel.gd        camera weight: g-force head movement and vibration
+scripts/cockpit.gd         the interior, dash, wheel and rear-view mirror
+scripts/atmosphere.gd      haze, sun shafts, lingering smoke, focus, sun glare
+scripts/rain_fx.gd         water film and dry line, spray, drops on the glass
+scripts/track_wear.gd      the rubber line, marbles and wall scuffs (also drives grip)
+scripts/race_day.gd        pit crews, flagman, crowd reactions, fireworks, burnout
 tests/                     headless test benches and screenshot scripts (see below)
 ```
 

@@ -87,11 +87,18 @@ func update(car: Node3D, delta: float) -> void:
 		# Aligning torque pulls the wheel back toward straight, in proportion to
 		# how hard the fronts are working; it drops away as they slide.
 		var align: float = clamp(abs(car.steer_feel), 0.0, 1.0) * (1.0 - 0.7 * clamp(car.scrub, 0.0, 1.0))
-		force = -sign(car.steer) * align * strength
-		var rough := 0.0
-		for i in 4:
-			rough += abs(car._road_rate[i])
-		rumble = clamp(rough * 0.15 + car.bump / 20.0 + car.wall_hit / 15.0, 0.0, 1.0) * strength
+		# Heavier with speed (the fronts carry downforce), light when they slide.
+		align *= 0.6 + 0.4 * clamp(car.speed() / 80.0, 0.0, 1.0)
+		force = -sign(car.steer) * align
+		# When the rear steps out the wheel tugs towards the countersteer.
+		force += sign(car.vy) * clamp(car.slide, 0.0, 1.0) * 0.35
+		# Contact snaps the wheel: a wall on the right kicks it left, and so on.
+		if car.wall_hit > 3.0:
+			force += -sign(car.d) * clamp(car.wall_hit / 15.0, 0.0, 1.0) * 0.8
+		force = clamp(force, -1.0, 1.0) * strength
+		var main := get_parent()
+		var h: Dictionary = main.haptics(car, Time.get_ticks_msec() / 1000.0) if main and main.has_method("haptics") else {"strong": 0.0, "weak": 0.0}
+		rumble = clamp(h.strong + h.weak * 0.3, 0.0, 1.0) * strength
 	udp.put_packet(("F %.3f %.3f\n" % [force, rumble]).to_ascii_buffer())
 
 

@@ -9,6 +9,7 @@ signal incident(car: Node3D, kind: String)
 
 const Car := preload("res://scripts/car.gd")
 const SkidMarks := preload("res://scripts/skid_marks.gd")
+const TrackWear := preload("res://scripts/track_wear.gd")
 
 var track: Node3D
 var cars: Array[Node3D] = []
@@ -50,14 +51,26 @@ var weather: Node = null # weather.gd, when the race has time and weather runnin
 ## Debris on the track from wrecks: [{s, d, age}]. Running over it can cut a tyre
 ## or block the grille; a lot of it brings out the caution.
 var debris: Array = []
+var wear: Node3D # the rubber line, marbles and wall scuffs (track_wear.gd)
 var _debris_mm: MultiMeshInstance3D
 const MAX_DEBRIS := 48
+
+func _exit_tree() -> void:
+	if track and is_instance_valid(track) and track.wear == wear:
+		track.wear = null
+
 
 func setup(trk: Node3D, player_team: int, lap_count: int, size := 40, grid: Array = [], player2_team := -1) -> void:
 	track = trk
 	track.rubber_laps = 0.0
 	skids = SkidMarks.new()
 	add_child(skids)
+	wear = TrackWear.new()
+	wear.name = "TrackWear"
+	add_child(wear)
+	wear.setup(track)
+	wear.visible = Game.modern
+	track.wear = wear
 	_build_debris_mesh()
 	laps = lap_count
 	field_size = size
@@ -231,6 +244,8 @@ func tick(delta: float) -> void:
 		var was_spin: bool = c.spinning
 		c.step(delta)
 		skids.track_car(c)
+		if c.wall_hit > 2.0:
+			wear.scuff(c)
 		if c.wall_hit > 9.0 or (c.tumbling and randf() < delta * 3.0):
 			spawn_debris(c.s(), c.d, 1 + int(c.wall_hit > 15.0))
 		if c.has_flat() and c.ai and not c.is_player and c.pit_state == 0 and control and control.enabled and not c.out:
@@ -261,6 +276,7 @@ func tick(delta: float) -> void:
 			incident.emit(c, "spin")
 			highlights.append({"t": rec_clock, "car": ci, "kind": "FLIP" if c.tumbling else "SPIN"})
 	_collide()
+	wear.track_cars(cars, delta)
 	if not debris.is_empty():
 		_debris_tick(delta)
 	# Laps / finish

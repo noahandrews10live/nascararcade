@@ -36,12 +36,14 @@ func _ready() -> void:
 ## Call once per physics tick for each car.
 func track_car(c: Node3D) -> void:
 	var sliding: bool = c.speed() > 6.0 and (c.slide > 0.35 or c.scrub > 0.55 or c.spinning or (c.brake > 0.9 and c.speed() > 25.0 and c.slide > 0.15))
-	if not sliding or c.pit_state >= 2 or not c.visible:
+	# Anything in the grass cuts ruts in it (they stay for the race).
+	var grass: bool = c.on_grass and c.speed() > 4.0
+	if not (sliding or grass) or c.pit_state >= 2 or not c.visible:
 		_last.erase(c)
 		return
 	var xf: Transform3D = c.global_transform
 	var strength: float = clamp(max(c.slide, c.scrub * 0.8) + (0.5 if c.spinning else 0.0), 0.2, 1.0)
-	var fronts: bool = c.spinning or c.scrub > 0.8
+	var fronts: bool = c.spinning or c.scrub > 0.8 or grass
 	var wheels := [Vector3(-0.84, 0.03, 1.45), Vector3(0.84, 0.03, 1.45)]
 	if fronts:
 		wheels.append(Vector3(-0.84, 0.03, -1.5))
@@ -69,7 +71,7 @@ func track_car(c: Node3D) -> void:
 		var right := fwd.cross(up).normalized()
 		var basis := Basis(right, up, -fwd * (dlen / SPACING))
 		multimesh.set_instance_transform(_next, Transform3D(basis, mid))
-		multimesh.set_instance_color(_next, Color(1, 1, 1, 0.55 * strength))
+		multimesh.set_instance_color(_next, Color(4.0, 2.6, 1.4, 0.8) if grass else Color(1, 1, 1, 0.55 * strength))
 		_next = (_next + 1) % MAX_MARKS
 		if _count < MAX_MARKS:
 			_count += 1

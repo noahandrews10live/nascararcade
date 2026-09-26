@@ -17,6 +17,7 @@ var engine_on := false
 var squeal := 0.0
 var pass_volume := 0.0
 var pass_pitch := 1.0
+var wind := 0.0 # 0..1: rushing air, rising with speed
 var master := 0.8
 
 var _ph1 := 0.0
@@ -29,6 +30,8 @@ var _lp2 := 0.0
 var _rpm_s := 0.0
 var _crash := 0.0
 var _crash_lp := 0.0
+var _wind_lp := 0.0
+var _wind_lp2 := 0.0
 var _beeps: Array = [] # [freq, remaining_samples, volume]
 var _rng := RandomNumberGenerator.new()
 
@@ -43,6 +46,8 @@ func _ready() -> void:
 	player.volume_db = -4.0
 	# Web exports default to sample playback, which cannot play a generator stream.
 	player.playback_type = AudioServer.PLAYBACK_TYPE_STREAM
+	if AudioServer.get_bus_index("World") >= 0:
+		player.bus = "World" # your own car echoes off the walls too
 	add_child(player)
 	player.play()
 	playback = player.get_stream_playback()
@@ -88,6 +93,10 @@ func _process(_delta: float) -> void:
 		if squeal > 0.02:
 			_sq_ph = fmod(_sq_ph + (820.0 + sin(_sq_ph * 40.0) * 20.0) / RATE, 1.0)
 			s += (sin(_sq_ph * TAU) * 0.6 + _rng.randf_range(-0.4, 0.4)) * squeal * 0.12
+		if wind > 0.01:
+			_wind_lp += (_rng.randf_range(-1.0, 1.0) - _wind_lp) * 0.2 * K
+			_wind_lp2 += (_wind_lp - _wind_lp2) * 0.05 * K
+			s += (_wind_lp - _wind_lp2) * wind * 0.5
 		if _crash > 0.001:
 			_crash_lp += (_rng.randf_range(-1.0, 1.0) - _crash_lp) * 0.3 * K
 			s += _crash_lp * _crash * 0.9
