@@ -98,6 +98,11 @@ func setup(trk: Node3D, player_team: int, lap_count: int, size := 40, grid: Arra
 		c.manual = Game.manual_shift
 		c.ai_skill = float(Game.teams[roster[p]].get("skill", rng.randf_range(0.955, 0.99))) * (Game.ai_skill_scale() / 0.985 if not arcade_setup else 1.0)
 		c.damage_mult = 1.0 if (Game.settings.damage == 1 or arcade_setup) else 0.0
+		# Each driver has a character: the better ones are steadier and smarter.
+		var talent: float = clamp((c.ai_skill - 0.95) / 0.04, 0.0, 1.0)
+		c.ai_patience = rng.randf_range(0.2, 0.9)
+		c.ai_consistency = clamp(rng.randf_range(0.65, 0.9) + talent * 0.1, 0.6, 0.99)
+		c.ai_racecraft = clamp(rng.randf_range(0.3, 0.8) + talent * 0.2, 0.2, 1.0)
 		c.ai_aggression = rng.randf_range(0.2, 0.9)
 		c.set_meta("grid", p)
 		c.set_meta("idx", cars.size())
@@ -600,13 +605,25 @@ func _drive_ai(c: Node3D, delta: float) -> void:
 			ahead = control.pace_car
 			ahead_gap = pg - 36.0
 	var drafting_track: bool = float(track.cfg.draft) > 0.8
+	# Stuck behind someone: patient drivers ride, impatient ones force it sooner.
+	if ahead and ahead_gap < 20.0 and not controlled:
+		c._stuck_behind += delta
+	else:
+		c._stuck_behind = 0.0
+	var laps_left: int = laps - c.lap()
 	if c.ai_lane_timer <= 0.0 and not debug_no_lane_changes and not controlled:
 		c.ai_lane_timer = rng.randf_range(0.4, 1.0)
-		if ahead and ahead_gap < 20.0 and (ahead.v < c.v + 0.8 or ahead_gap < 9.0) and not drafting_track:
+		var blocked: bool = ahead != null and ahead_gap < 20.0 and (ahead.v < c.v + 0.8 or ahead_gap < 9.0)
+		if blocked and not drafting_track and c._stuck_behind > c.ai_patience * 4.0:
 			_try_pass(c)
+		elif drafting_track and _try_block(c, laps_left):
+			pass
 		elif ahead and drafting_track and ahead_gap < 12.0 and rng.randf() < c.ai_aggression * 0.35:
-			# Pack racing: pull out and look for a run.
-			_try_pass(c)
+			# Pack racing: pull out, and the smart ones pick the lane that's moving.
+			if rng.randf() < c.ai_racecraft:
+				_pick_draft_lane(c)
+			else:
+				_try_pass(c)
 		else:
 			# Settle into the nearest proper lane, then drift down toward the
 			# preferred (shortest) one when there's room.
@@ -634,12 +651,18 @@ func _drive_ai(c: Node3D, delta: float) -> void:
 		want_gap = 9.0
 	if ahead and (abs(c.ai_lane - ahead.d) < 2.2 or controlled) and ahead_gap < max(want_gap * 2.0, search):
 		var bump_ok: bool = drafting_track and abs(k) < 0.001 and abs(ahead.yaw) < 0.08 and c.ai_aggression > 0.6 and not controlled
+		# Short-track bump-and-run late in the race, or a car with a score to settle.
+		var grudge: float = float(c.rivals.get(ahead, 0.0))
+		var short_track: bool = float(track.cfg.get("radius", 250.0)) < 120.0
+		if not controlled and ((short_track and laps_left <= 3 and c.ai_aggression > 0.7) or grudge > 0.6) and abs(ahead.yaw) < 0.1:
+			bump_ok = true
+			want_gap = min(want_gap, 5.5)
 		var err: float = ahead_gap - want_gap
 		# Never close faster than we could stop behind it.
 		var av: float = max(ahead.v, 0.0)
 		var match_v: float = sqrt(av * av + 2.0 * 4.5 * err) if err >= 0.0 else av + err * 0.6
 		if bump_ok and ahead_gap < 8.0:
-			match_v = ahead.v + 1.0
+			match_v = ahead.v + (1.6 if c.rivals.get(ahead, 0.0) > 0.6 else 1.0)
 		target = min(target, match_v)
 	# Avoid spinning cars ahead.
 	for q in range(0, nbl.size(), 2):
@@ -658,6 +681,23 @@ func _drive_ai(c: Node3D, delta: float) -> void:
 	var r_need: float = abs(k) * cos(track.bank_at(ss)) * c.v
 	if r_need > 0.9 * c.r_max_now:
 		target = min(target, c.v * 0.9 * c.r_max_now / max(r_need, 0.001))
+	# Mistakes: an inconsistent driver under pressure (a car on the bumper late in
+	# the race) sometimes overdrives a corner.
+	if not controlled and c.pit_state == 0:
+		if c._mistake > 0.0:
+			c._mistake -= delta
+			target *= 1.05
+		else:
+			var pressure := 1.0
+			for q in range(0, nbl.size(), 2):
+				var gq: float = nbl[q + 1]
+				if gq < 0.0 and gq > -10.0:
+					pressure = 2.5
+					break
+			if laps_left <= 5:
+				pressure *= 1.5
+			if abs(k) > 0.002 and rng.randf() < (1.0 - c.ai_consistency) * 0.01 * pressure * delta * 60.0:
+				c._mistake = rng.randf_range(0.6, 1.4)
 	# Pedals, eased in and out like a driver's feet.
 	var want_thr := 0.0
 	var want_brk := 0.0
@@ -696,6 +736,54 @@ func _nearest_lane(x: float) -> int:
 		if abs(lanes[i] - x) < abs(lanes[best] - x):
 			best = i
 	return best
+
+
+## Superspeedway line choice: go to the lane whose line is moving (more cars
+## drafting in it just ahead, and faster).
+func _pick_draft_lane(c: Node3D) -> void:
+	var best_lane: float = c.ai_lane
+	var best_score := -INF
+	for ln in lanes:
+		if abs(ln - c.ai_lane) > 5.0 or (abs(ln - c.ai_lane) > 1.0 and not _lane_clear(c, ln)):
+			continue
+		var cnt := 0
+		var vsum := 0.0
+		var nbl: Array = c.nb
+		for q in range(0, nbl.size(), 2):
+			var o: Node3D = nbl[q]
+			var g: float = nbl[q + 1]
+			if g > 0.0 and g < 80.0 and abs(o.d - ln) < 1.8:
+				cnt += 1
+				vsum += o.v
+		var score: float = cnt * 2.0 + (vsum / cnt - c.v if cnt > 0 else -3.0)
+		if score > best_score:
+			best_score = score
+			best_lane = ln
+	c.ai_lane = best_lane
+
+
+## Blocking: a run is coming in the other lane, so move over to take it away. Smart
+## drivers do it late in the race; it can go wrong (hooked in the right rear).
+func _try_block(c: Node3D, laps_left: int) -> bool:
+	if c.ai_racecraft < 0.4 or rng.randf() > c.ai_racecraft * (0.6 if laps_left <= 5 else 0.2):
+		return false
+	var nbl: Array = c.nb
+	for q in range(0, nbl.size(), 2):
+		var o: Node3D = nbl[q]
+		var g: float = nbl[q + 1]
+		if g < -6.0 and g > -30.0 and o.v > c.v + 0.8 and abs(o.d - c.d) > 2.4:
+			var ln: float = lanes[_nearest_lane(o.d)]
+			# Only if nobody is alongside us in the way.
+			var clear := true
+			for q2 in range(0, nbl.size(), 2):
+				var o2: Node3D = nbl[q2]
+				if abs(float(nbl[q2 + 1])) < 7.0 and abs(o2.d - ln) < 2.2:
+					clear = false
+					break
+			if clear:
+				c.ai_lane = ln
+				return true
+	return false
 
 
 func _try_pass(c: Node3D) -> void:
@@ -781,6 +869,13 @@ func _contact(a: Node3D, b: Node3D, rel: Vector2) -> void:
 	b.apply_impulse(imp, rb_p)
 	a.add_damage(j, ra_p)
 	b.add_damage(j, rb_p)
+	# Grudges: the car that got hit (in the rear or turned) remembers who did it.
+	if vn > 3.0:
+		var victim: Node3D = b if n.x > 0.3 else a # b is ahead along n: a hit b from behind
+		var culprit: Node3D = a if victim == b else b
+		victim.rivals[culprit] = min(float(victim.rivals.get(culprit, 0.0)) + clamp(vn / 10.0, 0.1, 0.6), 1.0)
+		if culprit.is_player and victim.rivals[culprit] > 0.5 and control:
+			control.message_for(culprit, "SPOTTER: THE %s IS HOT AT YOU" % victim.team.num, "spotter")
 	var hit: float = vn
 	a.bump = max(a.bump, hit)
 	b.bump = max(b.bump, hit)

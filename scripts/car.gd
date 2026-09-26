@@ -148,6 +148,14 @@ var ai_aggression := 0.5
 var ai_r_des := 0.0 # AI asks the steering assist for a yaw rate
 var ai_stuck := 0.0
 var ai_reverse := 0.0
+# Personality (0..1): patience before forcing a pass, consistency (fewer mistakes),
+# racecraft (smart lines, blocking). Rivals: who has wronged us, and how much.
+var ai_patience := 0.5
+var ai_consistency := 0.8
+var ai_racecraft := 0.6
+var rivals := {}
+var _stuck_behind := 0.0
+var _mistake := 0.0 # seconds left of an overcooked corner
 
 var model: Node3D
 var _retro: Node3D

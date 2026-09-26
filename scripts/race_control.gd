@@ -334,7 +334,17 @@ func _ai_pit_decisions() -> void:
 		if laps_left < 6 and c.fuel > fuel_need:
 			wants = false
 		if wants or randf() < 0.15:
-			c.pit_plan = "4" if c.tyre_wear > 0.2 or laps_left > 25 or randf() < 0.6 else "2"
+			# Strategy: leaders late in the race play track position (two tyres, or
+			# fuel only if it'll make it); cars further back take four and charge.
+			var pos: int = race.position_of(c)
+			if laps_left < 10 and c.tyre_wear < 0.25 and pos <= 8 and c.has_flat() == false:
+				c.pit_plan = "F" if laps_left < 6 else "2"
+			elif laps_left < 30 and pos <= 5 and c.tyre_wear < 0.3:
+				c.pit_plan = "2"
+			else:
+				c.pit_plan = "4"
+			if c.has_flat():
+				c.pit_plan = "4"
 			c.want_pit = true
 
 
