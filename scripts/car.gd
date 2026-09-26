@@ -670,6 +670,25 @@ func _build_model() -> void:
 	smoke.position = Vector3(0, 0.8, -2.0)
 
 
+static var _puff: GradientTexture2D
+
+
+## Soft round puff shared by all smoke emitters.
+static func _puff_texture() -> GradientTexture2D:
+	if _puff == null:
+		var g := Gradient.new()
+		g.set_color(0, Color(1, 1, 1, 0.9))
+		g.set_color(1, Color(1, 1, 1, 0.0))
+		_puff = GradientTexture2D.new()
+		_puff.gradient = g
+		_puff.fill = GradientTexture2D.FILL_RADIAL
+		_puff.fill_from = Vector2(0.5, 0.5)
+		_puff.fill_to = Vector2(1.0, 0.5)
+		_puff.width = 64
+		_puff.height = 64
+	return _puff
+
+
 func _smoke_emitter(col: Color, size: float) -> CPUParticles3D:
 	var p := CPUParticles3D.new()
 	p.emitting = false
@@ -697,6 +716,7 @@ func _smoke_emitter(col: Color, size: float) -> CPUParticles3D:
 	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	m.vertex_color_use_as_albedo = true
 	m.billboard_mode = BaseMaterial3D.BILLBOARD_PARTICLES
+	m.albedo_texture = _puff_texture()
 	qm.material = m
 	p.mesh = qm
 	add_child(p)

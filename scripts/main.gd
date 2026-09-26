@@ -9,7 +9,7 @@ const Hud := preload("res://scripts/hud.gd")
 const Synth := preload("res://scripts/audio.gd")
 const Menu := preload("res://scripts/menu.gd")
 
-enum State { TITLE, MODE_SELECT, TRACK_SELECT, CAR_SELECT, MENU, COUNTDOWN, RACE, FINISHED, RESULTS, SESSION_RESULTS, STANDINGS }
+enum State { TITLE, MODE_SELECT, TRACK_SELECT, CAR_SELECT, MENU, COUNTDOWN, RACE, FINISHED, RESULTS, SESSION_RESULTS, STANDINGS, REPLAY }
 
 const PACE_SPEED := 32.0
 const SELECT_TIME := 20.0
@@ -83,6 +83,10 @@ var session := "race" # practice / qualify / race
 var qual_grid: Array = [] # team indices, fastest first
 var qual_rows: Array = [] # [team idx, time]
 var _qual_base := {}
+var replay_t := 0.0
+var replay_rate := 1.0
+var replay_focus := 0
+var replay_cam := 0
 var challenge := {}
 var challenge_idx := -1
 var challenge_result := ""
@@ -601,6 +605,8 @@ func _enter_results() -> void:
 		_label("", r, 18, Color(0.3, 1.0, 0.4), Vector2(0, y2), HORIZONTAL_ALIGNMENT_CENTER, 5)
 		y2 += 22
 	_label("start", "PRESS START", 20, Color.WHITE, Vector2(0, 440), HORIZONTAL_ALIGNMENT_CENTER, 5)
+	if race.rec_times.size() > 20:
+		_label("", "R  WATCH REPLAY", 12, Color(0.6, 0.9, 1.0), Vector2(470, 446), HORIZONTAL_ALIGNMENT_LEFT, 3)
 
 
 # --- race events --------------------------------------------------------------
@@ -769,8 +775,25 @@ func _unhandled_input(event: InputEvent) -> void:
 					_enter_title()
 				else:
 					_return_hub()
+		State.REPLAY:
+			if event.is_action_pressed("start") or event.is_action_pressed("back") or event.is_action_pressed("replay"):
+				screen.visible = true
+				_set_state(State.RESULTS)
+				hud.visible = false
+			elif event.is_action_pressed("steer_left") or event.is_action_pressed("steer_right"):
+				var dir := -1 if event.is_action_pressed("steer_left") else 1
+				replay_focus = posmod(replay_focus + dir, race.cars.size())
+			elif event.is_action_pressed("menu_up") or event.is_action_pressed("menu_down"):
+				var rates := [-4.0, -1.0, 0.0, 0.5, 1.0, 2.0, 4.0]
+				var i := rates.find(replay_rate)
+				i = clamp(i + (1 if event.is_action_pressed("menu_up") else -1), 0, rates.size() - 1)
+				replay_rate = rates[i]
+			elif event.is_action_pressed("camera"):
+				replay_cam = (replay_cam + 1) % 4
 		State.RESULTS:
-			if event.is_action_pressed("start") and state_time > 1.0:
+			if event.is_action_pressed("replay") and race.rec_times.size() > 20:
+				_enter_replay()
+			elif event.is_action_pressed("start") and state_time > 1.0:
 				if (mode == "season" or mode == "career") and not Game.season.is_empty():
 					_after_season_race()
 				elif mode == "challenge":
@@ -819,6 +842,10 @@ func _physics_process(delta: float) -> void:
 				_enter_results()
 		State.RESULTS:
 			race.tick(delta)
+		State.REPLAY:
+			replay_t = clamp(replay_t + delta * replay_rate, race.rec_times[0], race.rec_times[race.rec_times.size() - 1])
+			race.replay_apply(replay_t)
+			_replay_overlay()
 
 
 var _out_timer := 0.0
@@ -1019,6 +1046,20 @@ func _update_camera(delta: float) -> void:
 	match state:
 		State.COUNTDOWN, State.RACE, State.FINISHED:
 			_chase_camera(race.player, delta, cam_mode)
+		State.REPLAY:
+			var focus: Node3D = race.cars[replay_focus]
+			match replay_cam:
+				0:
+					tv_target = focus
+					_tv_camera(delta, true)
+				1:
+					_chase_camera(focus, delta, 0)
+				2:
+					_chase_camera(focus, delta, 2)
+				3:
+					tv_target = focus
+					tv_mode = 3
+					_tv_camera(delta, true)
 		State.CAR_SELECT, State.MENU:
 			if preview_car and (state == State.CAR_SELECT or menu_kind == "paint"):
 				orbit += delta * 0.5
@@ -1062,13 +1103,15 @@ func _chase_camera(car: Node3D, delta: float, mode: int) -> void:
 	cam.fov = 64.0 + spd * 14.0
 
 
-func _tv_camera(delta: float) -> void:
+func _tv_camera(delta: float, fixed := false) -> void:
 	tv_timer -= delta
 	if tv_target == null or not is_instance_valid(tv_target) or tv_timer <= 0.0:
 		tv_timer = rng.randf_range(5.0, 8.0)
-		var pick: int = rng.randi() % min(6, race.order.size())
-		tv_target = race.order[pick]
-		tv_mode = rng.randi() % 4
+		if not fixed:
+			var pick: int = rng.randi() % min(6, race.order.size())
+			tv_target = race.order[pick]
+		if not (fixed and replay_cam == 3):
+			tv_mode = [0, 2, 2, 3][rng.randi() % 4] if fixed else rng.randi() % 4
 		tv_anchor = Vector3.ZERO
 		cam_pos = tv_target.global_position + Vector3(0, 40, 0)
 	var t := tv_target
@@ -1625,3 +1668,38 @@ func _enter_career_stats() -> void:
 	if hist != "":
 		_label("", hist, 12, Color(0.8, 0.85, 0.9), Vector2(0, 400), HORIZONTAL_ALIGNMENT_CENTER, 3)
 	_label("start", "PRESS START", 16, Color.WHITE, Vector2(0, 432), HORIZONTAL_ALIGNMENT_CENTER, 4)
+
+
+# --- replays ------------------------------------------------------------------------
+
+func _enter_replay() -> void:
+	_set_state(State.REPLAY)
+	screen.visible = false
+	replay_t = race.rec_times[0]
+	replay_rate = 1.0
+	replay_cam = 0
+	replay_focus = max(race.cars.find(race.player), 0)
+	tv_timer = 0.0
+	hud.visible = false
+	var ov := Game.make_label("", 14, Color(1, 0.9, 0.2), 4)
+	ov.name = "ReplayOverlay"
+	ov.position = Vector2(16, 12)
+	ui_layer.add_child(ov)
+
+
+func _replay_overlay() -> void:
+	var ov: Label = ui_layer.get_node_or_null("ReplayOverlay")
+	if ov == null:
+		return
+	if state != State.REPLAY:
+		ov.queue_free()
+		return
+	var c: Node3D = race.cars[replay_focus]
+	var span: float = race.rec_times[race.rec_times.size() - 1] - race.rec_times[0]
+	var at: float = replay_t - race.rec_times[0]
+	var rate := "PAUSED" if replay_rate == 0.0 else ("x%s" % str(replay_rate))
+	var blink := "REPLAY" if int(Time.get_ticks_msec() / 500) % 2 == 0 else "      "
+	ov.text = "%s  %s / %s  %s   #%s %s   [%s]\nLEFT/RIGHT CAR   UP/DOWN SPEED   C CAMERA   START EXIT" % [blink, Game.format_time(at), Game.format_time(span), rate, c.team.num, c.team.driver, ["TV", "CHASE", "BUMPER", "HELICOPTER"][replay_cam]]
+	synth.engine_on = true
+	synth.engine_rpm = 3000.0 + abs(c.v) * 70.0
+	synth.engine_load = 0.8

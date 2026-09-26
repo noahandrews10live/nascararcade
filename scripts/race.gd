@@ -25,6 +25,15 @@ var arcade_setup := false # set before setup() for arcade races (ignores sim set
 var career := false # apply the career car's R&D level to the player
 var debug_no_lane_changes := false
 var control: Node = null # race_control.gd when the full rules are on
+
+# Replay recording: per frame, for every car (and the pace car): dist, d, yaw, v, visible.
+const REC_HZ := 10.0
+const REC_MAX := 6000 # frames kept (10 minutes)
+var rec_times := PackedFloat32Array()
+var rec_data := PackedFloat32Array()
+var rec_clock := 0.0
+var _rec_next := 0.0
+var rec_cars: Array[Node3D] = []
 var wear_scale := 1.0 # fuel burn / tyre wear multiplier so short races still need pit strategy
 
 
@@ -150,6 +159,7 @@ func go_green() -> void:
 
 func tick(delta: float) -> void:
 	time += delta if running else 0.0
+	_record(delta)
 	if control:
 		control.tick(delta)
 	_aero(delta)
@@ -208,6 +218,60 @@ func tick(delta: float) -> void:
 						c.ai = true # autopilot for the cool-down lap
 					car_finished.emit(c, finish_count)
 	_update_order()
+
+
+func _record(delta: float) -> void:
+	rec_clock += delta
+	if rec_clock < _rec_next:
+		return
+	_rec_next = rec_clock + 1.0 / REC_HZ
+	if rec_cars.is_empty():
+		rec_cars = cars.duplicate()
+		if control:
+			rec_cars.append(control.pace_car)
+	rec_times.append(rec_clock)
+	for c in rec_cars:
+		rec_data.append(c.dist)
+		rec_data.append(c.d)
+		rec_data.append(c.yaw)
+		rec_data.append(c.v)
+		rec_data.append(1.0 if c.visible else 0.0)
+	if rec_times.size() > REC_MAX + 600:
+		var drop := 600
+		rec_times = rec_times.slice(drop)
+		rec_data = rec_data.slice(drop * rec_cars.size() * 5)
+
+
+## Puts every car where it was at recording time t (interpolated).
+func replay_apply(t: float) -> void:
+	var n := rec_times.size()
+	if n < 2:
+		return
+	var lo := 0
+	var hi := n - 1
+	t = clamp(t, rec_times[0], rec_times[n - 1])
+	while hi - lo > 1:
+		var mid := (lo + hi) / 2
+		if rec_times[mid] <= t:
+			lo = mid
+		else:
+			hi = mid
+	var f: float = (t - rec_times[lo]) / max(rec_times[hi] - rec_times[lo], 0.0001)
+	var stride := rec_cars.size() * 5
+	for k in rec_cars.size():
+		var c: Node3D = rec_cars[k]
+		var a := lo * stride + k * 5
+		var b := hi * stride + k * 5
+		c.dist = lerp(rec_data[a], rec_data[b], f)
+		c.d = lerp(rec_data[a + 1], rec_data[b + 1], f)
+		c.yaw = lerp_angle(rec_data[a + 2], rec_data[b + 2], f)
+		c.v = lerp(rec_data[a + 3], rec_data[b + 3], f)
+		c.visible = rec_data[a + 4] > 0.5
+		c.r = 0.0
+		c.slide = 0.0
+		c.scrub = 0.0
+		c.scraping = false
+		c.sync_visual()
 
 
 func _gap(from: Node3D, to: Node3D) -> float:

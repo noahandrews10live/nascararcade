@@ -814,6 +814,7 @@ func _setup_input() -> void:
 		"start": [KEY_ENTER, KEY_KP_ENTER, KEY_SPACE, "btn:%d" % JOY_BUTTON_START, "btn:%d" % JOY_BUTTON_A],
 		"back": [KEY_BACKSPACE, "btn:%d" % JOY_BUTTON_B],
 		"camera": [KEY_C, "btn:%d" % JOY_BUTTON_Y],
+		"replay": [KEY_R, "btn:%d" % JOY_BUTTON_RIGHT_STICK],
 		"pit": [KEY_TAB, "btn:%d" % JOY_BUTTON_X],
 		"pit_option": [KEY_O, "btn:%d" % JOY_BUTTON_DPAD_UP],
 		"shift_up": [KEY_E, "btn:%d" % JOY_BUTTON_RIGHT_SHOULDER],
