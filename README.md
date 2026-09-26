@@ -44,6 +44,8 @@ Motion smoothing), and Options → VSync off gives the lowest input delay.
 | **2 Player** | Split-screen racing. Player 2 uses I/J/K/L (U to pit) or a second gamepad. |
 | **Lightning Challenges** | Eight race-defining scenarios, such as a last-lap draft, a charge from the back or saving fuel. Completing five unlocks the #00 Thunderbolt legend car. |
 | **Paint Shop** | Create your own car: number, driver name, sponsor and colours. You can race it in every mode. |
+| **Online** | Race friends over the internet or a local network. One player hosts (desktop, port 24565), others join by address. Green-flag races with an AI field. |
+| **Track Editor** | Build a track from straights and turns (radius, angle, banking), see it drawn live, test-drive it and save it as a mod. |
 
 ## Racing: how it models 2026 Next Gen racing
 
@@ -95,6 +97,40 @@ Motion smoothing), and Options → VSync off gives the lowest input delay.
 - **Spotter.** Callouts for car high, car low, three wide and clear.
 - **Garage.** Adjust handling balance (tight or loose), tyre pressure (grip versus wear) and gearing.
 - **Replays.** After any race, press R to watch it with TV, chase, bumper or helicopter cameras.
+
+## Race day
+
+- **Tyre failures and damage rules.**
+  - Tyres cut from debris or bent fenders and leak down; overheated or worn-out tyres blow (a right front at turn entry sends you up the track).
+  - Locking a wheel grinds a flat spot you can feel.
+  - Water temperature climbs when you run tucked in a draft or pick up debris on the grille. Clean air can blow small pieces off; the crew clears the rest at a stop. Past 145 °C the engine fails.
+  - Wrecks leave debris on the track (enough of it brings out a caution).
+  - The Damaged Vehicle Policy gives you a six-minute repair clock, and cars that can't make minimum speed are parked.
+- **The air.** Every car leaves a wake. A line of cars stacks its tow; a car right behind pushes you; a car tucked in off your rear quarter takes air off your spoiler (you go loose); a car at your rear quarter side-drafts you; pull out of line and you hit the air wall.
+- **Drivers with character.** Aggression, patience, consistency and racecraft differ per driver:
+  - smart drivers pick the moving line and block late;
+  - drivers you wreck remember it;
+  - bump-and-run happens on short tracks at the end;
+  - inconsistent drivers make mistakes under pressure;
+  - pit calls depend on position and laps left.
+- **Weather and time of day.**
+  - The sun moves through the race: day races run into sunset, night races start at dusk. Track temperature follows.
+  - Race setting WEATHER: CLEAR, CHANGEABLE or RAIN. Ovals are held under caution until the track dries (a drying line forms where the cars run). Road courses race on, with wet tyres (pit plan W).
+- **Crew chief.**
+  - The garage has wedge, springs, sway bar, bump stops, stagger, pressures per side, brake bias and gearing. Setup sheets save per track, and you can share them as codes.
+  - The telemetry overlay (T) shows tread temperatures across each tyre, pressures, wear, loads, shock travel, the air around you, water temperature, a live delta to your best lap, and a speed trace.
+  - A radio voice (the system's text-to-speech) gives the spotter's and crew chief's calls.
+- **Broadcast director.**
+  - Replays cut between incidents, battles and the leader, with TV, chase, roof, blimp and helicopter shots.
+  - Highlights (H on the results) show every spin, flip, big hit and lead change in slow motion.
+  - Photo mode (F, in a replay or mid-race) lets you orbit, zoom and use depth of field, then save a PNG.
+- **Steering wheels.** Options → Wheel Setup: pick the axes by moving them, set rotation and force feedback strength.
+  - Force feedback comes from the front tyres' aligning torque, bumps and hits.
+  - It runs through a small native helper next to the game: `ffb_helper.exe` (DirectInput) on Windows, SDL2 on Linux. `native/build.sh` builds it.
+- **Mods.**
+  - Drop tracks in `user://mods/tracks/*.json`: a name plus a `segments` layout, with any other setting you want. Colours are `#rrggbb`.
+  - Drop teams in `user://mods/teams/*.json` (a list).
+  - The Track Editor writes track mods for you.
 
 ## Tracks (11, all fictional)
 
@@ -151,7 +187,9 @@ godot --headless --path . --export-release Web build/web/index.html
 | Pit this lap / change pit plan (Single Race, Season, Career) | Tab / O | X / D-pad up |
 | Choose restart lane at "one to go" | ← / → | Left stick |
 | Shift up / down (manual gearbox) | E / Q | RB / LB |
-| Watch replay (results screen) | R | Right stick click |
+| Watch replay / highlights (results screen) | R / H | Right stick click / — |
+| Telemetry overlay | T | Left stick click |
+| Photo mode (replay, or mid-race) | F | Touchpad |
 | Graphics: Modern / 1999 | F3 | — |
 | Toggle scanlines (1999 mode) | F2 | — |
 | Fullscreen | F11 | — |
@@ -197,6 +235,10 @@ All tests run headless (`godot --headless --fixed-fps 60 --path . -s <script>`):
 | Script | What it checks |
 |---|---|
 | `tests/smoke_test.gd` | Arcade game flow on every track |
+| `tests/weather_test.gd` | Rain on an oval (held under caution until dry) and a road course (wet tyres), and the moving clock |
+| `tests/director_test.gd` | Replay director, photo mode and the highlight reel |
+| `tests/net_test.gd` | Online: run with ROLE=host and ROLE=client together |
+| `tests/wheel_test.gd` | Starts the force-feedback helper and checks it answers |
 | `tests/telemetry_test.gd` | Chassis telemetry (roll, tyre loads, temperatures, bump stops) and wreck physics checks |
 | `tests/physics_test.gd` | Solo lap speeds, draft gain and a 40-car race per track |
 | `tests/field_test.gd` | Full-field AI race with incident tracing (`TRACK=n SECS=s TRACE=car#`) |
