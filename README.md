@@ -1,5 +1,11 @@
 # Speedway Thunder '99 — Stock Car Arcade
 
+Modern mode:
+
+![Modern graphics, day](docs/modern_day.png) ![Modern graphics, night](docs/modern_night.png)
+
+1999 mode:
+
 ![Title screen](docs/title.png) ![Racing](docs/race.png)
 
 A late-90s arcade stock car racer, like the NASCAR arcade cabinets of 1999, built in **Godot 4.3**.
