@@ -224,6 +224,7 @@ func _apply_graphics() -> void:
 		env.fog_density = 0.00035 if not night else 0.0012
 		env.fog_sun_scatter = 0.35
 		env.fog_aerial_perspective = 0.6
+		env.fog_sky_affect = 0.0 if not night else 0.3
 		env.volumetric_fog_enabled = night
 		env.volumetric_fog_density = 0.012
 		env.volumetric_fog_albedo = Color(0.8, 0.8, 0.85)

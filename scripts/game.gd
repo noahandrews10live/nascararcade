@@ -36,7 +36,7 @@ var tracks: Array[Dictionary] = [
 		"laps": 4, "draft": 0.7, "grid_player": 9,
 		"sky_top": Color(0.35, 0.45, 0.80), "sky_horizon": Color(0.98, 0.78, 0.55),
 		"grass": Color(0.42, 0.52, 0.20), "fog": Color(0.93, 0.78, 0.62),
-		"lake": false, "sun_elev": 9.0, "sun_az": 205.0,
+		"lake": false, "sun_elev": 14.0, "sun_az": 205.0,
 	},
 	{
 		"name": "THUNDER VALLEY SHORT TRACK",
