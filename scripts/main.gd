@@ -66,6 +66,8 @@ const MODES := [
 	["ARCADE", "BEAT THE CLOCK. 16 CARS, SHORT RACES, NO CAUTIONS."],
 	["SINGLE RACE", "A FULL RACE WEEKEND: PRACTICE, QUALIFYING, CAUTIONS, PITS, STAGES."],
 	["SEASON", "RUN A CHAMPIONSHIP. POINTS, WINS AND STANDINGS ARE SAVED."],
+	["LIGHTNING CHALLENGES", "RACE-DEFINING MOMENTS. BEAT FIVE TO UNLOCK A LEGEND."],
+	["PAINT SHOP", "CREATE YOUR OWN CAR: NUMBER, DRIVER, SPONSOR AND COLORS."],
 	["OPTIONS", "GRAPHICS AND RECORDS."],
 ]
 var mode_idx := 0
@@ -80,6 +82,9 @@ var session := "race" # practice / qualify / race
 var qual_grid: Array = [] # team indices, fastest first
 var qual_rows: Array = [] # [team idx, time]
 var _qual_base := {}
+var challenge := {}
+var challenge_idx := -1
+var challenge_result := ""
 
 
 func _ready() -> void:
@@ -290,7 +295,32 @@ func _new_race(player_team: int) -> void:
 	race.name = "Race"
 	add_child(race)
 	var sim := mode != "arcade" and player_team >= 0
-	if sim and session == "race":
+	if mode == "challenge":
+		var ch: Dictionary = challenge
+		var size: int = ch.field
+		var grid: Array = []
+		if size > 1:
+			var others: Array = range(Game.teams.size()).filter(func(i): return i != player_team and not Game.teams[i].get("legend", false))
+			others.shuffle()
+			for i in size:
+				grid.append(player_team if i == int(ch.grid) - 1 else others.pop_back())
+		race.setup(track, player_team, int(ch.laps), size, grid)
+		if ch.get("wear", false) or ch.has("fuel"):
+			race.enable_rules()
+			race.control.cautions_enabled = false
+			race.control.stage_ends.clear()
+			for c in race.cars:
+				c.burn_scale = 1.0 # real fuel mileage in challenges
+			race.control.message.connect(_on_control_message)
+			race.control.flag_changed.connect(_on_flag)
+		var p: Node3D = race.player
+		p.fuel = Car.FUEL_CAPACITY * float(ch.get("fuel", 1.0))
+		p.tyre_wear = float(ch.get("tyres", 0.0))
+		if ch.has("damage"):
+			for k in p.damage:
+				p.damage[k] = float(ch.damage)
+			p._update_damage_visual()
+	elif sim and session == "race":
 		var size: int = Game.FIELDS[Game.settings.field]
 		race.setup(track, player_team, Game.race_laps(Game.selected_track), size, _grid_for(size, player_team))
 		race.enable_rules()
@@ -386,10 +416,11 @@ func _enter_mode_select() -> void:
 	synth.beep(1320.0, 0.08)
 	_clear_screen()
 	_label("", "SELECT MODE", 34, Color(1.0, 0.85, 0.1), Vector2(0, 30), HORIZONTAL_ALIGNMENT_CENTER, 8)
-	_panel(Rect2(80, 120, 480, 260), Color(0, 0, 0, 0.6))
+	var step: int = int(300.0 / MODES.size())
+	_panel(Rect2(60, 96, 520, MODES.size() * step + 20), Color(0, 0, 0, 0.6))
 	for i in MODES.size():
-		_label("mode%d" % i, MODES[i][0], 30, Color.WHITE, Vector2(0, 140 + i * 70), HORIZONTAL_ALIGNMENT_CENTER, 7)
-		_label("mdesc%d" % i, MODES[i][1], 12, Color(0.7, 0.8, 0.9), Vector2(0, 178 + i * 70), HORIZONTAL_ALIGNMENT_CENTER, 3)
+		_label("mode%d" % i, MODES[i][0], 26, Color.WHITE, Vector2(0, 104 + i * step), HORIZONTAL_ALIGNMENT_CENTER, 7)
+		_label("mdesc%d" % i, MODES[i][1], 11, Color(0.7, 0.8, 0.9), Vector2(0, 136 + i * step), HORIZONTAL_ALIGNMENT_CENTER, 3)
 	_label("", "UP / DOWN   CHOOSE        START  SELECT", 14, Color(0.85, 0.85, 0.85), Vector2(0, 420))
 	_refresh_mode_select()
 
@@ -473,6 +504,10 @@ func _enter_countdown() -> void:
 	_clear_screen()
 	_new_race(Game.selected_team)
 	var lead := -(PACE_SPEED * 5.2 + 15.0)
+	if mode == "challenge" and challenge.has("start"):
+		lead = float(challenge.start)
+	elif mode == "challenge" and int(challenge.laps) <= 3:
+		lead = -120.0
 	if session == "qualify":
 		lead = -track.length * 0.7 # a warm-up lap, then the timed lap
 	elif session == "practice":
@@ -493,8 +528,11 @@ func _enter_countdown() -> void:
 	hud.visible = true
 	hud.clear_messages()
 	var intro: String = {"practice": "PRACTICE", "qualify": "QUALIFYING"}.get(session, "GET READY!") if mode != "arcade" else "GET READY!"
+	if mode == "challenge":
+		intro = challenge.name
+		hud.show_timer = false
 	hud.message(intro, 2.0, Color(1, 0.9, 0.2))
-	hud.sub_message(track.cfg.name if session != "practice" else "ESC THEN Q TO END PRACTICE", 2.5)
+	hud.sub_message((track.cfg.name if session != "practice" else "ESC THEN Q TO END PRACTICE") if mode != "challenge" else challenge.desc, 3.0)
 	countdown_step = 0
 	new_records.clear()
 	game_over_reason = ""
@@ -555,6 +593,8 @@ func _enter_results() -> void:
 	if game_over_reason != "":
 		_label("", game_over_reason, 18, Color(1, 0.3, 0.2), Vector2(0, y2), HORIZONTAL_ALIGNMENT_CENTER, 5)
 		y2 += 24
+	if mode == "challenge" and challenge_result != "":
+		_label("", challenge_result, 18, Color(0.3, 1.0, 0.4) if challenge_result.begins_with("CHALLENGE COMPLETE") else Color(1, 0.3, 0.2), Vector2(0, min(y2, 410)), HORIZONTAL_ALIGNMENT_CENTER, 5)
 	for r in new_records:
 		_label("", r, 18, Color(0.3, 1.0, 0.4), Vector2(0, y2), HORIZONTAL_ALIGNMENT_CENTER, 5)
 		y2 += 22
@@ -593,6 +633,21 @@ func _on_finished(car: Node3D, place: int) -> void:
 	if session == "qualify":
 		_finish_qualifying(car.best_lap)
 		return
+	if mode == "challenge":
+		var ok := false
+		match String(challenge.goal):
+			"win": ok = place == 1
+			"top3": ok = place <= 3
+			"top5": ok = place <= 5
+			"top10": ok = place <= 10
+			"time": ok = car.best_lap > 0.0 and car.best_lap <= float(challenge.time)
+		if ok:
+			var first := Game.complete_challenge(challenge_idx)
+			challenge_result = "CHALLENGE COMPLETE!" + ("   LEGEND UNLOCKED: #00 THUNDERBOLT" if first and Game.challenges_done.size() == 5 else "")
+		else:
+			challenge_result = "CHALLENGE FAILED"
+		if challenge.goal == "time":
+			challenge_result += "   LAP %s" % Game.format_time(car.best_lap)
 	_set_state(State.FINISHED)
 	hud.show_timer = false
 	var col := Color(1, 0.9, 0.2) if place == 1 else Color.WHITE
@@ -650,6 +705,10 @@ func _unhandled_input(event: InputEvent) -> void:
 						else:
 							_enter_season_hub()
 					3:
+						_enter_challenges()
+					4:
+						_enter_paint_shop()
+					5:
 						_enter_options()
 			elif event.is_action_pressed("back"):
 				_enter_title()
@@ -668,7 +727,9 @@ func _unhandled_input(event: InputEvent) -> void:
 		State.CAR_SELECT:
 			if event.is_action_pressed("steer_left") or event.is_action_pressed("steer_right"):
 				var dir := -1 if event.is_action_pressed("steer_left") else 1
-				Game.selected_team = posmod(Game.selected_team + dir, Game.SELECTABLE_TEAMS)
+				var pick: Array = Game.selectable_teams()
+				var cur: int = max(pick.find(Game.selected_team), 0)
+				Game.selected_team = pick[posmod(cur + dir, pick.size())]
 				synth.beep(880.0, 0.05)
 				_refresh_car_select()
 			elif event.is_action_pressed("start"):
@@ -701,6 +762,8 @@ func _unhandled_input(event: InputEvent) -> void:
 			if event.is_action_pressed("start") and state_time > 1.0:
 				if mode == "season" and not Game.season.is_empty():
 					_after_season_race()
+				elif mode == "challenge":
+					_enter_challenges()
 				else:
 					_enter_title()
 
@@ -723,6 +786,7 @@ func _physics_process(delta: float) -> void:
 			_player_input()
 			race.tick(delta)
 			if mode != "arcade":
+				_check_player_out(delta)
 				return
 			time_left -= delta
 			hud.time_left = time_left
@@ -744,6 +808,27 @@ func _physics_process(delta: float) -> void:
 				_enter_results()
 		State.RESULTS:
 			race.tick(delta)
+
+
+var _out_timer := 0.0
+
+
+## Wrecked out or stopped with an empty tank: the player's race is over.
+func _check_player_out(delta: float) -> void:
+	var p: Node3D = race.player
+	var dry: bool = p.fuel <= 0.0 and p.speed() < 1.0 and p.pit_state == 0
+	if p.out or dry:
+		_out_timer += delta
+		if _out_timer > 3.0:
+			_out_timer = 0.0
+			p.out = true
+			game_over_reason = "OUT OF FUEL" if dry else "WRECKED  -  OUT OF THE RACE"
+			if mode == "challenge":
+				challenge_result = "CHALLENGE FAILED"
+			hud.message("OUT OF FUEL" if dry else "OUT OF THE RACE", 3.0, Color(1, 0.3, 0.2))
+			_set_state(State.FINISHED)
+	else:
+		_out_timer = 0.0
 
 
 func _loop_attract() -> void:
@@ -923,14 +1008,20 @@ func _update_camera(delta: float) -> void:
 	match state:
 		State.COUNTDOWN, State.RACE, State.FINISHED:
 			_chase_camera(race.player, delta, cam_mode)
-		State.CAR_SELECT:
-			if preview_car:
+		State.CAR_SELECT, State.MENU:
+			if preview_car and (state == State.CAR_SELECT or menu_kind == "paint"):
 				orbit += delta * 0.5
 				preview_car.rotation.y = orbit
 				var p := preview_car.global_position
 				cam.fov = 45.0
-				cam.global_position = p + Vector3(sin(0.6) * 9.0, 2.3, cos(0.6) * 9.0)
-				cam.look_at(p + Vector3(0, -0.9, 0), Vector3.UP)
+				var eye := p + Vector3(sin(0.6) * 9.0, 2.3, cos(0.6) * 9.0)
+				cam.global_position = eye
+				var side := (p - eye).cross(Vector3.UP).normalized()
+				# In the paint shop, frame the car on the right, clear of the menu.
+				var shift := -side * 1.9 if state == State.MENU else Vector3.ZERO
+				cam.look_at(p + Vector3(0, -0.9, 0) + shift, Vector3.UP)
+			else:
+				_tv_camera(delta)
 		_:
 			_tv_camera(delta)
 	cam.global_position += cam.global_transform.basis * sh
@@ -1105,6 +1196,9 @@ func _on_menu_changed(id: String, idx: int) -> void:
 			elif Game.setup.has(id):
 				Game.setup[id] = idx
 			Game.save_settings()
+		"paint":
+			Game.custom[id] = idx + 1 if id == "num" else idx
+			_paint_preview()
 		"options":
 			if id == "gfx" and Game.modern_supported and (idx == 1) != Game.modern:
 				Game.toggle_graphics()
@@ -1117,6 +1211,9 @@ func _on_menu_changed(id: String, idx: int) -> void:
 
 func _on_menu_activated(id: String) -> void:
 	synth.beep(1320.0, 0.06)
+	if id.begins_with("ch_"):
+		_start_challenge(int(id.substr(3)))
+		return
 	match id:
 		"go", "weekend":
 			_start_weekend()
@@ -1134,6 +1231,13 @@ func _on_menu_activated(id: String) -> void:
 		"start_season":
 			Game.new_season(Game.selected_team, menu.value("slen"))
 			_enter_season_hub()
+		"save":
+			Game.save_custom()
+			Game.selected_team = Game.custom_team_idx
+			if preview_car:
+				preview_car.queue_free()
+				preview_car = null
+			_enter_mode_select()
 		"reset":
 			Game.records = ConfigFile.new()
 			Game.records.save(Game.RECORDS_PATH)
@@ -1156,6 +1260,14 @@ func _on_menu_cancelled() -> void:
 				_enter_race_setup()
 		"hub", "options":
 			_enter_title()
+		"challenges":
+			_enter_mode_select()
+		"paint":
+			if preview_car:
+				preview_car.queue_free()
+				preview_car = null
+			Game.load_custom()
+			_enter_mode_select()
 		"season_setup":
 			_enter_car_select()
 
@@ -1310,3 +1422,61 @@ func _enter_standings(final := false) -> void:
 		_label("", "CHAMPION:  #%s %s" % [table[0][0], champ.driver], 20, Color(0.3, 1.0, 0.4), Vector2(0, 420), HORIZONTAL_ALIGNMENT_CENTER, 5)
 		Game.clear_season()
 	_label("start", "PRESS START", 16, Color.WHITE, Vector2(0, 446), HORIZONTAL_ALIGNMENT_CENTER, 4)
+
+
+# --- paint shop ---------------------------------------------------------------------
+
+func _enter_paint_shop() -> void:
+	var cols: Array = Game.PALETTE.map(func(p): return p[0])
+	var nums: Array = range(1, 100).map(func(n): return str(n))
+	var rows := [
+		{"id": "num", "label": "CAR NUMBER", "values": nums, "index": int(Game.custom.num) - 1},
+		{"id": "first", "label": "FIRST NAME", "values": Game.FIRST_NAMES, "index": Game.custom.first},
+		{"id": "last", "label": "LAST NAME", "values": Game.LAST_NAMES, "index": Game.custom.last},
+		{"id": "sponsor", "label": "SPONSOR", "values": Game.SPONSORS, "index": Game.custom.sponsor},
+		{"id": "c1", "label": "BODY COLOR", "values": cols, "index": Game.custom.c1},
+		{"id": "c2", "label": "TRIM COLOR", "values": cols, "index": Game.custom.c2},
+		{"id": "cn", "label": "NUMBER COLOR", "values": cols, "index": Game.custom.cn},
+		{"id": "save", "label": "SAVE CAR", "hint": "YOUR CAR APPEARS IN CAR SELECT FOR EVERY MODE"},
+	]
+	_open_menu("paint", "PAINT SHOP", rows, 0)
+	menu.top = 90
+	menu.row_h = 30
+	menu.width = 330
+	menu.left_override = 30
+	menu.build("PAINT SHOP", rows, 0)
+	_paint_preview()
+
+
+func _paint_preview() -> void:
+	if preview_car:
+		preview_car.queue_free()
+	preview_car = Car.new()
+	add_child(preview_car)
+	preview_car.setup(Game.custom_team(), null)
+	var base: Vector3 = track.pos[0] + track.right[0] * (track.inner_wall() - 14.0)
+	preview_car.position = base + Vector3.UP * 0.02
+
+
+# --- Lightning Challenges ---------------------------------------------------------
+
+func _enter_challenges() -> void:
+	mode = "challenge"
+	var rows: Array = []
+	for i in Game.CHALLENGES.size():
+		var ch: Dictionary = Game.CHALLENGES[i]
+		var done: bool = Game.challenges_done.has(str(i))
+		rows.append({"id": "ch_%d" % i, "label": ("[X] " if done else "[ ] ") + ch.name, "hint": ch.desc})
+	var title := "LIGHTNING CHALLENGES  %d/%d" % [Game.challenges_done.size(), Game.CHALLENGES.size()]
+	_open_menu("challenges", title, rows, max(challenge_idx, 0))
+	menu.row_h = 28
+	menu.build(title, rows, max(challenge_idx, 0))
+
+
+func _start_challenge(idx: int) -> void:
+	challenge_idx = idx
+	challenge = Game.CHALLENGES[idx]
+	challenge_result = ""
+	session = "race"
+	_use_track(int(challenge.track))
+	_enter_countdown()

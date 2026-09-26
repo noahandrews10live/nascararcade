@@ -192,6 +192,119 @@ var assists := true # steering/stability/traction help for the player
 var manual_shift := false
 var debug_seed := 0 # fixed randomness for tests
 var selected_track := 0
+
+# --- create-a-car ------------------------------------------------------------------
+const CUSTOM_PATH := "user://custom_car.cfg"
+const PALETTE := [
+	["RED", Color(0.85, 0.08, 0.1)], ["ORANGE", Color(0.95, 0.45, 0.05)], ["YELLOW", Color(1.0, 0.82, 0.05)],
+	["LIME", Color(0.55, 0.9, 0.1)], ["GREEN", Color(0.1, 0.55, 0.2)], ["TEAL", Color(0.05, 0.6, 0.6)],
+	["SKY BLUE", Color(0.35, 0.7, 0.95)], ["BLUE", Color(0.1, 0.25, 0.85)], ["NAVY", Color(0.05, 0.08, 0.3)],
+	["PURPLE", Color(0.45, 0.1, 0.7)], ["PINK", Color(0.95, 0.45, 0.7)], ["WHITE", Color(0.95, 0.95, 0.95)],
+	["SILVER", Color(0.7, 0.72, 0.75)], ["GOLD", Color(0.8, 0.62, 0.2)], ["BROWN", Color(0.45, 0.28, 0.12)],
+	["BLACK", Color(0.06, 0.06, 0.07)],
+]
+const FIRST_NAMES := ["ACE", "BILLY", "BO", "CHARLIE", "CODY", "DALE", "DUSTY", "HANK", "JESSE", "JOHNNY", "LUKE", "MAX", "RAY", "ROCKY", "SAM", "TEX", "TOMMY", "WYATT", "ZEKE", "YOU"]
+const LAST_NAMES := ["BLAZE", "BOLT", "BURNETT", "CARVER", "DAWSON", "FIELDS", "GRANGER", "HOLT", "JAMESON", "KNOX", "MCCALL", "PARKER", "RHODES", "SHELBY", "STEELE", "THORNE", "WALLACE", "WILDER", "YATES", "RACER"]
+const SPONSORS := ["THUNDER COLA", "BIG RIG TIRES", "SIZZLE BURGERS", "GATOR JUICE", "MOTORHEAD OIL", "CRUNCHY O'S", "HOG WILD BBQ", "ROCKET PARTS", "NITRO GUM", "PEAK AUTO PARTS", "RIVER BANK", "MOONSHINE ENERGY", "TITAN TOOLS", "GOLD STAR PIZZA", "VELOCITY SODA", "YOUR NAME HERE"]
+var custom := {"num": 1, "first": 0, "last": 0, "sponsor": 0, "c1": 7, "c2": 11, "cn": 2}
+var custom_team_idx := -1
+
+
+func load_custom() -> void:
+	var cf := ConfigFile.new()
+	if cf.load(CUSTOM_PATH) == OK:
+		for k in custom:
+			custom[k] = cf.get_value("car", k, custom[k])
+	_apply_custom()
+
+
+func save_custom() -> void:
+	var cf := ConfigFile.new()
+	for k in custom:
+		cf.set_value("car", k, custom[k])
+	cf.save(CUSTOM_PATH)
+	_apply_custom()
+
+
+## The custom car is a real team entry, so every mode can use it.
+func custom_team() -> Dictionary:
+	return {
+		"num": str(custom.num), "driver": "%s %s" % [FIRST_NAMES[custom.first], LAST_NAMES[custom.last]],
+		"sponsor": SPONSORS[custom.sponsor], "c1": PALETTE[custom.c1][1], "c2": PALETTE[custom.c2][1],
+		"cn": PALETTE[custom.cn][1], "speed": 1.0, "accel": 1.0, "handling": 1.0, "custom": true,
+	}
+
+
+func _apply_custom() -> void:
+	var t := custom_team()
+	# Keep numbers unique: another team using this number takes a free one.
+	for i in teams.size():
+		if i != custom_team_idx and teams[i].num == t.num:
+			var n := 100
+			while team_by_num(str(n)).size() > 0:
+				n += 1
+			teams[i].num = str(n)
+	if custom_team_idx < 0:
+		teams.append(t)
+		custom_team_idx = teams.size() - 1
+	else:
+		teams[custom_team_idx] = t
+
+
+## Cars the player can pick: the six featured teams, the custom car, and the
+## legendary car once enough Lightning Challenges are done.
+func selectable_teams() -> Array:
+	var out: Array = range(SELECTABLE_TEAMS)
+	if custom_team_idx >= 0:
+		out.append(custom_team_idx)
+	if legend_unlocked():
+		out.append(legend_team_idx())
+	return out
+
+
+# --- Lightning Challenges ------------------------------------------------------------
+const CHALLENGES_PATH := "user://challenges.cfg"
+## track: index into tracks; grid: your starting spot; start: leader's distance to the
+## line at the start (negative = before it); goal: "win", "top3", "top5", "top10" or
+## "time" (with "time" in seconds for a solo hot lap).
+const CHALLENGES := [
+	{"name": "LAST LAP LUNGE", "desc": "WHITE FLAG AT THUNDER BEACH. YOU'RE 2ND IN THE DRAFT. WIN IT.", "track": 0, "laps": 1, "field": 16, "grid": 2, "start": -500.0, "goal": "win"},
+	{"name": "SHORT TRACK SCRAPPER", "desc": "START 20TH AT THUNDER VALLEY. 6 LAPS TO GET INTO THE TOP 5.", "track": 2, "laps": 6, "field": 24, "grid": 20, "goal": "top5"},
+	{"name": "HOLD THE LINE", "desc": "LEADING AT BIG SKY WITH 3 TO GO AND THE PACK BEHIND YOU. WIN.", "track": 3, "laps": 3, "field": 30, "grid": 1, "goal": "win"},
+	{"name": "PAPERCLIP PATIENCE", "desc": "MAGNOLIA. 12 LAPS, START 8TH WITH A BENT FENDER. WIN.", "track": 7, "laps": 12, "field": 20, "grid": 8, "damage": 0.2, "goal": "win"},
+	{"name": "FUEL MISER", "desc": "GULF COAST. 8 LAPS, NOT QUITE ENOUGH FUEL. FINISH TOP 10.", "track": 5, "laps": 8, "field": 24, "grid": 6, "fuel": 0.15, "goal": "top10", "wear": true},
+	{"name": "ROAD WARRIOR", "desc": "CANYON RIDGE ROAD COURSE. START 12TH, 3 LAPS. TOP 3.", "track": 10, "laps": 3, "field": 20, "grid": 12, "goal": "top3"},
+	{"name": "TRIANGLE HOT LAP", "desc": "ONE LAP OF KEYSTONE, ALONE. BEAT 70 SECONDS.", "track": 9, "laps": 1, "field": 1, "grid": 1, "start": -2400.0, "goal": "time", "time": 70.0},
+	{"name": "EGG TIMER", "desc": "PALMETTO ON WORN TIRES. 5 LAPS FROM 10TH. TOP 5.", "track": 6, "laps": 5, "field": 24, "grid": 10, "tyres": 0.9, "goal": "top5"},
+]
+var challenges_done := {}
+
+
+func load_challenges() -> void:
+	var cf := ConfigFile.new()
+	if cf.load(CHALLENGES_PATH) == OK:
+		challenges_done = cf.get_value("done", "list", {})
+
+
+func complete_challenge(idx: int) -> bool:
+	var first := not challenges_done.has(str(idx))
+	challenges_done[str(idx)] = true
+	var cf := ConfigFile.new()
+	cf.set_value("done", "list", challenges_done)
+	cf.save(CHALLENGES_PATH)
+	return first
+
+
+func legend_unlocked() -> bool:
+	return challenges_done.size() >= 5
+
+
+func legend_team_idx() -> int:
+	for i in teams.size():
+		if teams[i].get("legend", false):
+			return i
+	teams.append({"num": "00", "driver": "THUNDER JONES", "sponsor": "THUNDERBOLT", "c1": Color(0.08, 0.08, 0.1), "c2": Color(1.0, 0.8, 0.1), "cn": Color(1.0, 0.8, 0.1), "speed": 1.03, "accel": 1.04, "handling": 1.04, "legend": true})
+	return teams.size() - 1
 var selected_team := 0
 var scanlines := true
 ## "Modern" = Forward+ PBR rendering. Needs a RenderingDevice (not available on web /
@@ -236,6 +349,8 @@ func _ready() -> void:
 	_fill_teams()
 	load_settings()
 	load_season()
+	load_custom()
+	load_challenges()
 	modern_supported = RenderingServer.get_rendering_device() != null
 	modern = modern_supported
 

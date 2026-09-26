@@ -14,6 +14,7 @@ var title := ""
 var top := 96
 var row_h := 30
 var width := 480
+var left_override := -1
 var _labels: Array = []
 var _values: Array = []
 var _hint: Label
@@ -38,7 +39,7 @@ func build(t: String, r: Array, start_cursor := 0) -> void:
 	add_child(_title)
 	var panel := ColorRect.new()
 	panel.color = Color(0, 0, 0, 0.62)
-	var left := (640 - width) / 2
+	var left := (640 - width) / 2 if left_override < 0 else left_override
 	panel.position = Vector2(left - 16, top - 12)
 	panel.size = Vector2(width + 32, rows.size() * row_h + 24)
 	panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -58,6 +59,9 @@ func build(t: String, r: Array, start_cursor := 0) -> void:
 	_hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_hint.size = Vector2(640, 20)
 	_hint.position = Vector2(0, top + rows.size() * row_h + 22)
+	if left_override >= 0:
+		_hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
+		_hint.position.x = left_override
 	add_child(_hint)
 	var keys := Game.make_label("UP/DOWN  SELECT     LEFT/RIGHT  CHANGE     START  OK     BACKSPACE  BACK", 11, Color(0.7, 0.7, 0.75), 3)
 	keys.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER

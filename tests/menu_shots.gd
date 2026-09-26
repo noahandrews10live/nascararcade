@@ -30,6 +30,13 @@ func _run() -> void:
 	main.mode = "race"
 	main._enter_race_setup()
 	await _shot("m2_race_setup")
+	main._enter_paint_shop()
+	main.menu.set_value("c1", 1)
+	main._on_menu_changed("c1", 1)
+	main.menu.set_value("num", 43)
+	main._on_menu_changed("num", 43)
+	await _shot("m6_paint")
+	main._on_menu_cancelled()
 	main._enter_garage("race_setup")
 	await _shot("m3_garage")
 	game.new_season(0, 0)
