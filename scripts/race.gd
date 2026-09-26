@@ -436,6 +436,14 @@ func position_of(c: Node3D) -> int:
 ## draft on the straights but dirty air that takes front downforce off a trailing car,
 ## so it pushes (gets tight) in the corners.
 func _aero(delta: float) -> void:
+	## Every car leaves a wake: a velocity deficit strongest right behind it, widening
+	## and fading with distance, and stronger when that car is itself in a draft (so
+	## a line of cars stacks up). Each car samples the air around it:
+	##   nose     - the tow (less drag) and dirty air on the splitter (less front grip);
+	##   spoiler  - the pressure bubble ahead of a car right behind (a push: less drag;
+	##              offset to one side it takes air off the spoiler: the rear goes loose);
+	##   sides    - side-draft from a car at your rear quarter, and the "air wall" of
+	##              turbulent air at the edge of a line when you pull out.
 	var strength: float = float(track.cfg.draft)
 	var n := cars.size()
 	var drag := PackedFloat32Array()
@@ -444,52 +452,51 @@ func _aero(delta: float) -> void:
 	front.resize(n)
 	var draft_amt := PackedFloat32Array()
 	draft_amt.resize(n)
-	# Process from the front of the pack back so the tow can stack.
+	# Front of the pack back, so the tow can stack.
 	var idx := range(n)
 	idx.sort_custom(func(a, b): return cars[a].dist > cars[b].dist)
-	for i in n:
-		drag[i] = 1.0
-		front[i] = 1.0
 	for ii in n:
 		var i: int = idx[ii]
 		var c: Node3D = cars[i]
+		drag[i] = 1.0
+		front[i] = 1.0
 		if c.towed:
 			continue
-		var best := 0.0
+		var tow := 0.0
 		var dirty := 0.0
-		var pushed := 0.0
-		var side_pen := 0.0
+		var push := 0.0
 		var loosen := 0.0
+		var side := 0.0
+		var wall := 0.0
 		var nbl: Array = c.nb
 		for q in range(0, nbl.size(), 2):
 			var o: Node3D = nbl[q]
-			var gap: float = nbl[q + 1] # o ahead when > 0
-			var j: int = o.get_meta("idx", 0)
-			var lat: float = abs(o.d - c.d)
-			if gap > 3.0 and gap < 45.0 and lat < 2.2:
-				# Tow from the car ahead, stronger when it is itself in a draft.
-				var t: float = clamp(1.0 - (gap - 5.0) / 40.0, 0.0, 1.0) * (1.0 - lat / 2.2 * 0.5)
-				t *= 1.0 + 0.6 * draft_amt[j]
-				best = max(best, t)
-				if gap < 25.0:
-					dirty = max(dirty, clamp(1.0 - (gap - 5.0) / 20.0, 0.0, 1.0) * (1.0 - lat / 2.2))
-			elif gap < -3.0 and gap > -9.0 and lat < 1.8:
-				# A car right on the bumper pushes air under this one.
-				pushed = max(pushed, 1.0)
-			if gap < -2.0 and gap > -10.0 and lat > 0.5 and lat < 2.4:
-				# A car tucked in off our rear quarter takes the air off the spoiler:
-				# the rear gets light and the car goes loose.
-				loosen = max(loosen, clamp(1.0 - (-gap - 2.0) / 8.0, 0.0, 1.0))
-			if abs(gap) < 5.0 and lat > 1.9 and lat < 3.6 and gap > 0.0 and gap < 4.0:
-				# Side draft: a car alongside our rear quarter slows us down.
-				side_pen = max(side_pen, 1.0 - abs(gap - 2.0) / 3.0)
-		best = min(best, 1.3)
-		draft_amt[i] = best
-		var reduction: float = best * 0.13 * strength + pushed * 0.05 * strength
-		drag[i] = (1.0 - reduction) * (1.0 + side_pen * 0.07 * strength)
+			var gap: float = nbl[q + 1] # CG to CG, + = o ahead
+			var y: float = abs(o.d - c.d)
+			if gap > 0.0:
+				var x: float = max(gap - Car.LENGTH, 0.0) # our nose to their tail
+				var sigma: float = 1.5 + 0.03 * x
+				var j: int = o.get_meta("idx", 0)
+				var core: float = exp(-x / 25.0) * exp(-(y * y) / (sigma * sigma))
+				tow = max(tow, core * (1.0 + 0.6 * draft_amt[j]))
+				dirty = max(dirty, exp(-x / 12.0) * exp(-(y * y) / 1.44))
+				# The wake's turbulent edge: pulling out of line hits a wall of air.
+				wall = max(wall, exp(-x / 8.0) * exp(-pow((y - 2.4) / 0.5, 2.0)))
+			else:
+				var xb: float = max(-gap - Car.LENGTH, 0.0) # their nose to our bumper
+				push = max(push, exp(-xb / 3.0) * exp(-(y * y)))
+				# A car beside us with its nose at our rear quarter side-drafts us: the
+				# low pressure between the cars holds us back.
+				side = max(side, exp(-pow((-gap - 2.5) / 2.0, 2.0)) * exp(-pow((y - 2.6) / 0.6, 2.0)))
+				loosen = max(loosen, exp(-xb / 4.0) * clamp((y - 0.4) / 0.6, 0.0, 1.0) * clamp((2.6 - y) / 0.6, 0.0, 1.0))
+		tow = min(tow, 1.3)
+		draft_amt[i] = tow
+		var reduction: float = tow * 0.13 * strength + push * 0.05 * strength
+		drag[i] = (1.0 - reduction) * (1.0 + side * 0.07 * strength) * (1.0 + wall * 0.04 * strength)
 		# Dirty air matters most where the draft doesn't dominate.
 		front[i] = 1.0 - dirty * 0.38 * (1.2 - strength)
 		c.set_meta("loosen", loosen)
+		c.set_meta("air", Vector4(tow, push, side, wall))
 	for i in n:
 		var c: Node3D = cars[i]
 		c.drag_mult = drag[i]

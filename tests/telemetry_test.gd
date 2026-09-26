@@ -94,6 +94,7 @@ func _run() -> void:
 		t.free()
 	_wreck_tests(game)
 	_failure_tests(game)
+	_air_tests(game)
 	print("FAILURES: ", failures)
 	quit(1 if failures > 0 else 0)
 
@@ -187,5 +188,46 @@ func _failure_tests(game: Node) -> void:
 	print("   right-front blowout: air %.2f, pushed %.1f m up the track, hit the wall=%s" % [c.tyre_air[1], d_max - d0, hit])
 	_check(c.tyre_air[1] < 0.05, "a blown tyre goes flat")
 	_check(hit or d_max - d0 > 5.0, "a right-front blowout loses the front: the car pushes up the track")
+	race.free()
+	t.free()
+
+
+## The wake model: a line stacks its tow, a car alongside the rear quarter
+## side-drafts, a car offset behind takes air off the spoiler.
+func _air_tests(game: Node) -> void:
+	var t: Node3D = Track.new()
+	root.add_child(t)
+	t.setup(game.tracks[0])
+	print("== air (", game.tracks[0].name, ")")
+	var race: Node3D = Race.new()
+	root.add_child(race)
+	race.setup(t, -1, 5, 6)
+	for i in 6:
+		var c: Node3D = race.cars[i]
+		c.dist = 800.0 - i * 8.0
+		c.d = race.lanes[0]
+	race._build_neighbors()
+	race._aero(10.0)
+	var second: float = race.cars[1].drag_mult
+	var last: float = race.cars[5].drag_mult
+	print("   drag: 2nd in line %.3f, 6th in line %.3f" % [second, last])
+	_check(last < second, "the tow stacks down a line of cars")
+	# Car 1 moves alongside car 0's rear quarter.
+	var before: float = race.cars[0].drag_mult
+	race.cars[1].dist = 800.0 - 2.0
+	race.cars[1].d = race.lanes[0] + 2.6
+	for i in range(2, 6):
+		race.cars[i].dist = 0.0
+	race._build_neighbors()
+	race._aero(10.0)
+	print("   leader drag alone %.3f, with a car at its rear quarter %.3f" % [before, race.cars[0].drag_mult])
+	_check(race.cars[0].drag_mult > 1.0, "a car at your rear quarter side-drafts you")
+	# Car 1 tucked in 1.2 m to the side, right behind: loosens car 0.
+	race.cars[1].dist = 800.0 - 6.0
+	race.cars[1].d = race.lanes[0] + 1.2
+	race._build_neighbors()
+	race._aero(10.0)
+	print("   loosen with a car off the rear quarter: %.2f" % float(race.cars[0].get_meta("loosen", 0.0)))
+	_check(float(race.cars[0].get_meta("loosen", 0.0)) > 0.3, "a car tucked in off your bumper takes air off the spoiler")
 	race.free()
 	t.free()
