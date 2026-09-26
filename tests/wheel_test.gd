@@ -24,12 +24,13 @@ func _run() -> void:
 	game.wheel.enabled = true
 	w.start_helper()
 	_check(w.helper_pid > 0, "the helper starts")
-	var t := 0.0
-	while w.status == "" and t < 5.0:
+	# Real seconds, not game time: --fixed-fps runs frames as fast as it can, and
+	# the helper needs a moment to start up (longer on a busy machine).
+	var t0 := Time.get_ticks_msec()
+	while w.status == "" and Time.get_ticks_msec() - t0 < 10000:
 		w.update(null, 1.0 / 60.0)
 		await process_frame
-		await create_timer(1.0 / 60.0).timeout
-		t += 1.0 / 60.0
+		OS.delay_msec(16)
 	print("   helper says: '%s'" % w.status)
 	_check(w.status == "NONE" or w.status.begins_with("OK"), "the helper reports back (no wheel here)")
 	_check(w.read().has("steer"), "wheel input reads without a device")

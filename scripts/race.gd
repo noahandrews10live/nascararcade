@@ -236,6 +236,12 @@ func tick(delta: float) -> void:
 		if c.has_flat() and c.ai and not c.is_player and c.pit_state == 0 and control and control.enabled and not c.out:
 			c.want_pit = true
 			c.pit_plan = "4"
+		elif c.ai and not c.is_player and c.pit_state == 0 and control and control.enabled and not c.out and maxf(maxf(c.tyre_wear4[0], c.tyre_wear4[1]), maxf(c.tyre_wear4[2], c.tyre_wear4[3])) > 0.85 and laps - control.leader().lap() > 2:
+			c.want_pit = true # green-flag stop before the tyres go to the cords
+			c.pit_plan = "4"
+		elif c.grille_block > 0.2 and c.engine_temp > 132.0 and c.ai and not c.is_player and c.pit_state == 0 and control and control.enabled and not c.out:
+			c.want_pit = true # get the debris pulled off the grille
+			c.pit_plan = "F"
 		elif weather and c.ai and not c.is_player and c.pit_state == 0 and control and control.enabled and track.cfg.get("road", false):
 			var w: float = weather.average_wet()
 			if c.tyre_compound == "slick" and w > 0.35:
@@ -629,6 +635,8 @@ func _drive_ai(c: Node3D, delta: float) -> void:
 	var look: float = max(c.v, 0.0) * 0.7
 	var grip_scale: float = sqrt(c.mu * c.tyre_grip() * c._track_grip) * lerp(0.92, 1.0, c.df_front_mult)
 	var target: float = track.profile_at(ss + look) * grip_scale * c.ai_skill * 0.95
+	# In the wet drivers leave a margin: less feel, spray, and puddles off line.
+	target *= 1.0 - 0.05 * c._wet
 	if c.flat_time > 1.2:
 		target *= 0.55 # limp it back to pit road (after the moment it takes to react)
 	if controlled:
@@ -1006,7 +1014,7 @@ func _debris_tick(delta: float) -> void:
 				continue
 			dd.hit[c] = true
 			var roll := rng.randf()
-			if roll < 0.18:
+			if roll < 0.07:
 				var wheel: int = (0 if ds > 0.0 else 2) + (1 if dd.d > c.d else 0)
 				c.fail_tyre(wheel, "cut")
 			elif roll < 0.3 and ds > 0.5:

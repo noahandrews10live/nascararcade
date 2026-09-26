@@ -322,7 +322,8 @@ func _update_tyres_before() -> void:
 	for i in 4:
 		var t: float = tyre_temp[i]
 		# Grip peaks around 100 C: cold tyres are slick, overheated ones go greasy.
-		var dt: float = (t - 100.0) / 70.0
+		# Wets are a soft, cool-running compound that works from about 45 C.
+		var dt: float = (t - 100.0) / 70.0 if tyre_compound == "slick" else (t - 55.0) / 45.0
 		var temp_f: float = 1.0 - 0.12 * min(dt * dt, 1.0)
 		# Hot air raises the pressure; past its sweet spot the contact patch shrinks.
 		var side_psi: float = psi_l if i % 2 == 0 else psi_r
@@ -447,13 +448,14 @@ func has_flat() -> bool:
 ## grille. Tucked up behind another car (dirty air) or with the grille blocked it
 ## climbs; past ~125 C the engine is protected (less power), past 145 C it fails.
 func _update_engine(delta: float) -> void:
-	var airflow: float = clamp(abs(v) / 80.0, 0.15, 1.2) * (1.0 - grille_block) * (1.0 - 0.12 * clamp(draft, 0.0, 1.0)) * (1.0 - 0.4 * clamp(damage.front - 0.2, 0.0, 1.0))
-	var heat: float = (0.25 + 0.75 * throttle) * 2.4
+	var airflow: float = clamp(0.3 + abs(v) / 115.0, 0.2, 1.2) * (1.0 - grille_block) * (1.0 - 0.12 * clamp(draft, 0.0, 1.0)) * (1.0 - 0.4 * clamp(damage.front - 0.2, 0.0, 1.0))
+	# (A hot engine is protected by pulling power, which also makes less heat.)
+	var heat: float = (0.25 + 0.75 * throttle * engine_derate()) * 2.4
 	engine_temp += (heat - (engine_temp - 40.0) * airflow * 0.037) * delta
 	engine_temp = clamp(engine_temp, 40.0, 170.0)
 	# In clean air at speed, debris on the grille can blow off (drivers pull out of
 	# line to clear it).
-	if grille_block > 0.0 and grille_block < 0.4 and draft < 0.1 and abs(v) > 55.0:
+	if grille_block > 0.0 and grille_block < 0.4 and draft < 0.1 and abs(v) > 40.0:
 		grille_block = max(grille_block - 0.012 * delta, 0.0)
 	if engine_temp > 145.0:
 		_overheat_time += delta
@@ -631,7 +633,7 @@ func step(delta: float) -> void:
 	_track_grip = track.grip_at(ss, d)
 	_wet = track.wet_at(d)
 	if tyre_compound == "wet":
-		_track_grip *= 0.9 - 0.08 * (1.0 - _wet) # grooved: fine in the wet, soft in the dry
+		_track_grip *= 0.8 - 0.05 * (1.0 - _wet) # grooved: fine in the wet, soft in the dry
 	else:
 		_track_grip *= 1.0 - 0.42 * _wet # slicks aquaplane
 	# Your car integrates at 240 Hz, cars around you at 120 Hz, distant ones at 60 Hz.
