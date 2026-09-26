@@ -501,7 +501,10 @@ func _build_motion_blur() -> void:
 	_blur.mesh = qm
 	_blur_mat = ShaderMaterial.new()
 	_blur_mat.shader = load("res://shaders/motion_blur.gdshader")
-	_blur_mat.render_priority = 100
+	# First in the transparent pass: it blurs the opaque scene, then smoke, spray,
+	# skid marks, glass and text draw over it (the screen copy it reads is taken
+	# before any of them, so drawing it later would paint over them all).
+	_blur_mat.render_priority = -128
 	_blur.material_override = _blur_mat
 	_blur.extra_cull_margin = 16384.0
 	_blur.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF

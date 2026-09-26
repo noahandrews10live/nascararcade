@@ -11,6 +11,8 @@ uniform float wipe = -1.0;    // wiper angle 0..1 while sweeping, <0 parked
 uniform float time_s = 0.0;
 uniform float density = 1.0;  // fewer drops on a camera lens
 uniform float refill = 1.0;   // after a wipe the glass fills up again
+uniform float min_depth = 0.0; // in the cockpit: only on the glass, not the cage and wheel
+uniform sampler2D depth_tex : hint_depth_texture, filter_nearest;
 
 void vertex() {
 	POSITION = vec4(VERTEX.xy * 2.0, 0.0, 1.0);
@@ -43,6 +45,16 @@ vec3 drops(vec2 uv, float scale, float t, float streak) {
 void fragment() {
 	if (amount <= 0.01) discard;
 	vec2 uv = SCREEN_UV;
+	if (min_depth > 0.0) {
+		float dz = texture(depth_tex, uv).r;
+#if CURRENT_RENDERER == RENDERER_COMPATIBILITY
+		vec4 ndc = vec4(uv * 2.0 - 1.0, dz * 2.0 - 1.0, 1.0);
+#else
+		vec4 ndc = vec4(uv * 2.0 - 1.0, dz, 1.0);
+#endif
+		vec4 vp = INV_PROJECTION_MATRIX * ndc;
+		if (-vp.z / vp.w < min_depth) discard;
+	}
 	vec2 asp = vec2(VIEWPORT_SIZE.x / VIEWPORT_SIZE.y, 1.0);
 	vec3 a = drops(uv * asp, 18.0, time_s, 1.0 + speed * 6.0);
 	vec3 b = drops(uv * asp + 3.1, 34.0, time_s * 1.3, 1.0 + speed * 9.0);
@@ -63,7 +75,7 @@ void fragment() {
 	// behind it, with a darker rim and a bright glint.
 	vec3 col = texture(screen_tex, uv - off * 0.18).rgb;
 	float rim = m * (1.0 - m) * 4.0;
-	col = mix(col, col * 0.55, rim * 0.6);
+	col = mix(col, col * 0.7, rim * 0.45);
 	col += vec3(0.08) * smoothstep(0.85, 1.0, m);
 	ALBEDO = col;
 	ALPHA = clamp(m * 1.2, 0.0, 1.0);

@@ -101,8 +101,8 @@ func build(c: Node3D, with_mirror: bool) -> void:
 	# The dash display sits right of the wheel, where the driver can glance at it.
 	display.position = Vector3(0.0, 0.99, -0.08)
 	display.rotation = Vector3(deg_to_rad(-30.0), deg_to_rad(-25.0), 0.0) # turned towards the driver
-	display.pixel_size = 0.0014
-	display.font_size = 40
+	display.pixel_size = 0.00045
+	display.font_size = 32
 	display.outline_size = 0
 	display.modulate = Color(0.55, 1.0, 0.7)
 	display.shaded = false

@@ -39,7 +39,7 @@ func setup(t: Node3D, w: Node, cam: Camera3D) -> void:
 		glass.mesh = qm
 		glass_mat = ShaderMaterial.new()
 		glass_mat.shader = load("res://shaders/windshield.gdshader")
-		glass_mat.render_priority = 90
+		glass_mat.render_priority = 120 # the glass is nearest of all
 		glass.material_override = glass_mat
 		glass.extra_cull_margin = 16384.0
 		glass.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
@@ -139,7 +139,7 @@ func _build_spray() -> void:
 	quad.material = m
 	var ramp := Gradient.new()
 	ramp.offsets = PackedFloat32Array([0.0, 0.2, 1.0])
-	ramp.colors = PackedColorArray([Color(0.85, 0.87, 0.9, 0.0), Color(0.85, 0.87, 0.9, 0.55), Color(0.85, 0.87, 0.9, 0.0)])
+	ramp.colors = PackedColorArray([Color(0.85, 0.87, 0.9, 0.0), Color(0.85, 0.87, 0.9, 0.32), Color(0.85, 0.87, 0.9, 0.0)])
 	for k in SPRAY_POOL:
 		if Game.forward_plus:
 			var p := GPUParticles3D.new()
@@ -279,4 +279,5 @@ func update(delta: float, race: Node3D, cam: Camera3D, view: String, focus: Node
 	glass_mat.set_shader_parameter("wipe", _wipe_t)
 	glass_mat.set_shader_parameter("refill", _refill)
 	glass_mat.set_shader_parameter("time_s", _time)
-	glass_mat.set_shader_parameter("density", 1.0 if inside else 0.35)
+	glass_mat.set_shader_parameter("density", 1.0 if inside else 0.12)
+	glass_mat.set_shader_parameter("min_depth", 0.75 if view == "cockpit" else 0.0)
