@@ -813,8 +813,10 @@ func _enter_countdown() -> void:
 	for i in track.n:
 		ref += seg / min(track.speed_profile[i], 80.0)
 	# (Real laps run ~25% over the ideal profile: traffic, tyre warm-up, bumps.)
-	time_left = round(ref * 1.8 + 15.0)
-	lap_bonus = round(ref * 1.35)
+	# Road courses run further over it (braking zones, traffic in the hairpins).
+	var slack: float = 1.2 if track.cfg.get("road", false) else 1.0
+	time_left = round(ref * 1.8 * slack + 15.0)
+	lap_bonus = round(ref * 1.35 * slack)
 	hud.race = race
 	telemetry.car = race.player
 	hud.track = track

@@ -108,6 +108,8 @@ func setup(trk: Node3D, player_team: int, lap_count: int, size := 40, grid: Arra
 		c.ai_patience = rng.randf_range(0.2, 0.9)
 		c.ai_consistency = clamp(rng.randf_range(0.65, 0.9) + talent * 0.1, 0.6, 0.99)
 		c.ai_racecraft = clamp(rng.randf_range(0.3, 0.8) + talent * 0.2, 0.2, 1.0)
+		if arcade_setup:
+			c.ai_consistency = 0.97 # the arcade game is against the clock: no pile-ups ahead
 		c.ai_aggression = rng.randf_range(0.2, 0.9)
 		c.set_meta("grid", p)
 		c.set_meta("idx", cars.size())
@@ -923,7 +925,7 @@ func _contact(a: Node3D, b: Node3D, rel: Vector2) -> void:
 		b.apply_impulse(imp, rb_p)
 		b.add_damage(j, rb_p)
 	# Grudges: the car that got hit (in the rear or turned) remembers who did it.
-	if vn > 3.0:
+	if vn > 3.0 and not arcade:
 		var victim: Node3D = b if n.x > 0.3 else a # b is ahead along n: a hit b from behind
 		var culprit: Node3D = a if victim == b else b
 		victim.rivals[culprit] = min(float(victim.rivals.get(culprit, 0.0)) + clamp(vn / 10.0, 0.1, 0.6), 1.0)
