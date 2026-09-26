@@ -445,7 +445,7 @@ var forward_plus := false
 const QUALITY_NAMES := ["AUTO", "LOW", "MEDIUM", "HIGH", "ULTRA"]
 var quality := 0
 ## The level AUTO is currently running at (adjusted from measured frame times).
-var auto_quality := 2 if OS.has_feature("web") else 3
+var auto_quality := (1 if OS.has_feature("web_android") or OS.has_feature("web_ios") else 2) if OS.has_feature("web") else 3
 ## Blend car positions between physics steps so motion is smooth at any refresh rate.
 var smoothing := true
 var vsync := true
@@ -468,7 +468,7 @@ const WEEKENDS := ["RACE ONLY", "QUALIFY + RACE", "PRACTICE + QUALIFY + RACE"]
 var settings := {
 	# Browsers get a 20-car field by default (GDScript runs slower there).
 	"length": 1, "difficulty": 1, "field": 0 if OS.has_feature("web") else 2, "cautions": 1, "damage": 1, "wear": 1, "weather": 0,
-	"assists": 2, "manual": 0, "weekend": 1,
+	"assists": 2, "manual": 0, "weekend": 1, "touch_tilt": true,
 }
 ## Garage setup (applied to the player's car): -3..3 balance (tight..loose),
 ## tyre pressure 0 low / 1 std / 2 high, gearing 0 short / 1 std / 2 long.
@@ -1148,6 +1148,18 @@ static func ordinal(n: int) -> String:
 		2: return "%dND" % n
 		3: return "%dRD" % n
 	return "%dTH" % n
+
+
+## Lays a control out as the 640x480 design frame, centred in the window (the
+## window can be wider or taller in the Modern look).
+static func center_frame(c: Control) -> Control:
+	c.set_anchors_preset(Control.PRESET_CENTER)
+	c.offset_left = -320.0
+	c.offset_right = 320.0
+	c.offset_top = -240.0
+	c.offset_bottom = 240.0
+	c.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	return c
 
 
 func make_label(text: String, size: int, color := Color.WHITE, outline := 6) -> Label:

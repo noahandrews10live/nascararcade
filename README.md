@@ -195,6 +195,17 @@ templates, then run:
 godot --headless --path . --export-release Web build/web/index.html
 ```
 
+## Full screen and phones
+
+- The Modern look fills any screen shape: laptops, ultrawides, and phones in landscape. The race view widens, and menus stay centred. The 1999 look keeps its 4:3 picture.
+- In the browser, Start goes full screen (untick it to play in the page). On Android it also locks landscape. A full screen button appears when you move the mouse or touch the bottom middle of the screen. iPhone Safari has no full screen for web pages; the game still fills the page.
+- **Touch controls** appear on phones and tablets, and on a touchscreen laptop as soon as you touch it. Using a keyboard or gamepad hides them again.
+  - Steer by tilting the device like a wheel. Wherever you hold it at the start counts as straight ahead. You can also drag a thumb anywhere on the left side, where a full lock is about a thumb's width. TILT/DRAG switches between the two.
+  - GAS and BRAKE pedals are on the right. Small buttons: II pause, CAM, PIT.
+  - Menus, results and replays show a D-pad with A (select) and B (back). The pause screen adds RESUME and QUIT.
+  - Tilt needs the motion sensor: iPhone asks permission when you tap Start. Where the browser or the page's host blocks the sensor, the game says so and uses drag steering.
+- Phones start on the LOW preset, and the browser caps the 3D resolution so it stays smooth on high-density screens.
+
 ## Controls
 
 | Action | Keyboard | Gamepad |
@@ -241,6 +252,7 @@ scripts/atmosphere.gd      haze, sun shafts, lingering smoke, focus, sun glare
 scripts/rain_fx.gd         water film and dry line, spray, drops on the glass
 scripts/track_wear.gd      the rubber line, marbles and wall scuffs (also drives grip)
 scripts/race_day.gd        pit crews, flagman, crowd reactions, fireworks, burnout
+scripts/touch_controls.gd  phone/tablet controls: tilt or drag steering, pedals, menu pad
 tests/                     headless test benches and screenshot scripts (see below)
 ```
 

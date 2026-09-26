@@ -18,6 +18,7 @@ const Cockpit := preload("res://scripts/cockpit.gd")
 const Atmosphere := preload("res://scripts/atmosphere.gd")
 const RainFx := preload("res://scripts/rain_fx.gd")
 const RaceDay := preload("res://scripts/race_day.gd")
+const TouchControls := preload("res://scripts/touch_controls.gd")
 const Menu := preload("res://scripts/menu.gd")
 
 enum State { TITLE, MODE_SELECT, TRACK_SELECT, CAR_SELECT, MENU, COUNTDOWN, RACE, FINISHED, RESULTS, SESSION_RESULTS, STANDINGS, REPLAY }
@@ -39,6 +40,7 @@ var synth: Node
 var soundscape: Node3D
 var hud: Control
 var ui_layer: CanvasLayer
+var ui_root: Control # the 640x480 menu frame, centred however wide the screen is
 var screen: Control
 var pause_layer: CanvasLayer
 var scan_rect: ColorRect
@@ -63,6 +65,7 @@ var cockpit: Node3D # the interior of the car you're riding in (cockpit view)
 var atmosphere: Node # haze, sun shafts, lingering smoke, focus, glare
 var rain_fx: Node3D # water film and dry line, spray, drops on the glass
 var race_day: Node3D # pit crews, the flagman, the crowd, fireworks (a child of the race)
+var touch: Control # on-screen controls for phones and tablets
 var tv_mode := 0
 var tv_target: Node3D
 var tv_timer := 0.0
@@ -172,6 +175,8 @@ func _ready() -> void:
 	ui_layer = CanvasLayer.new()
 	ui_layer.layer = 2
 	add_child(ui_layer)
+	ui_root = Game.center_frame(Control.new())
+	ui_layer.add_child(ui_root)
 
 	pause_layer = CanvasLayer.new()
 	pause_layer.layer = 5
@@ -181,16 +186,25 @@ func _ready() -> void:
 	dim.color = Color(0, 0, 0, 0.55)
 	dim.set_anchors_preset(Control.PRESET_FULL_RECT)
 	pause_layer.add_child(dim)
+	var pause_frame := Game.center_frame(Control.new())
+	pause_layer.add_child(pause_frame)
 	var pl := Game.make_label("PAUSED", 56, Color(1, 0.9, 0.2), 8)
 	pl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	pl.size = Vector2(640, 60)
 	pl.position = Vector2(0, 170)
-	pause_layer.add_child(pl)
+	pause_frame.add_child(pl)
 	var pl2 := Game.make_label("ESC  RESUME        Q  QUIT / END SESSION", 18, Color.WHITE, 5)
 	pl2.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	pl2.size = Vector2(640, 30)
 	pl2.position = Vector2(0, 250)
-	pause_layer.add_child(pl2)
+	pause_frame.add_child(pl2)
+
+	var touch_layer := CanvasLayer.new()
+	touch_layer.layer = 6 # above the pause screen, so RESUME / QUIT can be tapped
+	add_child(touch_layer)
+	touch = TouchControls.new()
+	touch.main = self
+	touch_layer.add_child(touch)
 
 	var scan_layer := CanvasLayer.new()
 	scan_layer.layer = 10
@@ -254,6 +268,9 @@ func _apply_graphics() -> void:
 	# 1999: render everything at 640x480 and upscale. Modern: native resolution 3D,
 	# with the 640x480 UI scaled up smoothly.
 	win.content_scale_mode = Window.CONTENT_SCALE_MODE_CANVAS_ITEMS if modern else Window.CONTENT_SCALE_MODE_VIEWPORT
+	# Modern fills any screen shape (the race view widens; menus stay centred in
+	# a 640x480 frame); 1999 keeps its 4:3 picture.
+	win.content_scale_aspect = Window.CONTENT_SCALE_ASPECT_EXPAND if modern else Window.CONTENT_SCALE_ASPECT_KEEP
 	var vp := get_viewport()
 	vp.msaa_3d = Viewport.MSAA_DISABLED
 	if Game.forward_plus:
@@ -464,7 +481,8 @@ func _apply_quality(night: bool) -> void:
 	else:
 		# Compatibility renderer (browser): plain upscaling and FXAA.
 		vp.scaling_3d_mode = Viewport.SCALING_3D_MODE_BILINEAR
-		vp.scaling_3d_scale = [0.7, 0.7, 0.85, 1.0, 1.0][q]
+		_web_scale = [0.7, 0.7, 0.85, 1.0, 1.0][q]
+		_fit_web_resolution(true)
 		# (Godot 4.7's Compatibility renderer has no FXAA; MSAA smooths the edges.)
 		vp.msaa_3d = Viewport.MSAA_2X if q >= 3 else Viewport.MSAA_DISABLED
 	RenderingServer.directional_shadow_atlas_set_size([2048, 2048, 4096, 4096, 8192][q], true)
@@ -482,6 +500,25 @@ func _apply_quality(night: bool) -> void:
 	env.glow_enabled = fp or q >= 3
 	get_tree().call_group("probe", "set_visible", fp and q >= 3)
 	get_tree().call_group("haze", "set_visible", fp and q >= 3)
+
+
+## Browsers: phones report 2-3 device pixels per CSS pixel, so a full-screen
+## canvas can be 2400+ pixels wide. Cap the 3D picture's width (the UI stays
+## sharp) and re-check whenever the window changes shape (full screen, rotation).
+var _web_scale := 1.0
+var _web_px := Vector2i.ZERO
+
+
+func _fit_web_resolution(force := false) -> void:
+	if Game.forward_plus:
+		return
+	var px: Vector2i = get_window().size
+	if px == _web_px and not force:
+		return
+	_web_px = px
+	var mobile: bool = OS.has_feature("web_android") or OS.has_feature("web_ios")
+	var cap: float = (1100.0 if mobile else 1920.0) / max(float(px.x), 1.0)
+	get_viewport().scaling_3d_scale = clamp(min(_web_scale, cap), 0.25, 1.0)
 
 
 ## Camera motion blur (desktop Modern): a full-screen card on the camera, see
@@ -680,7 +717,7 @@ func _clear_screen() -> void:
 	screen = Control.new()
 	screen.set_anchors_preset(Control.PRESET_FULL_RECT)
 	screen.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	ui_layer.add_child(screen)
+	ui_root.add_child(screen)
 	menu_labels.clear()
 
 
@@ -1505,6 +1542,8 @@ func _process(delta: float) -> void:
 		var fc: Node3D = race.player if race and state != State.REPLAY else tv_target
 		atmosphere.update(delta, fc.speed() if fc and is_instance_valid(fc) else 0.0, cockpit != null and is_instance_valid(cockpit) and cockpit.visible, racing)
 	_auto_quality(delta)
+	if OS.has_feature("web") and Game.modern:
+		_fit_web_resolution()
 	_update_audio()
 	if screen:
 		var blink := int(state_time * 3.0) % 2 == 0
@@ -2384,11 +2423,11 @@ func _enter_replay() -> void:
 	var ov := Game.make_label("", 14, Color(1, 0.9, 0.2), 4)
 	ov.name = "ReplayOverlay"
 	ov.position = Vector2(16, 12)
-	ui_layer.add_child(ov)
+	ui_root.add_child(ov)
 
 
 func _replay_overlay() -> void:
-	var ov: Label = ui_layer.get_node_or_null("ReplayOverlay")
+	var ov: Label = ui_root.get_node_or_null("ReplayOverlay")
 	if ov == null:
 		return
 	if state != State.REPLAY:
@@ -2480,7 +2519,7 @@ func _edit_address() -> void:
 			net_address = t.strip_edges()
 			_addr_edit.visible = false
 			_enter_online())
-		ui_layer.add_child(_addr_edit)
+		ui_root.add_child(_addr_edit)
 	_addr_edit.text = net_address
 	_addr_edit.visible = true
 	_addr_edit.grab_focus()
@@ -2535,7 +2574,7 @@ func _enter_track_editor() -> void:
 		editor.closed.connect(func():
 			editor.visible = false
 			_enter_mode_select())
-		ui_layer.add_child(editor)
+		ui_root.add_child(editor)
 	editor.visible = true
 
 
@@ -2674,7 +2713,7 @@ func _enter_photo() -> void:
 	replay_rate = 0.0
 	hud.visible = false
 	telemetry.visible = false
-	var ov: Node = ui_layer.get_node_or_null("ReplayOverlay")
+	var ov: Node = ui_root.get_node_or_null("ReplayOverlay")
 	if ov:
 		ov.visible = false
 	_sub("PHOTO MODE: ARROWS ORBIT  W/S ZOOM  E/Q HEIGHT  ENTER SNAP  BACKSPACE EXIT", 4.0)
@@ -2692,7 +2731,7 @@ func _exit_photo() -> void:
 	if state != State.REPLAY:
 		hud.visible = true
 		paused = false
-	var ov: Node = ui_layer.get_node_or_null("ReplayOverlay")
+	var ov: Node = ui_root.get_node_or_null("ReplayOverlay")
 	if ov:
 		ov.visible = true
 
@@ -2769,12 +2808,14 @@ func _build_split() -> void:
 	split_layer = CanvasLayer.new()
 	split_layer.layer = 0
 	add_child(split_layer)
+	var split_frame := Game.center_frame(Control.new())
+	split_layer.add_child(split_frame)
 	for i in 2:
 		var cont := SubViewportContainer.new()
 		cont.stretch = true
 		cont.position = Vector2(0, i * 241)
 		cont.size = Vector2(640, 239)
-		split_layer.add_child(cont)
+		split_frame.add_child(cont)
 		var vp := SubViewport.new()
 		vp.size = Vector2i(640, 239)
 		vp.audio_listener_enable_3d = false
@@ -2788,6 +2829,7 @@ func _build_split() -> void:
 		vp.add_child(hl)
 		var h: Control = Hud.new()
 		var sc := 0.6
+		h.auto_size = false
 		h.W = 640.0 / sc
 		h.H = 239.0 / sc
 		h.player_idx = i + 1
@@ -2804,7 +2846,7 @@ func _build_split() -> void:
 	bar.color = Color(0, 0, 0)
 	bar.position = Vector2(0, 239)
 	bar.size = Vector2(640, 2)
-	split_layer.add_child(bar)
+	split_frame.add_child(bar)
 	hud.visible = false
 
 

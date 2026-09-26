@@ -7,6 +7,8 @@ var track: Node3D
 ## wide, short layout). Set before the HUD enters the tree.
 var W := 640.0
 var H := 480.0
+var auto_size := true # follow the window's shape (off in split screen, which sets W/H)
+var _items: Array = [] # [label, offset, corner]
 var player_idx := 1 # 1 = race.player, 2 = race.player2
 var control: Node = null # race_control.gd in Single Race mode
 var time_left := 0.0
@@ -80,6 +82,27 @@ func _ready() -> void:
 ## corner: 0 top-left, 1 top-centre, 2 top-right, 3 bottom-right
 func _add(l: Label, p: Vector2, corner: int) -> Label:
 	add_child(l)
+	_items.append([l, p, corner])
+	_place(l, p, corner)
+	return l
+
+
+## Puts everything where it belongs for the current W x H (the Modern look can be
+## any shape, from a phone in landscape to an ultrawide).
+func _layout() -> void:
+	for it in _items:
+		_place(it[0], it[1], it[2])
+	l_msg.size = Vector2(W, 80)
+	l_msg.position = Vector2(0, H * 0.31)
+	l_msg.pivot_offset = Vector2(W * 0.5, 40)
+	l_spot.size = Vector2(W, 30)
+	l_spot.position = Vector2(0, H - 88)
+	l_flag.position = Vector2(W * 0.5 - 120, 4)
+	l_sub.size = Vector2(W, 30)
+	l_sub.position = Vector2(0, H * 0.46)
+
+
+func _place(l: Label, p: Vector2, corner: int) -> void:
 	match corner:
 		0:
 			l.position = p
@@ -95,7 +118,6 @@ func _add(l: Label, p: Vector2, corner: int) -> Label:
 			l.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 			l.size = Vector2(120, 0)
 			l.position = Vector2(W - 120 + p.x, H + p.y)
-	return l
 
 
 func message(text: String, seconds := 2.0, color := Color(1, 0.9, 0.2)) -> void:
@@ -123,6 +145,12 @@ func clear_messages() -> void:
 
 
 func _process(delta: float) -> void:
+	if auto_size and l_msg:
+		var sz: Vector2 = get_viewport().get_visible_rect().size
+		if not sz.is_equal_approx(Vector2(W, H)):
+			W = sz.x
+			H = sz.y
+			_layout()
 	blink += delta
 	if msg_time > 0.0:
 		msg_time -= delta

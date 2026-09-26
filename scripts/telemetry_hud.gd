@@ -10,8 +10,7 @@ var H := 480.0
 
 
 func _ready() -> void:
-	mouse_filter = Control.MOUSE_FILTER_IGNORE
-	set_anchors_preset(Control.PRESET_FULL_RECT)
+	Game.center_frame(self)
 
 
 func _process(_delta: float) -> void:
