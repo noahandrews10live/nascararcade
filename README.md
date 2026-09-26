@@ -49,6 +49,13 @@ audio. The project has no imported assets.
 
 ## Running
 
+**Windows, no install:** download
+[`downloads/SpeedwayThunder-windows.zip`](downloads/SpeedwayThunder-windows.zip),
+unzip it and double-click `SpeedwayThunder.exe`. The exe isn't code-signed, so Windows
+SmartScreen may warn you: click **More info → Run anyway**.
+
+**Any platform, from source:**
+
 1. Install [Godot 4.3+](https://godotengine.org/download). The standard build is fine; you don't need .NET. Modern graphics need a Vulkan (or Direct3D 12) capable GPU; on older machines, launch with `godot --path . --rendering-method gl_compatibility` and the game runs in 1999 mode.
 2. Open `project.godot` in the editor and press **F5**, or run from the command line:
    ```sh
