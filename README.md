@@ -54,12 +54,13 @@ Motion smoothing), and Options → VSync off gives the lowest input delay.
   - fuel burn and tyre wear.
 
   Cars can get loose or tight, spin, and wreck.
-- **Packages.** Each track uses a real rules package:
-  - 510 hp, low downforce at the superspeedways;
-  - 670 hp on the intermediates;
-  - 750 hp at the short tracks and on the road course.
+- **Power.** Gen-3 style, unrestricted 950 hp everywhere:
+  - superspeedways run tall gears and trimmed drag: about 208–212 mph alone and
+    215–220 mph in the draft;
+  - everywhere else the cars carry more drag and downforce, so they're quick off
+    the corners but top out around 180–195 mph.
 - **Drafting.**
-  - Superspeedways: pack drafting worth about 8 mph that builds through a line of cars. A car on your bumper pushes you, and a car alongside your rear quarter slows you down (side-drafting).
+  - Superspeedways: pack drafting worth about 9 mph that builds through a line of cars. A car on your bumper pushes you, and a car alongside your rear quarter slows you down (side-drafting).
   - Other tracks: the draft is smaller, and a car close behind another loses front downforce in its dirty air and pushes up the track.
 - **Contact and wrecks.** Car-to-car and wall contact is resolved as physical impulses at the contact point:
   - A tap in the right rear can hook a car into a spin.
