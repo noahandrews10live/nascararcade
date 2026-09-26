@@ -1,0 +1,449 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>Speedway Thunder '99</title>
+<meta name="description" content="A stock car racer: arcade, full race weekends, seasons, career and challenges. Full screen on laptops and phones, with touch and tilt steering.">
+<meta name="theme-color" content="#0b1026">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Thunder '99">
+$GODOT_HEAD_INCLUDE
+<link rel="apple-touch-icon" sizes="180x180" href="index.180x180.png"><!-- after the generated one, so iPhone uses the game icon -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bungee&family=Chivo+Mono:wght@400;600&display=swap">
+<style>
+  /* Deliberately single-theme: a night-race arcade cabinet. */
+  :root {
+    color-scheme: dark;
+    --night: #0b1026;
+    --bezel: #151b3a;
+    --bezel-edge: #262f5c;
+    --flag-yellow: #ffd21f;
+    --flag-red: #e0321c;
+    --lamp: #e8ecf5;
+    --muted: #8a93b5;
+    --display: "Bungee", "Impact", "Arial Black", sans-serif;
+    --mono: "Chivo Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  }
+  [hidden] { display: none !important; }
+  html, body { height: 100%; }
+  body {
+    background: #000;
+    color: var(--lamp);
+    font-family: var(--mono);
+    font-size: 14px;
+    overflow: hidden;
+    overscroll-behavior: none;
+  }
+  /* The game owns the whole screen. */
+  .stage { position: fixed; inset: 0; background: #000; }
+  #canvas {
+    display: block;
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    outline: none;
+    touch-action: none;
+    user-select: none;
+    -webkit-user-select: none;
+    -webkit-touch-callout: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+  /* Start screen */
+  .overlay {
+    position: fixed;
+    inset: 0;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 18px;
+    padding: max(20px, env(safe-area-inset-top, 0px)) max(16px, env(safe-area-inset-right, 0px)) max(20px, env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-left, 0px));
+    text-align: center;
+    background: radial-gradient(ellipse at center, #1b2458 0%, var(--night) 75%);
+  }
+  .overlay::before {
+    content: "";
+    position: absolute;
+    inset: 0 0 auto 0;
+    height: 8px;
+    background: repeating-linear-gradient(90deg, var(--lamp) 0 8px, #111 8px 16px);
+    opacity: 0.85;
+  }
+  /* Centred when it fits; scrolls from the top when it doesn't (phones in landscape). */
+  .overlay > :first-child { margin-top: auto; }
+  .overlay > :last-child { margin-bottom: auto; }
+  .overlay h1 {
+    margin: 0;
+    font-family: var(--display);
+    font-weight: 400;
+    font-style: italic;
+    font-size: clamp(30px, 7vw, 64px);
+    line-height: 1;
+    color: var(--flag-yellow);
+    text-shadow: 3px 3px 0 var(--flag-red);
+    text-wrap: balance;
+  }
+  .tag { margin: 0; color: var(--muted); letter-spacing: 0.14em; text-transform: uppercase; font-size: 12px; }
+  .overlay p.blurb { margin: 0; color: var(--lamp); max-width: 48ch; line-height: 1.5; }
+  .row { display: flex; flex-wrap: wrap; gap: 12px 20px; justify-content: center; align-items: center; }
+  .start {
+    font-family: var(--display);
+    font-size: clamp(18px, 3.4vw, 24px);
+    color: var(--night);
+    background: var(--flag-yellow);
+    border: 0;
+    border-radius: 4px;
+    padding: 14px 30px;
+    cursor: pointer;
+    box-shadow: 0 4px 0 #a88400;
+    touch-action: manipulation;
+  }
+  .start:hover { filter: brightness(1.08); }
+  .start:focus-visible { outline: 3px solid var(--lamp); outline-offset: 3px; }
+  .start:active { transform: translateY(2px); box-shadow: 0 2px 0 #a88400; }
+  .check { display: inline-flex; gap: 8px; align-items: center; color: var(--lamp); cursor: pointer; font-size: 13px; }
+  .check input { width: 18px; height: 18px; accent-color: var(--flag-yellow); }
+  .meter { width: min(360px, 80%); height: 12px; background: #000; border: 1px solid var(--bezel-edge); border-radius: 2px; overflow: hidden; }
+  .meter span {
+    display: block; height: 100%; width: 0%;
+    background: repeating-linear-gradient(90deg, var(--flag-yellow) 0 10px, #c9a300 10px 12px);
+    transition: width 0.15s linear;
+  }
+  .status { font-variant-numeric: tabular-nums; color: var(--lamp); font-size: 13px; }
+  .error { color: #ff8a73; }
+  .howto {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 10px 18px;
+    margin: 0;
+    padding: 14px 16px;
+    width: min(760px, 100%);
+    box-sizing: border-box;
+    background: rgba(21, 27, 58, 0.85);
+    border: 1px solid var(--bezel-edge);
+    border-radius: 6px;
+    text-align: left;
+  }
+  .howto div { display: flex; flex-direction: column; gap: 3px; }
+  .howto dt { color: var(--muted); font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; }
+  .howto dd { margin: 0; font-weight: 600; }
+  .note { color: var(--muted); font-size: 12px; line-height: 1.5; margin: 0; max-width: 72ch; }
+  /* Touch devices see the touch guide; mouse-and-keyboard devices the key guide. */
+  .touch-only { display: none; }
+  @media (hover: none) and (pointer: coarse) {
+    .touch-only { display: grid; }
+    .keys-only { display: none; }
+  }
+  /* Floating full screen toggle: appears when you move the mouse or touch. */
+  .fs {
+    position: fixed;
+    left: 50%;
+    bottom: max(10px, env(safe-area-inset-bottom, 0px));
+    transform: translateX(-50%);
+    z-index: 5;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 14px;
+    font: 600 12px var(--mono);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--lamp);
+    background: rgba(11, 16, 38, 0.72);
+    border: 1px solid var(--bezel-edge);
+    border-radius: 999px;
+    cursor: pointer;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.25s;
+    touch-action: manipulation;
+  }
+  .fs.show { opacity: 1; pointer-events: auto; }
+  .fs svg { width: 16px; height: 16px; }
+  /* Phones race sideways only: in portrait a rotate screen covers the game (it pauses). */
+  .rotate {
+    position: fixed;
+    inset: 0;
+    z-index: 20;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 18px;
+    padding: 24px;
+    text-align: center;
+    background: radial-gradient(ellipse at center, #1b2458 0%, var(--night) 75%);
+    font-size: 15px;
+    line-height: 1.5;
+  }
+  .rotate strong { font-family: var(--display); font-weight: 400; font-style: italic; font-size: 26px; color: var(--flag-yellow); text-shadow: 2px 2px 0 var(--flag-red); }
+  .rotate svg { width: 88px; height: 88px; color: var(--lamp); animation: turn 2.4s ease-in-out infinite; }
+  @keyframes turn { 0%, 30% { transform: rotate(0deg); } 60%, 100% { transform: rotate(-90deg); } }
+  .install { display: flex; flex-direction: column; gap: 6px; align-items: center; max-width: 52ch; color: var(--lamp); font-size: 13px; line-height: 1.5; }
+  .install button {
+    font: 600 13px var(--mono); letter-spacing: 0.06em; text-transform: uppercase;
+    color: var(--lamp); background: transparent; border: 1px solid var(--flag-yellow);
+    border-radius: 4px; padding: 8px 14px; cursor: pointer; touch-action: manipulation;
+  }
+  @media (prefers-reduced-motion: reduce) { .meter span, .fs { transition: none; } .rotate svg { animation: none; transform: rotate(-90deg); } }
+</style>
+</head>
+<body>
+<div class="stage">
+  <canvas id="canvas" tabindex="0">Your browser does not support the canvas element.</canvas>
+</div>
+
+<div class="overlay" id="overlay">
+  <h1>Speedway Thunder '99</h1>
+  <p class="tag">Stock car racing &middot; 11 tracks &middot; 40-car fields</p>
+  <p class="blurb" id="blurb">Tap start to load the game (about 38 MB). Sound starts after you tap.</p>
+  <div class="row">
+    <button class="start" id="start" type="button">Start engine</button>
+    <label class="check" id="fs-choice"><input type="checkbox" id="fs-on" checked> Full screen</label>
+  </div>
+  <div class="install" id="install" hidden>
+    <button type="button" id="install-btn" hidden>Install the app</button>
+    <span id="install-text"></span>
+  </div>
+  <div class="meter" id="meter" hidden><span id="bar"></span></div>
+  <div class="status" id="status" hidden></div>
+
+  <dl class="howto touch-only">
+    <div><dt>Hold it</dt><dd>Sideways, like a wheel</dd></div>
+    <div><dt>Steer</dt><dd>Tilt the phone, or drag on the left</dd></div>
+    <div><dt>Gas / brake</dt><dd>Pedals on the right</dd></div>
+    <div><dt>Menus</dt><dd>D-pad, A to select, B back</dd></div>
+    <div><dt>In the race</dt><dd>II pause &middot; CAM &middot; PIT &middot; TILT/DRAG</dd></div>
+  </dl>
+  <dl class="howto keys-only">
+    <div><dt>Steer</dt><dd>← → or A D</dd></div>
+    <div><dt>Gas / brake</dt><dd>↑ ↓ or W S</dd></div>
+    <div><dt>Start / select</dt><dd>Enter or Space</dd></div>
+    <div><dt>Camera (4 views)</dt><dd>C</dd></div>
+    <div><dt>Pause</dt><dd>Esc (Q quits race)</dd></div>
+    <div><dt>Pit / pit plan</dt><dd>Tab / O</dd></div>
+    <div><dt>Telemetry &middot; photo</dt><dd>T &middot; F</dd></div>
+    <div><dt>Full screen</dt><dd>F11, or the button below</dd></div>
+  </dl>
+  <p class="note">Needs WebGL 2 (current Chrome, Edge, Firefox or Safari). Gamepads work too. Seasons, careers, your car and best laps are saved in this browser. Phones run the lighter graphics settings automatically; the Windows download adds sun shafts, lingering smoke, SSAO, reflections, online hosting and steering-wheel force feedback.</p>
+</div>
+
+<button class="fs" id="fs" type="button" hidden aria-label="Toggle full screen">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg>
+  <span id="fs-label">Full screen</span>
+</button>
+<div class="rotate" id="rotate" hidden>
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="6" y="2" width="12" height="20" rx="2.5"/><path d="M10.5 18.5h3"/></svg>
+  <strong>Turn your phone sideways</strong>
+  <span>Speedway Thunder races in landscape. The race is paused until you do.</span>
+</div>
+
+<script src="$GODOT_URL"></script>
+<script>
+  (function () {
+    const config = $GODOT_CONFIG;
+    config.canvasResizePolicy = 2; // the canvas follows the window: full screen at any size
+    const $ = function (id) { return document.getElementById(id); };
+    const overlay = $("overlay"), startBtn = $("start"), meter = $("meter"), bar = $("bar");
+    const status = $("status"), blurb = $("blurb"), canvas = $("canvas");
+    const fsBtn = $("fs"), fsLabel = $("fs-label"), fsOn = $("fs-on"), fsChoice = $("fs-choice");
+    const rotate = $("rotate");
+    const install = $("install"), installBtn = $("install-btn"), installText = $("install-text");
+    const touchDevice = window.matchMedia("(hover: none) and (pointer: coarse)").matches || navigator.maxTouchPoints > 1;
+    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+    const installed = window.matchMedia("(display-mode: fullscreen), (display-mode: standalone)").matches || navigator.standalone === true;
+
+    // --- Full screen and landscape. An installed app is already full screen; in
+    // a browser, Start asks for it (iPhone Safari can't: the page fills instead).
+    const root = document.documentElement;
+    const canFullscreen = !installed && !!(document.fullscreenEnabled || document.webkitFullscreenEnabled);
+    if (!canFullscreen) fsChoice.hidden = true;
+    function lockLandscape() {
+      if (touchDevice && screen.orientation && screen.orientation.lock) {
+        screen.orientation.lock("landscape").catch(function () {});
+      }
+    }
+    function isFull() { return !!(document.fullscreenElement || document.webkitFullscreenElement); }
+    function enterFull() {
+      const req = root.requestFullscreen ? root.requestFullscreen({ navigationUI: "hide" }) : (root.webkitRequestFullscreen ? root.webkitRequestFullscreen() : null);
+      return Promise.resolve(req).then(lockLandscape).catch(function () {});
+    }
+    function exitFull() {
+      const ex = document.exitFullscreen ? document.exitFullscreen() : (document.webkitExitFullscreen ? document.webkitExitFullscreen() : null);
+      return Promise.resolve(ex).catch(function () {});
+    }
+    function syncFs() { fsLabel.textContent = isFull() ? "Exit full screen" : "Full screen"; }
+    document.addEventListener("fullscreenchange", syncFs);
+    document.addEventListener("webkitfullscreenchange", syncFs);
+    fsBtn.addEventListener("click", function () {
+      (isFull() ? exitFull() : enterFull()).then(function () { canvas.focus(); });
+    });
+    let hideTimer = 0;
+    function peekFs() {
+      if (fsBtn.hidden) return;
+      fsBtn.classList.add("show");
+      clearTimeout(hideTimer);
+      hideTimer = setTimeout(function () { fsBtn.classList.remove("show"); }, 2500);
+    }
+    window.addEventListener("mousemove", peekFs, { passive: true });
+    window.addEventListener("touchstart", function (e) {
+      // Only a touch near the bottom middle shows it, so it never covers the pedals.
+      const t = e.touches[0];
+      if (t && Math.abs(t.clientX - window.innerWidth / 2) < 120 && t.clientY > window.innerHeight - 90) peekFs();
+    }, { passive: true });
+    if (installed) lockLandscape();
+
+    // --- Portrait: phones race sideways only. The game reads window.stPortrait
+    // and pauses the race.
+    window.stPortrait = false;
+    function checkRotate() {
+      const portrait = touchDevice && window.innerHeight > window.innerWidth;
+      window.stPortrait = portrait;
+      rotate.hidden = !portrait;
+    }
+    window.addEventListener("resize", checkRotate);
+    window.addEventListener("orientationchange", function () { setTimeout(checkRotate, 250); });
+    checkRotate();
+
+    // --- Tilt steering. The page reads the motion sensor and the game reads
+    // window.stTiltAngle: how far the phone is turned like a steering wheel, in
+    // degrees (+ = right). Uses the accelerometer (devicemotion) or, where only
+    // that's available, the orientation sensor (deviceorientation).
+    window.stTiltOk = false;
+    window.stTiltAngle = 0;
+    let flip = 0; // platforms disagree on the accelerometer's sign; learnt below
+    let lastMotion = 0;
+    function screenAngle() {
+      if (screen.orientation && typeof screen.orientation.angle === "number") return screen.orientation.angle;
+      return typeof window.orientation === "number" ? window.orientation : 0;
+    }
+    // "up" in device axes (x right, y towards the top in portrait), any scale.
+    function steerFrom(x, y) {
+      const a = screenAngle() * Math.PI / 180;
+      let right = x * Math.cos(a) - y * Math.sin(a);
+      let up = x * Math.sin(a) + y * Math.cos(a);
+      if (Math.hypot(right, up) < 0.15) return; // lying flat: no wheel to turn
+      window.stTiltAngle = Math.atan2(-right, up) * 180 / Math.PI;
+      window.stTiltOk = true;
+    }
+    function onMotion(e) {
+      const g = e.accelerationIncludingGravity;
+      if (!g || g.x === null || g.y === null || (g.x === 0 && g.y === 0 && g.z === 0)) return;
+      const a = screenAngle() * Math.PI / 180;
+      const up = g.x * Math.sin(a) + g.y * Math.cos(a);
+      // Whoever holds a phone to race has the top of the screen higher than the
+      // bottom, so "up" must come out positive: that tells us the sign.
+      if (up > 2.5) flip = 1; else if (up < -2.5) flip = -1;
+      if (flip === 0) return;
+      lastMotion = Date.now();
+      steerFrom(g.x * flip / 9.81, g.y * flip / 9.81);
+    }
+    function onOrientation(e) {
+      if (Date.now() - lastMotion < 500 || e.beta === null || e.gamma === null) return;
+      const b = e.beta * Math.PI / 180, c = e.gamma * Math.PI / 180;
+      // The world's up direction seen from the device.
+      steerFrom(-Math.sin(c) * Math.cos(b), Math.sin(b));
+    }
+    function startMotion() {
+      if (!touchDevice) return;
+      const listen = function () {
+        window.addEventListener("devicemotion", onMotion);
+        window.addEventListener("deviceorientation", onOrientation);
+      };
+      // iPhone and iPad ask first, and only from a tap.
+      const askMotion = (typeof DeviceMotionEvent !== "undefined" && typeof DeviceMotionEvent.requestPermission === "function") ? DeviceMotionEvent.requestPermission() : null;
+      const askOrient = (typeof DeviceOrientationEvent !== "undefined" && typeof DeviceOrientationEvent.requestPermission === "function") ? DeviceOrientationEvent.requestPermission() : null;
+      if (askMotion || askOrient) {
+        Promise.all([askMotion, askOrient].map(function (p) { return p ? p.catch(function () { return "denied"; }) : "granted"; })).then(function (r) {
+          if (r.indexOf("granted") >= 0) listen();
+        });
+      } else {
+        listen();
+      }
+    }
+
+    // --- Install: Android offers an install button; iPhone needs Share > Add to Home Screen.
+    let deferredPrompt = null;
+    if (!installed && config.serviceWorker) {
+      window.addEventListener("beforeinstallprompt", function (e) {
+        e.preventDefault();
+        deferredPrompt = e;
+        install.hidden = false;
+        installBtn.hidden = false;
+        installText.textContent = "Play it from your home screen, full screen and offline.";
+      });
+      installBtn.addEventListener("click", function () {
+        if (!deferredPrompt) return;
+        deferredPrompt.prompt();
+        deferredPrompt.userChoice.finally(function () { install.hidden = true; deferredPrompt = null; });
+      });
+      if (isIOS) {
+        install.hidden = false;
+        installText.textContent = "Install it: tap Share, then “Add to Home Screen”. It then opens full screen from its own icon.";
+      }
+    }
+
+    function fail(msg) {
+      meter.hidden = true;
+      status.hidden = false;
+      status.classList.add("error");
+      status.textContent = msg;
+      startBtn.hidden = false;
+      startBtn.textContent = "Try again";
+    }
+
+    const missing = Engine.getMissingFeatures({ threads: false });
+    if (missing.length) {
+      blurb.textContent = "This browser is missing features the game needs: " + missing.join(", ") + ". Try a current Chrome, Edge, Firefox or Safari.";
+      startBtn.hidden = true;
+    }
+
+    let engine = null;
+    startBtn.addEventListener("click", function () {
+      // These need the tap itself, so they go first.
+      startMotion();
+      if (canFullscreen && fsOn.checked) enterFull(); else lockLandscape();
+      startBtn.hidden = true;
+      fsChoice.hidden = true;
+      install.hidden = true;
+      blurb.textContent = "Warming up the engine…";
+      meter.hidden = false;
+      status.hidden = false;
+      status.classList.remove("error");
+      status.textContent = "Loading…";
+      if (!engine) engine = new Engine(config);
+      engine.startGame({
+        onProgress: function (current, total) {
+          if (total > 0) {
+            bar.style.width = Math.min(100, (current / total) * 100).toFixed(1) + "%";
+            status.textContent = (current / 1048576).toFixed(1) + " / " + (total / 1048576).toFixed(1) + " MB";
+          }
+        }
+      }).then(function () {
+        overlay.hidden = true;
+        fsBtn.hidden = !canFullscreen;
+        syncFs();
+        peekFs();
+        checkRotate();
+        canvas.focus();
+      }).catch(function (err) {
+        fail("The game couldn't start: " + (err && err.message ? err.message : err) + ". Reload the page and try again.");
+      });
+    });
+    canvas.addEventListener("pointerdown", function () { canvas.focus(); });
+    // Keep arrow keys and space from scrolling, and stop pinch/double-tap zoom.
+    window.addEventListener("keydown", function (e) {
+      if (document.activeElement === canvas && ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", " "].indexOf(e.key) >= 0) e.preventDefault();
+    }, { passive: false });
+    document.addEventListener("gesturestart", function (e) { e.preventDefault(); });
+  })();
+</script>
+</body>
+</html>

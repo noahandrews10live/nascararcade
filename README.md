@@ -203,8 +203,23 @@ godot --headless --path . --export-release Web build/web/index.html
   - Steer by tilting the device like a wheel. Wherever you hold it at the start counts as straight ahead. You can also drag a thumb anywhere on the left side, where a full lock is about a thumb's width. TILT/DRAG switches between the two.
   - GAS and BRAKE pedals are on the right. Small buttons: II pause, CAM, PIT.
   - Menus, results and replays show a D-pad with A (select) and B (back). The pause screen adds RESUME and QUIT.
-  - Tilt needs the motion sensor: iPhone asks permission when you tap Start. Where the browser or the page's host blocks the sensor, the game says so and uses drag steering.
+  - Tilt needs the motion sensor: iPhone asks permission when you tap Start. The page reads the accelerometer, or the orientation sensor where that's all there is. It works out each phone's sign convention from which edge of the screen is higher. Where the browser or an embedding page blocks the sensor, the game says so and uses drag steering. The installed app isn't embedded, so tilt works there.
 - Phones start on the LOW preset, and the browser caps the 3D resolution so it stays smooth on high-density screens.
+
+## Install it on your phone
+
+`docs/` holds the game built as an installable web app. It has a manifest with icon, an offline cache (service worker), full-screen display and a landscape lock. GitHub Pages serves it:
+
+1. On GitHub: **Settings → Pages → Build and deployment**. Choose **Deploy from a branch**, then the branch holding `docs/` and the **/docs** folder. Save.
+2. After a minute the game is at `https://<user>.github.io/nascararcade/`.
+3. On the phone, open that link.
+   - **Android (Chrome):** tap **Install the app** on the start screen, or use the ⋮ menu → **Install app**.
+   - **iPhone (Safari):** tap **Share → Add to Home Screen**.
+4. It then opens from its own icon: full screen, landscape, and playable offline after the first load.
+
+Phones race in landscape only. Android installs lock to landscape. iPhone can't lock, so holding it upright shows a "turn your phone sideways" card and pauses the race.
+
+Rebuild after changes: export the **Web App** preset (`godot --headless --export-release "Web App" docs/index.html`) and add an empty `docs/.nojekyll`. The page around the game is `web/shell.html`. `web/make_artifact_page.py` builds the single-page variant (engine split into parts) from the plain **Web** export.
 
 ## Controls
 

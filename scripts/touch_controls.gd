@@ -29,6 +29,7 @@ var _js_window = null
 var _last_racing := false
 var _font: Font
 var _race_time := 0.0 # seconds since the race controls came up
+var _portrait := false # the page says the phone is upright: the race waits (paused)
 
 
 func _ready() -> void:
@@ -55,11 +56,16 @@ func _read_tilt() -> void:
 	if _js_window == null:
 		_tilt_ok = false
 		return
+	var portrait = _js_window.stPortrait
+	_portrait = portrait == true
 	var ok = _js_window.stTiltOk
+	var was_ok := _tilt_ok
 	_tilt_ok = ok == true
 	if _tilt_ok:
 		var a = _js_window.stTiltAngle
 		_tilt_value = float(a) if a != null else 0.0
+		if not was_ok:
+			_tilt_center = _tilt_value # first reading: however it's held is straight
 
 
 func _layout() -> void:
@@ -178,8 +184,14 @@ func _process(delta: float) -> void:
 		_race_time = 0.0
 		if racing:
 			_tilt_center = _tilt_value # hold it how you like: that's straight ahead
-	_layout()
 	_read_tilt()
+	# Phones race in landscape only: turning the phone upright pauses the race
+	# (the page covers the screen with a "turn your phone" card meanwhile).
+	if _portrait and racing:
+		_release_all()
+		_tap("pause")
+		return
+	_layout()
 	if racing:
 		var gas := 0.0
 		var brake := 0.0
