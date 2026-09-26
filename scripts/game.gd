@@ -19,7 +19,7 @@ var tracks: Array[Dictionary] = [
 		"width": 20.0, "apron": 9.0, "infield": 14.0,
 		"bank_turn": 31.0, "bank_straight": 4.0,
 		"laps": 3, "draft": 1.0, "grid_player": 24,
-		"hp": 510, "cda": 1.05, "cla": 1.6, "pit_mph": 55, "race_laps": 20,
+		"hp": 510, "cda": 1.05, "cla": 1.6, "pit_mph": 55, "race_laps": 20, "full_laps": 200,
 		"sky_top": Color(0.18, 0.38, 0.78), "sky_horizon": Color(0.72, 0.84, 0.95),
 		"grass": Color(0.24, 0.55, 0.18), "fog": Color(0.70, 0.80, 0.92),
 		"lake": true, "sun_elev": 58.0, "sun_az": 35.0,
@@ -33,7 +33,7 @@ var tracks: Array[Dictionary] = [
 		"width": 18.0, "apron": 8.0, "infield": 12.0,
 		"bank_turn": 24.0, "bank_straight": 5.0,
 		"laps": 4, "draft": 0.35, "grid_player": 24,
-		"hp": 670, "cda": 1.0, "cla": 2.4, "pit_mph": 45, "race_laps": 30,
+		"hp": 670, "cda": 1.0, "cla": 2.4, "pit_mph": 45, "race_laps": 30, "full_laps": 267,
 		"sky_top": Color(0.35, 0.45, 0.80), "sky_horizon": Color(0.98, 0.78, 0.55),
 		"grass": Color(0.42, 0.52, 0.20), "fog": Color(0.93, 0.78, 0.62),
 		"lake": false, "sun_elev": 14.0, "sun_az": 205.0,
@@ -47,7 +47,7 @@ var tracks: Array[Dictionary] = [
 		"width": 15.0, "apron": 6.0, "infield": 8.0,
 		"bank_turn": 36.0, "bank_straight": 12.0,
 		"laps": 8, "draft": 0.2, "grid_player": 24,
-		"hp": 750, "cda": 1.0, "cla": 2.4, "pit_mph": 30, "race_laps": 60,
+		"hp": 750, "cda": 1.0, "cla": 2.4, "pit_mph": 30, "race_laps": 60, "full_laps": 500,
 		"sky_top": Color(0.05, 0.05, 0.20), "sky_horizon": Color(0.25, 0.20, 0.40),
 		"grass": Color(0.16, 0.36, 0.14), "fog": Color(0.12, 0.10, 0.22),
 		"lake": false, "night": true, "sun_elev": 40.0, "sun_az": 120.0,
@@ -87,6 +87,23 @@ signal graphics_changed
 
 var _tex := {}
 
+# --- settings, garage setup, season ------------------------------------------------
+const SETTINGS_PATH := "user://settings.cfg"
+const SEASON_PATH := "user://season.cfg"
+const LENGTHS := [["SPRINT", 0.05], ["SHORT", 0.1], ["MEDIUM", 0.25], ["LONG", 0.5], ["FULL", 1.0]]
+const DIFFICULTIES := [["ROOKIE", 0.955], ["VETERAN", 0.985], ["LEGEND", 1.0]]
+const FIELDS := [20, 30, 40]
+const WEEKENDS := ["RACE ONLY", "QUALIFY + RACE", "PRACTICE + QUALIFY + RACE"]
+var settings := {
+	"length": 1, "difficulty": 1, "field": 2, "cautions": 1, "damage": 1, "wear": 1,
+	"assists": 1, "manual": 0, "weekend": 1,
+}
+## Garage setup (applied to the player's car): -3..3 balance (tight..loose),
+## tyre pressure 0 low / 1 std / 2 high, gearing 0 short / 1 std / 2 long.
+var setup := {"balance": 0, "pressure": 1, "gearing": 1}
+## Season in progress (empty = none).
+var season := {}
+
 var arcade_font: FontVariation
 var records := ConfigFile.new()
 
@@ -101,8 +118,124 @@ func _ready() -> void:
 	arcade_font.variation_transform = Transform2D(Vector2(1, 0), Vector2(-0.22, 1), Vector2.ZERO)
 	records.load(RECORDS_PATH)
 	_fill_teams()
+	load_settings()
+	load_season()
 	modern_supported = RenderingServer.get_rendering_device() != null
 	modern = modern_supported
+
+
+func load_settings() -> void:
+	var cf := ConfigFile.new()
+	if cf.load(SETTINGS_PATH) == OK:
+		for k in settings:
+			settings[k] = cf.get_value("settings", k, settings[k])
+		for k in setup:
+			setup[k] = cf.get_value("setup", k, setup[k])
+		modern = cf.get_value("video", "modern", modern) and modern_supported
+		scanlines = cf.get_value("video", "scanlines", scanlines)
+	assists = settings.assists == 1
+	manual_shift = settings.manual == 1
+
+
+func save_settings() -> void:
+	assists = settings.assists == 1
+	manual_shift = settings.manual == 1
+	var cf := ConfigFile.new()
+	for k in settings:
+		cf.set_value("settings", k, settings[k])
+	for k in setup:
+		cf.set_value("setup", k, setup[k])
+	cf.set_value("video", "modern", modern)
+	cf.set_value("video", "scanlines", scanlines)
+	cf.save(SETTINGS_PATH)
+
+
+func race_laps(track_idx: int) -> int:
+	var full: int = tracks[track_idx].get("full_laps", 200)
+	return max(5, int(round(full * float(LENGTHS[settings.length][1]))))
+
+
+func ai_skill_scale() -> float:
+	return DIFFICULTIES[settings.difficulty][1]
+
+
+## Applies the garage setup to the player's car.
+func apply_setup(c: Node3D) -> void:
+	var bal: float = setup.balance # + = looser
+	c.grip_front = 0.98 + bal * 0.012
+	c.grip_rear = 1.07 - bal * 0.014
+	match int(setup.pressure):
+		0:
+			c.mu *= 1.025
+			c.wear_mult = 1.3
+		2:
+			c.mu *= 0.98
+			c.wear_mult = 0.75
+	c.gear_scale = [1.08, 1.0, 0.93][int(setup.gearing)]
+
+
+# --- season ------------------------------------------------------------------------
+const SEASON_LENGTHS := [["SHORT", 6], ["HALF", 12], ["FULL", 36]]
+
+func new_season(team_idx: int, length_idx: int) -> void:
+	var n: int = SEASON_LENGTHS[length_idx][1]
+	var sched: Array = []
+	var rng := RandomNumberGenerator.new()
+	rng.randomize()
+	for i in n:
+		sched.append(i % tracks.size() if i < tracks.size() else rng.randi() % tracks.size())
+	season = {
+		"team": team_idx, "schedule": sched, "round": 0,
+		"points": {}, "wins": {}, "top5": {}, "results": [],
+	}
+	save_season()
+
+
+func load_season() -> void:
+	var cf := ConfigFile.new()
+	if cf.load(SEASON_PATH) == OK:
+		season = cf.get_value("season", "data", {})
+
+
+func save_season() -> void:
+	var cf := ConfigFile.new()
+	cf.set_value("season", "data", season)
+	cf.save(SEASON_PATH)
+
+
+func clear_season() -> void:
+	season = {}
+	DirAccess.remove_absolute(ProjectSettings.globalize_path(SEASON_PATH))
+
+
+## Records a race into the season: points by car number, wins, top 5s.
+func record_season_race(track_idx: int, finish: Array) -> void:
+	for row in finish:
+		var num: String = row.num
+		season.points[num] = int(season.points.get(num, 0)) + int(row.points)
+		if row.pos == 1:
+			season.wins[num] = int(season.wins.get(num, 0)) + 1
+		if row.pos <= 5:
+			season.top5[num] = int(season.top5.get(num, 0)) + 1
+	season.results.append({"track": track_idx, "winner": finish[0].num})
+	season.round = int(season.round) + 1
+	save_season()
+
+
+## Standings: [[num, points, wins, top5], ...] sorted.
+func standings() -> Array:
+	var rows: Array = []
+	for num in season.get("points", {}):
+		rows.append([num, int(season.points[num]), int(season.wins.get(num, 0)), int(season.top5.get(num, 0))])
+	rows.sort_custom(func(a, b): return a[1] > b[1] or (a[1] == b[1] and a[2] > b[2]))
+	return rows
+
+
+func team_by_num(num: String) -> Dictionary:
+	for t in teams:
+		if t.num == num:
+			return t
+	return {}
 
 
 ## Pads the hand-made teams out to a full 40-car field with generated ones.

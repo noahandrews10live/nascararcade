@@ -398,6 +398,19 @@ func caution_drive(c: Node3D) -> Array:
 
 
 func pit_drive(c: Node3D) -> Array:
+	var res := _pit_drive(c)
+	if c.pit_state >= Pit.LANE and c.pit_state != Pit.SERVICE:
+		# Queue behind the car ahead on pit road.
+		for o in race.cars:
+			if o == c or o.pit_state < Pit.LANE or o.pit_state == Pit.SERVICE:
+				continue
+			var g: float = race._gap(c, o)
+			if g > 0.0 and g < 14.0 and abs(o.kin_d - res[1]) < 1.2:
+				res[0] = min(res[0], max(o.v - (14.0 - g) * 0.8, 0.0))
+	return res
+
+
+func _pit_drive(c: Node3D) -> Array:
 	var L: float = track.length
 	var ss: float = c.s()
 	var pin: float = track.pit_in_s()

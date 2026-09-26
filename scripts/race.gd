@@ -21,12 +21,14 @@ var rng := RandomNumberGenerator.new()
 var lanes: Array[float] = []
 var arcade := false # rubber-banding for the arcade mode only
 var field_size := 40
+var arcade_setup := false # set before setup() for arcade races (ignores sim settings)
 var debug_no_lane_changes := false
 var control: Node = null # race_control.gd when the full rules are on
 var wear_scale := 1.0 # fuel burn / tyre wear multiplier so short races still need pit strategy
 
 
-func setup(trk: Node3D, player_team: int, lap_count: int, size := 40) -> void:
+## `grid` (optional) is the starting order as team indices, e.g. from qualifying.
+func setup(trk: Node3D, player_team: int, lap_count: int, size := 40, grid: Array = []) -> void:
 	track = trk
 	laps = lap_count
 	field_size = size
@@ -47,11 +49,16 @@ func setup(trk: Node3D, player_team: int, lap_count: int, size := 40) -> void:
 	team_ids.shuffle()
 	var grid_player: int = min(int(track.cfg.grid_player), field_size - 1)
 	var roster: Array[int] = []
-	for p in field_size:
-		if player_team >= 0 and p == grid_player:
-			roster.append(player_team)
-		else:
-			roster.append(team_ids.pop_back())
+	if grid.size() >= field_size:
+		for p in field_size:
+			roster.append(int(grid[p]))
+		grid_player = roster.find(player_team)
+	else:
+		for p in field_size:
+			if player_team >= 0 and p == grid_player:
+				roster.append(player_team)
+			else:
+				roster.append(team_ids.pop_back())
 	for p in roster.size():
 		var c: Node3D = Car.new()
 		c.name = "Car%s" % Game.teams[roster[p]].num
@@ -61,13 +68,16 @@ func setup(trk: Node3D, player_team: int, lap_count: int, size := 40) -> void:
 		c.ai = not c.is_player
 		c.assisted = true
 		c.manual = Game.manual_shift
-		c.ai_skill = float(Game.teams[roster[p]].get("skill", rng.randf_range(0.955, 0.99)))
+		c.ai_skill = float(Game.teams[roster[p]].get("skill", rng.randf_range(0.955, 0.99))) * (Game.ai_skill_scale() / 0.985 if not arcade_setup else 1.0)
+		c.damage_mult = 1.0 if (Game.settings.damage == 1 or arcade_setup) else 0.0
 		c.ai_aggression = rng.randf_range(0.2, 0.9)
 		c.set_meta("grid", p)
 		cars.append(c)
 		if c.is_player:
 			player = c
-			c.assisted = Game.assists
+			c.assisted = Game.assists or arcade_setup
+			if not arcade_setup:
+				Game.apply_setup(c)
 	order = cars.duplicate()
 
 
@@ -81,8 +91,11 @@ func enable_rules() -> void:
 	# strategy still matters (a tank should last ~40% of the race).
 	var race_km: float = laps * track.length / 1000.0
 	wear_scale = clamp(150.0 / max(race_km * 0.4, 1.0), 1.0, 8.0)
+	if Game.settings.wear == 0:
+		wear_scale = 0.0
 	for c in cars:
 		c.burn_scale = wear_scale
+	control.cautions_enabled = Game.settings.cautions == 1
 
 
 func give_lap(c: Node3D) -> void:
@@ -498,8 +511,8 @@ func _collide() -> void:
 			continue
 		for j in range(i + 1, n):
 			var b: Node3D = cars[j]
-			if b.towed or ((a.pit_state >= 2) != (b.pit_state >= 2)):
-				continue
+			if b.towed or a.pit_state >= 2 or b.pit_state >= 2:
+				continue # pit road is driven automatically, in single file
 			var gap: float = _gap(a, b)
 			if abs(gap) > 7.0 or abs(b.d - a.d) > 6.0:
 				continue

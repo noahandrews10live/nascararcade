@@ -7,8 +7,9 @@ const Race := preload("res://scripts/race.gd")
 const Car := preload("res://scripts/car.gd")
 const Hud := preload("res://scripts/hud.gd")
 const Synth := preload("res://scripts/audio.gd")
+const Menu := preload("res://scripts/menu.gd")
 
-enum State { TITLE, MODE_SELECT, TRACK_SELECT, CAR_SELECT, COUNTDOWN, RACE, FINISHED, RESULTS }
+enum State { TITLE, MODE_SELECT, TRACK_SELECT, CAR_SELECT, MENU, COUNTDOWN, RACE, FINISHED, RESULTS, SESSION_RESULTS, STANDINGS }
 
 const PACE_SPEED := 32.0
 const SELECT_TIME := 20.0
@@ -63,9 +64,22 @@ var autopilot := false
 var mode := "arcade"
 const MODES := [
 	["ARCADE", "BEAT THE CLOCK. 16 CARS, SHORT RACES, NO CAUTIONS."],
-	["SINGLE RACE", "40 CARS, CAUTIONS, PIT STOPS, STAGES AND POINTS."],
+	["SINGLE RACE", "A FULL RACE WEEKEND: PRACTICE, QUALIFYING, CAUTIONS, PITS, STAGES."],
+	["SEASON", "RUN A CHAMPIONSHIP. POINTS, WINS AND STANDINGS ARE SAVED."],
+	["OPTIONS", "GRAPHICS AND RECORDS."],
 ]
 var mode_idx := 0
+
+# menus and race weekends
+var menu: Control
+var menu_kind := ""
+var menu_return := ""
+var sessions: Array = ["race"]
+var session_idx := 0
+var session := "race" # practice / qualify / race
+var qual_grid: Array = [] # team indices, fastest first
+var qual_rows: Array = [] # [team idx, time]
+var _qual_base := {}
 
 
 func _ready() -> void:
@@ -111,7 +125,7 @@ func _ready() -> void:
 	pl.size = Vector2(640, 60)
 	pl.position = Vector2(0, 170)
 	pause_layer.add_child(pl)
-	var pl2 := Game.make_label("ESC  RESUME        Q  QUIT RACE", 18, Color.WHITE, 5)
+	var pl2 := Game.make_label("ESC  RESUME        Q  QUIT / END SESSION", 18, Color.WHITE, 5)
 	pl2.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	pl2.size = Vector2(640, 30)
 	pl2.position = Vector2(0, 250)
@@ -275,13 +289,18 @@ func _new_race(player_team: int) -> void:
 	race = Race.new()
 	race.name = "Race"
 	add_child(race)
-	var sim := mode == "race" and player_team >= 0
-	if sim:
-		race.setup(track, player_team, int(track.cfg.race_laps), Game.FIELD_SIZE)
+	var sim := mode != "arcade" and player_team >= 0
+	if sim and session == "race":
+		var size: int = Game.FIELDS[Game.settings.field]
+		race.setup(track, player_team, Game.race_laps(Game.selected_track), size, _grid_for(size, player_team))
 		race.enable_rules()
 		race.control.message.connect(_on_control_message)
 		race.control.flag_changed.connect(_on_flag)
+	elif sim:
+		# Practice / qualifying: the player alone on track.
+		race.setup(track, player_team, 999 if session == "practice" else 1, 1)
 	else:
+		race.arcade_setup = true
 		race.setup(track, player_team, int(track.cfg.laps), 16 if player_team >= 0 else 24)
 		race.arcade = true
 	race.lap_completed.connect(_on_lap)
@@ -454,6 +473,10 @@ func _enter_countdown() -> void:
 	_clear_screen()
 	_new_race(Game.selected_team)
 	var lead := -(PACE_SPEED * 5.2 + 15.0)
+	if session == "qualify":
+		lead = -track.length * 0.7 # a warm-up lap, then the timed lap
+	elif session == "practice":
+		lead = -60.0
 	race.grid_up(lead, PACE_SPEED)
 	# Arcade clock: generous first lap, then an extension each lap.
 	var ref := 0.0
@@ -469,8 +492,9 @@ func _enter_countdown() -> void:
 	hud.control = race.control
 	hud.visible = true
 	hud.clear_messages()
-	hud.message("GET READY!", 2.0, Color(1, 0.9, 0.2))
-	hud.sub_message(track.cfg.name, 2.0)
+	var intro: String = {"practice": "PRACTICE", "qualify": "QUALIFYING"}.get(session, "GET READY!") if mode != "arcade" else "GET READY!"
+	hud.message(intro, 2.0, Color(1, 0.9, 0.2))
+	hud.sub_message(track.cfg.name if session != "practice" else "ESC THEN Q TO END PRACTICE", 2.5)
 	countdown_step = 0
 	new_records.clear()
 	game_over_reason = ""
@@ -495,7 +519,8 @@ func _enter_results() -> void:
 	rows = rows.slice(0, 14)
 	var row_h := 24
 	if sim:
-		_label("", "POS  CAR  DRIVER                         LED  STG  PTS", 11, Color(0.6, 0.7, 0.8), Vector2(60, 72), HORIZONTAL_ALIGNMENT_LEFT, 3)
+		for h in [["POS", 60], ["CAR", 100], ["DRIVER", 160], ["LED", 376], ["STG", 416], ["PTS", 460]]:
+			_label("", h[0], 11, Color(0.6, 0.7, 0.8), Vector2(h[1], 72), HORIZONTAL_ALIGNMENT_LEFT, 3)
 		y = 86
 	for i in race.order.size():
 		if i not in rows:
@@ -545,6 +570,11 @@ func _on_lap(car: Node3D, laps_done: int, lap_time: float) -> void:
 		if not new_records.has("NEW LAP RECORD!"):
 			new_records.append("NEW LAP RECORD!")
 	if mode != "arcade":
+		if session == "practice":
+			hud.message(Game.format_time(lap_time), 2.0, Color.WHITE)
+			hud.sub_message("BEST " + Game.format_time(car.best_lap), 2.0)
+		elif session == "qualify" and laps_done == 0:
+			hud.message("TIMED LAP", 1.5, Color(0.3, 1.0, 0.4))
 		return
 	if laps_done < race.laps:
 		time_left += lap_bonus
@@ -559,6 +589,9 @@ func _on_lap(car: Node3D, laps_done: int, lap_time: float) -> void:
 
 func _on_finished(car: Node3D, place: int) -> void:
 	if car != race.player or state != State.RACE:
+		return
+	if session == "qualify":
+		_finish_qualifying(car.best_lap)
 		return
 	_set_state(State.FINISHED)
 	hud.show_timer = false
@@ -584,7 +617,13 @@ func _unhandled_input(event: InputEvent) -> void:
 		elif paused and event.is_action_pressed("quit_race"):
 			paused = false
 			pause_layer.visible = false
-			_enter_title()
+			if session == "practice":
+				session_idx += 1
+				_start_session()
+			elif mode == "season" and not Game.season.is_empty():
+				_enter_season_hub()
+			else:
+				_enter_title()
 			return
 		elif event.is_action_pressed("camera"):
 			cam_mode = (cam_mode + 1) % 3
@@ -600,8 +639,18 @@ func _unhandled_input(event: InputEvent) -> void:
 				synth.beep(880.0, 0.05)
 				_refresh_mode_select()
 			elif event.is_action_pressed("start"):
-				mode = ["arcade", "race"][mode_idx]
-				_enter_track_select()
+				match mode_idx:
+					0, 1:
+						mode = ["arcade", "race"][mode_idx]
+						_enter_track_select()
+					2:
+						mode = "season"
+						if Game.season.is_empty():
+							_enter_car_select()
+						else:
+							_enter_season_hub()
+					3:
+						_enter_options()
 			elif event.is_action_pressed("back"):
 				_enter_title()
 		State.TRACK_SELECT:
@@ -623,12 +672,37 @@ func _unhandled_input(event: InputEvent) -> void:
 				synth.beep(880.0, 0.05)
 				_refresh_car_select()
 			elif event.is_action_pressed("start"):
-				_enter_countdown()
+				match mode:
+					"arcade":
+						_enter_countdown()
+					"race":
+						_enter_race_setup()
+					"season":
+						_enter_season_setup()
 			elif event.is_action_pressed("back"):
-				_enter_track_select()
+				if mode == "season":
+					_enter_mode_select()
+				else:
+					_enter_track_select()
+		State.MENU:
+			if menu:
+				menu.handle(event)
+		State.SESSION_RESULTS:
+			if event.is_action_pressed("start") and state_time > 0.8:
+				session_idx += 1
+				_start_session()
+		State.STANDINGS:
+			if (event.is_action_pressed("start") or event.is_action_pressed("back")) and state_time > 0.5:
+				if Game.season.is_empty():
+					_enter_title()
+				else:
+					_enter_season_hub()
 		State.RESULTS:
 			if event.is_action_pressed("start") and state_time > 1.0:
-				_enter_title()
+				if mode == "season" and not Game.season.is_empty():
+					_after_season_race()
+				else:
+					_enter_title()
 
 
 func _physics_process(delta: float) -> void:
@@ -639,7 +713,7 @@ func _physics_process(delta: float) -> void:
 		return
 	state_time += delta
 	match state:
-		State.TITLE, State.MODE_SELECT, State.TRACK_SELECT, State.CAR_SELECT:
+		State.TITLE, State.MODE_SELECT, State.TRACK_SELECT, State.CAR_SELECT, State.MENU, State.SESSION_RESULTS, State.STANDINGS:
 			_loop_attract()
 			race.tick(delta)
 		State.COUNTDOWN:
@@ -786,6 +860,9 @@ func _process(delta: float) -> void:
 				menu_labels.logo2.pivot_offset = Vector2(320, 36)
 				menu_labels.logo2.scale = Vector2(sc, sc)
 			State.TRACK_SELECT, State.CAR_SELECT:
+				if mode != "arcade":
+					menu_labels.timer.text = ""
+					return
 				if not paused:
 					sel_timer -= delta
 				menu_labels.timer.text = "%d" % max(ceil(sel_timer), 0)
@@ -912,3 +989,324 @@ func _tv_camera(delta: float) -> void:
 			cam.global_position = cam_pos
 			cam.look_at(tr.origin - tr.basis.z * 10.0, Vector3.UP)
 			cam.fov = 60.0
+
+
+# --- menus: race setup, garage, season, options -----------------------------------
+
+func _open_menu(kind: String, title: String, rows: Array, cursor := 0) -> void:
+	_set_state(State.MENU)
+	_clear_screen()
+	menu_kind = kind
+	menu = Menu.new()
+	screen.add_child(menu)
+	menu.build(title, rows, cursor)
+	menu.activated.connect(_on_menu_activated)
+	menu.changed.connect(_on_menu_changed)
+	menu.cancelled.connect(_on_menu_cancelled)
+
+
+func _enter_race_setup(return_to := "") -> void:
+	if return_to != "":
+		menu_return = return_to
+	elif mode != "season":
+		menu_return = "car"
+	var lengths: Array = []
+	for i in Game.LENGTHS.size():
+		var full: int = Game.tracks[Game.selected_track].get("full_laps", 200)
+		lengths.append("%s  %d LAPS" % [Game.LENGTHS[i][0], max(5, int(round(full * float(Game.LENGTHS[i][1]))))])
+	var diffs: Array = Game.DIFFICULTIES.map(func(d): return d[0])
+	var rows := [
+		{"id": "length", "label": "RACE LENGTH", "values": lengths, "index": Game.settings.length, "hint": "PERCENT OF A REAL CUP RACE DISTANCE"},
+		{"id": "difficulty", "label": "DIFFICULTY", "values": diffs, "index": Game.settings.difficulty, "hint": "HOW FAST AND SHARP THE OTHER DRIVERS ARE"},
+		{"id": "field", "label": "FIELD SIZE", "values": Game.FIELDS.map(func(f): return "%d CARS" % f), "index": Game.settings.field},
+		{"id": "weekend", "label": "WEEKEND", "values": Game.WEEKENDS, "index": Game.settings.weekend, "hint": "QUALIFY TO SET YOUR STARTING SPOT"},
+		{"id": "cautions", "label": "CAUTIONS", "values": ["OFF", "ON"], "index": Game.settings.cautions},
+		{"id": "damage", "label": "DAMAGE", "values": ["OFF", "ON"], "index": Game.settings.damage, "hint": "DAMAGE HURTS SPEED, HANDLING AND CAN END YOUR RACE"},
+		{"id": "wear", "label": "FUEL + TIRE WEAR", "values": ["OFF", "ON"], "index": Game.settings.wear, "hint": "SCALED TO RACE LENGTH SO PIT STRATEGY MATTERS"},
+		{"id": "assists", "label": "DRIVING ASSISTS", "values": ["OFF", "ON"], "index": Game.settings.assists, "hint": "STEERING, TRACTION AND STABILITY HELP"},
+		{"id": "manual", "label": "TRANSMISSION", "values": ["AUTOMATIC", "MANUAL"], "index": Game.settings.manual, "hint": "MANUAL: E = UP, Q = DOWN (RB / LB)"},
+		{"id": "garage", "label": "GARAGE SETUP", "hint": "BALANCE, TIRE PRESSURE AND GEARING"},
+	]
+	if mode == "season":
+		rows.append({"id": "back", "label": "DONE"})
+	else:
+		rows.append({"id": "go", "label": "START RACE WEEKEND"})
+	_open_menu("race_setup", "RACE SETTINGS", rows, rows.size() - 1)
+
+
+func _enter_garage(return_to: String) -> void:
+	menu_return = return_to
+	var bal := ["TIGHT 3", "TIGHT 2", "TIGHT 1", "NEUTRAL", "LOOSE 1", "LOOSE 2", "LOOSE 3"]
+	var rows := [
+		{"id": "balance", "label": "HANDLING BALANCE", "values": bal, "index": int(Game.setup.balance) + 3, "hint": "WEDGE / TRACK BAR: TIGHT PUSHES UP THE TRACK, LOOSE TURNS BUT CAN SPIN"},
+		{"id": "pressure", "label": "TIRE PRESSURE", "values": ["LOW", "STANDARD", "HIGH"], "index": Game.setup.pressure, "hint": "LOW: MORE GRIP, FASTER WEAR.  HIGH: LESS GRIP, LASTS LONGER"},
+		{"id": "gearing", "label": "GEARING", "values": ["SHORT", "STANDARD", "LONG"], "index": Game.setup.gearing, "hint": "SHORT: QUICKER OFF THE CORNERS.  LONG: MORE TOP SPEED"},
+		{"id": "back", "label": "DONE"},
+	]
+	_open_menu("garage", "GARAGE", rows, 3)
+
+
+func _enter_season_setup() -> void:
+	var rows := [
+		{"id": "slen", "label": "SEASON LENGTH", "values": Game.SEASON_LENGTHS.map(func(x): return "%s  %d RACES" % [x[0], x[1]]), "index": 0},
+		{"id": "start_season", "label": "START SEASON"},
+	]
+	_open_menu("season_setup", "NEW SEASON", rows, 1)
+
+
+func _enter_season_hub() -> void:
+	mode = "season"
+	var sn: Dictionary = Game.season
+	Game.selected_team = int(sn.team)
+	var n: int = sn.schedule.size()
+	var rnd: int = sn.round
+	var next_track: int = sn.schedule[min(rnd, n - 1)]
+	_use_track(next_track)
+	_start_attract()
+	var me: String = Game.teams[int(sn.team)].num
+	var pos := 0
+	var pts := 0
+	var table := Game.standings()
+	for i in table.size():
+		if table[i][0] == me:
+			pos = i + 1
+			pts = table[i][1]
+	var rows := [
+		{"id": "weekend", "label": "RACE %d/%d:  %s" % [rnd + 1, n, Game.tracks[next_track].short], "hint": "%s  -  %d LAPS" % [Game.tracks[next_track].name, Game.race_laps(next_track)]},
+		{"id": "settings", "label": "RACE SETTINGS"},
+		{"id": "garage", "label": "GARAGE SETUP"},
+		{"id": "standings", "label": "STANDINGS", "hint": ("YOU ARE %s WITH %d POINTS" % [Game.ordinal(pos), pts]) if pos > 0 else "NO RACES RUN YET"},
+		{"id": "abandon", "label": "ABANDON SEASON", "hint": "DELETES THE SAVED SEASON"},
+		{"id": "main", "label": "MAIN MENU", "hint": "YOUR SEASON IS SAVED"},
+	]
+	_open_menu("hub", "SEASON  -  #%s %s" % [me, Game.teams[int(sn.team)].driver], rows, 0)
+
+
+func _enter_options() -> void:
+	var rows := [
+		{"id": "gfx", "label": "GRAPHICS", "values": ["1999", "MODERN"] if Game.modern_supported else ["1999"], "index": 1 if Game.modern else 0, "hint": "MODERN NEEDS A VULKAN GPU (NOT AVAILABLE IN THE BROWSER)"},
+		{"id": "scan", "label": "SCANLINES (1999)", "values": ["OFF", "ON"], "index": 1 if Game.scanlines else 0},
+		{"id": "reset", "label": "RESET LAP RECORDS"},
+		{"id": "back", "label": "DONE"},
+	]
+	_open_menu("options", "OPTIONS", rows, 3)
+
+
+func _on_menu_changed(id: String, idx: int) -> void:
+	synth.beep(880.0, 0.04)
+	match menu_kind:
+		"race_setup":
+			if Game.settings.has(id):
+				Game.settings[id] = idx
+				Game.save_settings()
+		"garage":
+			if id == "balance":
+				Game.setup.balance = idx - 3
+			elif Game.setup.has(id):
+				Game.setup[id] = idx
+			Game.save_settings()
+		"options":
+			if id == "gfx" and Game.modern_supported and (idx == 1) != Game.modern:
+				Game.toggle_graphics()
+				Game.save_settings()
+			elif id == "scan":
+				Game.scanlines = idx == 1
+				scan_rect.visible = Game.scanlines and not Game.modern
+				Game.save_settings()
+
+
+func _on_menu_activated(id: String) -> void:
+	synth.beep(1320.0, 0.06)
+	match id:
+		"go", "weekend":
+			_start_weekend()
+		"garage":
+			_enter_garage("race_setup" if menu_kind == "race_setup" else "hub")
+		"settings":
+			_enter_race_setup("hub")
+		"standings":
+			_enter_standings()
+		"abandon":
+			Game.clear_season()
+			_enter_title()
+		"main":
+			_enter_title()
+		"start_season":
+			Game.new_season(Game.selected_team, menu.value("slen"))
+			_enter_season_hub()
+		"reset":
+			Game.records = ConfigFile.new()
+			Game.records.save(Game.RECORDS_PATH)
+			hud.sub_message("RECORDS CLEARED", 2.0)
+		"back":
+			_on_menu_cancelled()
+
+
+func _on_menu_cancelled() -> void:
+	match menu_kind:
+		"race_setup":
+			if menu_return == "hub" or mode == "season":
+				_enter_season_hub()
+			else:
+				_enter_car_select()
+		"garage":
+			if menu_return == "hub":
+				_enter_season_hub()
+			else:
+				_enter_race_setup()
+		"hub", "options":
+			_enter_title()
+		"season_setup":
+			_enter_car_select()
+
+
+# --- race weekends ------------------------------------------------------------------
+
+func _start_weekend() -> void:
+	sessions = [["race"], ["qualify", "race"], ["practice", "qualify", "race"]][Game.settings.weekend]
+	session_idx = 0
+	qual_grid = []
+	qual_rows = []
+	_start_session()
+
+
+func _start_session() -> void:
+	if session_idx >= sessions.size():
+		_enter_title()
+		return
+	session = sessions[session_idx]
+	_enter_countdown()
+
+
+## Starting order for the race: qualifying order if we have one (the player keeps
+## their spot even in a smaller field), otherwise random with the player mid-pack.
+func _grid_for(size: int, player_team: int) -> Array:
+	if qual_grid.is_empty():
+		return []
+	var grid: Array = []
+	for t in qual_grid:
+		var room: int = size - (0 if grid.has(player_team) or t == player_team else 1)
+		if grid.size() < room or t == player_team:
+			grid.append(t)
+	return grid.slice(0, size)
+
+
+## A realistic pole-speed lap for this track: one AI car, alone, simulated offscreen.
+func _qual_base_time() -> float:
+	var key: int = Game.selected_track
+	if _qual_base.has(key):
+		return _qual_base[key]
+	var r: Node3D = Race.new()
+	add_child(r)
+	r.arcade_setup = true
+	r.setup(track, -1, 2, 1)
+	r.visible = false
+	r.cars[0].ai_skill = 1.0
+	r.grid_up(-track.length * 0.7, PACE_SPEED)
+	r.go_green()
+	var t := 0.0
+	while t < 300.0 and r.cars[0].lap() < 1:
+		r.tick(1.0 / 60.0)
+		t += 1.0 / 60.0
+	var best: float = r.cars[0].best_lap if r.cars[0].best_lap > 0.0 else track.length / 70.0
+	r.queue_free()
+	_qual_base[key] = best
+	return best
+
+
+func _finish_qualifying(player_time: float) -> void:
+	var base := _qual_base_time()
+	var rng2 := RandomNumberGenerator.new()
+	rng2.randomize()
+	qual_rows = []
+	for i in Game.teams.size():
+		if i == Game.selected_team:
+			qual_rows.append([i, player_time])
+			continue
+		var skill: float = float(Game.teams[i].get("skill", 0.97)) * Game.ai_skill_scale() / 0.985
+		var t: float = base * (0.994 + (0.99 - skill) * 0.9) + rng2.randf_range(0.0, base * 0.006)
+		qual_rows.append([i, t])
+	qual_rows.sort_custom(func(a, b): return a[1] < b[1])
+	qual_grid = qual_rows.map(func(r): return r[0])
+	_enter_session_results()
+
+
+func _enter_session_results() -> void:
+	_set_state(State.SESSION_RESULTS)
+	hud.visible = false
+	_clear_screen()
+	_panel(Rect2(30, 10, 580, 460), Color(0, 0, 0, 0.72))
+	_label("", "QUALIFYING", 34, Color(1.0, 0.85, 0.1), Vector2(0, 16), HORIZONTAL_ALIGNMENT_CENTER, 8)
+	_label("", track.cfg.name, 14, Color(0.5, 0.9, 1.0), Vector2(0, 58), HORIZONTAL_ALIGNMENT_CENTER, 4)
+	var y := 86
+	var pole: float = qual_rows[0][1]
+	var shown := 0
+	for i in qual_rows.size():
+		var ti: int = qual_rows[i][0]
+		var me := ti == Game.selected_team
+		if shown >= 13 and not me:
+			continue
+		if shown >= 14:
+			break
+		var t: Dictionary = Game.teams[ti]
+		var col := Color(1, 0.9, 0.2) if me else Color.WHITE
+		var mph: float = track.length / qual_rows[i][1] * Game.MPS_TO_MPH
+		_label("", "%2d" % (i + 1), 16, col, Vector2(60, y), HORIZONTAL_ALIGNMENT_LEFT, 4)
+		_label("", "#" + t.num, 16, t.c1.lightened(0.3), Vector2(100, y), HORIZONTAL_ALIGNMENT_LEFT, 4)
+		_label("", ("%s  (YOU)" % t.driver) if me else t.driver, 16, col, Vector2(160, y), HORIZONTAL_ALIGNMENT_LEFT, 4)
+		_label("", "%s  %.3f MPH" % [Game.format_time(qual_rows[i][1]), mph] if i == 0 else "+%.3f" % (qual_rows[i][1] - pole), 14, col, Vector2(410, y + 2), HORIZONTAL_ALIGNMENT_LEFT, 3)
+		y += 24
+		shown += 1
+	_label("start", "PRESS START FOR THE RACE", 18, Color.WHITE, Vector2(0, 440), HORIZONTAL_ALIGNMENT_CENTER, 5)
+
+
+# --- season -------------------------------------------------------------------------
+
+func _after_season_race() -> void:
+	var finish: Array = []
+	for i in race.order.size():
+		var c: Node3D = race.order[i]
+		var pts: int = race.control.finishing_points(i + 1, c) if race.control else 0
+		finish.append({"num": c.team.num, "pos": i + 1, "points": pts})
+	Game.record_season_race(Game.selected_track, finish)
+	if int(Game.season.round) >= Game.season.schedule.size():
+		_enter_standings(true)
+	else:
+		_enter_season_hub()
+
+
+func _enter_standings(final := false) -> void:
+	_set_state(State.STANDINGS)
+	_clear_screen()
+	_panel(Rect2(30, 10, 580, 460), Color(0, 0, 0, 0.72))
+	var table := Game.standings()
+	var me: String = Game.teams[int(Game.season.team)].num
+	var head := "FINAL STANDINGS" if final else "STANDINGS"
+	_label("", head, 34, Color(1.0, 0.85, 0.1), Vector2(0, 16), HORIZONTAL_ALIGNMENT_CENTER, 8)
+	_label("", "AFTER %d OF %d RACES" % [int(Game.season.round), Game.season.schedule.size()], 14, Color(0.5, 0.9, 1.0), Vector2(0, 58), HORIZONTAL_ALIGNMENT_CENTER, 4)
+	for h in [["POS", 60], ["CAR", 100], ["DRIVER", 160], ["PTS", 420], ["WINS", 470], ["TOP 5", 522]]:
+		_label("", h[0], 11, Color(0.6, 0.7, 0.8), Vector2(h[1], 76), HORIZONTAL_ALIGNMENT_LEFT, 3)
+	var y := 92
+	var shown := 0
+	for i in table.size():
+		var row: Array = table[i]
+		var is_me: bool = row[0] == me
+		if shown >= 13 and not is_me:
+			continue
+		if shown >= 14:
+			break
+		var t := Game.team_by_num(row[0])
+		var col := Color(1, 0.9, 0.2) if is_me else Color.WHITE
+		_label("", "%2d" % (i + 1), 16, col, Vector2(60, y), HORIZONTAL_ALIGNMENT_LEFT, 4)
+		_label("", "#" + row[0], 16, (t.c1 as Color).lightened(0.3) if t else Color.WHITE, Vector2(100, y), HORIZONTAL_ALIGNMENT_LEFT, 4)
+		_label("", t.driver if t else "?", 16, col, Vector2(160, y), HORIZONTAL_ALIGNMENT_LEFT, 4)
+		_label("", "%d" % row[1], 16, Color(1, 0.85, 0.3), Vector2(420, y), HORIZONTAL_ALIGNMENT_LEFT, 4)
+		_label("", "%d" % row[2], 14, col, Vector2(478, y + 2), HORIZONTAL_ALIGNMENT_LEFT, 3)
+		_label("", "%d" % row[3], 14, col, Vector2(530, y + 2), HORIZONTAL_ALIGNMENT_LEFT, 3)
+		y += 24
+		shown += 1
+	if final and table.size() > 0:
+		var champ := Game.team_by_num(table[0][0])
+		_label("", "CHAMPION:  #%s %s" % [table[0][0], champ.driver], 20, Color(0.3, 1.0, 0.4), Vector2(0, 420), HORIZONTAL_ALIGNMENT_CENTER, 5)
+		Game.clear_season()
+	_label("start", "PRESS START", 16, Color.WHITE, Vector2(0, 446), HORIZONTAL_ALIGNMENT_CENTER, 4)

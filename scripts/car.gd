@@ -56,6 +56,9 @@ var cla := 2.0
 var mu := 1.0
 var grip_front := 0.98 # setup balance (wedge / track bar / stagger all end up here)
 var grip_rear := 1.07
+var wear_mult := 1.0 # tyre pressure trade-off
+var gear_scale := 1.0 # gearing: >1 shorter (more accel, lower top speed)
+var damage_mult := 1.0 # 0 = damage off
 var gear := 1
 var rpm_now := 3000.0
 
@@ -182,9 +185,9 @@ func _auto_shift() -> void:
 			gear = clamp(gear + shift_request, 1, 5)
 			shift_request = 0
 		return
-	if gear < 5 and u * RPM_PER_MPS[gear - 1] > 9000.0:
+	if gear < 5 and u * RPM_PER_MPS[gear - 1] * gear_scale > 9000.0:
 		gear += 1
-	elif gear > 1 and u * RPM_PER_MPS[gear - 2] < 8200.0:
+	elif gear > 1 and u * RPM_PER_MPS[gear - 2] * gear_scale < 8200.0:
 		gear -= 1
 
 
@@ -250,7 +253,7 @@ func step(delta: float) -> void:
 	_walls()
 	# Wear and fuel
 	var travelled: float = abs(v) * delta
-	tyre_wear += travelled / 1000.0 * (0.006 + 0.08 * slide * slide + 0.01 * scrub) * burn_scale
+	tyre_wear += travelled / 1000.0 * (0.006 + 0.08 * slide * slide + 0.01 * scrub) * burn_scale * wear_mult
 	fuel = max(0.0, fuel - travelled / 1000.0 * 0.62 * (0.3 + 0.7 * throttle) * burn_scale)
 	spinning = abs(yaw) > 0.6 and speed() > 8.0
 	if total_damage() > 0.72 and not out:
@@ -272,7 +275,7 @@ func _integrate(h: float) -> void:
 
 	# --- engine / gearbox
 	_auto_shift()
-	rpm_now = clamp(abs(u) * RPM_PER_MPS[gear - 1], 2800.0, REDLINE + 200.0)
+	rpm_now = clamp(abs(u) * RPM_PER_MPS[gear - 1] * gear_scale, 2800.0, REDLINE + 200.0)
 	var dmg_power: float = 1.0 - 0.45 * clamp(damage.front - 0.35, 0.0, 1.0)
 	var p_avail: float = _engine_power(rpm_now) * dmg_power
 	if rpm_now >= REDLINE or fuel <= 0.0:
@@ -432,7 +435,7 @@ func inv_mass_along(n: Vector2, rp: Vector2) -> float:
 
 func add_damage(j: float, rp_track: Vector2) -> void:
 	var rb: Vector2 = track_to_body(rp_track)
-	var amount: float = j / (MASS * 55.0)
+	var amount: float = j / (MASS * 55.0) * damage_mult
 	if amount < 0.01:
 		return
 	if abs(rb.x) > 1.2:
