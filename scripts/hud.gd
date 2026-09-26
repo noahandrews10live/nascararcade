@@ -128,8 +128,8 @@ func _process(delta: float) -> void:
 	var pos: int = race.position_of(p)
 	l_pos.text = Game.ordinal(pos)
 	l_pos_of.text = "OF %d" % race.cars.size()
-	l_speed.text = "%d" % int(abs(p.v) * Game.MPS_TO_MPH)
-	l_gear.text = "R" if p.v < -0.1 else str(p.gear())
+	l_speed.text = "%d" % int(p.speed() * Game.MPS_TO_MPH)
+	l_gear.text = "R" if p.v < -0.1 else str(p.gear)
 	l_draft.visible = p.draft > 0.35 and int(blink * 6.0) % 2 == 0
 	# mini leaderboard of the top 5
 	var lines := PackedStringArray()
@@ -161,6 +161,21 @@ func _draw() -> void:
 	var dm := Rect2(Vector2(478, 468), Vector2(150, 6))
 	draw_rect(dm, Color(0, 0, 0, 0.6))
 	draw_rect(Rect2(dm.position, Vector2(dm.size.x * p.draft, dm.size.y)), Color(0.3, 1.0, 1.0))
+	# Car condition: damage by corner, tyres and fuel.
+	var cc := Vector2(160, 400)
+	var dmg: Dictionary = p.damage
+	var dc := func(x: float) -> Color:
+		return Color(0.3, 1.0, 0.4).lerp(Color(1.0, 0.85, 0.2), clamp(x * 2.0, 0.0, 1.0)).lerp(Color(1.0, 0.2, 0.15), clamp(x * 2.0 - 1.0, 0.0, 1.0))
+	draw_rect(Rect2(cc + Vector2(-4, -4), Vector2(78, 72)), Color(0, 0, 0, 0.35))
+	draw_rect(Rect2(cc + Vector2(8, 0), Vector2(14, 6)), dc.call(dmg.front))
+	draw_rect(Rect2(cc + Vector2(8, 56), Vector2(14, 6)), dc.call(dmg.rear))
+	draw_rect(Rect2(cc + Vector2(0, 8), Vector2(6, 46)), dc.call(dmg.left))
+	draw_rect(Rect2(cc + Vector2(24, 8), Vector2(6, 46)), dc.call(dmg.right))
+	var f := Game.arcade_font
+	draw_string(f, cc + Vector2(36, 14), "TIRE", HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color(0.8, 0.9, 1.0))
+	draw_string(f, cc + Vector2(36, 28), "%d%%" % int(p.tyre_grip() * 100.0), HORIZONTAL_ALIGNMENT_LEFT, -1, 12, dc.call(p.tyre_wear * 0.7))
+	draw_string(f, cc + Vector2(36, 44), "FUEL", HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color(0.8, 0.9, 1.0))
+	draw_string(f, cc + Vector2(36, 58), "%.1f" % (p.fuel / 3.785), HORIZONTAL_ALIGNMENT_LEFT, -1, 12, dc.call(1.0 - p.fuel / 75.0))
 	# Minimap
 	var mm_pos := Vector2(12, 360)
 	var mm_size := 110.0

@@ -267,7 +267,8 @@ func _new_race(player_team: int) -> void:
 	race = Race.new()
 	race.name = "Race"
 	add_child(race)
-	race.setup(track, player_team, int(track.cfg.laps))
+	race.setup(track, player_team, int(track.cfg.laps), 16 if player_team >= 0 else 24)
+	race.arcade = true
 	race.lap_completed.connect(_on_lap)
 	race.car_finished.connect(_on_finished)
 
@@ -423,8 +424,8 @@ func _enter_countdown() -> void:
 	var seg: float = track.length / track.n
 	for i in track.n:
 		ref += seg / min(track.speed_profile[i], 80.0)
-	time_left = round(ref * 1.35 + 10.0)
-	lap_bonus = round(ref * 1.08)
+	time_left = round(ref * 1.6 + 12.0)
+	lap_bonus = round(ref * 1.2)
 	hud.race = race
 	hud.track = track
 	hud.time_left = time_left
@@ -637,6 +638,10 @@ func _player_input() -> void:
 	p.throttle = Input.get_action_strength("accelerate")
 	p.brake = Input.get_action_strength("brake")
 	p.steer_in = Input.get_action_strength("steer_right") - Input.get_action_strength("steer_left")
+	if Input.is_action_just_pressed("shift_up"):
+		p.shift_request = 1
+	elif Input.is_action_just_pressed("shift_down"):
+		p.shift_request = -1
 
 
 func _process(delta: float) -> void:

@@ -5,6 +5,7 @@ extends Node3D
 
 const STEP := 3.0 # metres between centre line samples
 const G := 9.81
+const CAR_MASS := 1600.0
 
 var cfg: Dictionary
 var length := 0.0
@@ -39,40 +40,53 @@ func setup(config: Dictionary) -> void:
 
 # --- geometry ----------------------------------------------------------------
 
+## Builds the centre line with a turtle: start/finish at the middle of the front
+## stretch, then [front half, dog-leg arc, front side, turn, back half] twice. The
+## path is palindromic with 360 degrees of turning, so it always closes, and every
+## piece turns left (real tri-ovals and quad-ovals never bend the other way).
 func _raw_outline() -> PackedVector2Array:
-	var S: float = cfg.straight
+	var S: float = cfg.back # back stretch
 	var R: float = cfg.radius
-	var B: float = cfg.bump
-	var shape: String = cfg.shape
-	var pts := PackedVector2Array()
-	var fine := 0.5
-	var front := func(x: float) -> float:
-		var u := x / S
-		if shape == "trioval":
-			return R + B * pow(cos(PI * u), 2)
-		elif shape == "quadoval":
-			return R + B * pow(sin(2.0 * PI * u), 2)
-		return R
-	# Front stretch (0 -> +S/2), turn 1-2, back stretch, turn 3-4, front stretch (-S/2 -> 0)
-	var x := 0.0
-	while x < S * 0.5:
-		pts.append(Vector2(x, front.call(x)))
-		x += fine
-	var steps := int(PI * R / fine)
-	for i in steps:
-		var a := PI * 0.5 - PI * float(i) / steps
-		pts.append(Vector2(S * 0.5 + cos(a) * R, sin(a) * R))
-	x = S * 0.5
-	while x > -S * 0.5:
-		pts.append(Vector2(x, -R))
-		x -= fine
-	for i in steps:
-		var a := -PI * 0.5 - PI * float(i) / steps
-		pts.append(Vector2(-S * 0.5 + cos(a) * R, sin(a) * R))
-	x = -S * 0.5
-	while x < 0.0:
-		pts.append(Vector2(x, front.call(x)))
-		x += fine
+	var phi := deg_to_rad(float(cfg.get("dog_phi", 0.0)))
+	var rd: float = cfg.get("dog_r", 500.0)
+	var lc: float = cfg.get("front_mid", S)
+	var ls: float = cfg.get("front_side", 0.0)
+	# Turtle state lives in a Dictionary: lambdas capture locals by value.
+	var st := {"p": Vector2.ZERO, "h": 0.0, "pts": PackedVector2Array()}
+	var straight := func(length: float) -> void:
+		var steps := int(length / 0.5)
+		for i in steps:
+			st.pts.append(st.p)
+			st.p += Vector2(cos(st.h), sin(st.h)) * (length / steps)
+	var arc := func(radius: float, angle: float) -> void:
+		var steps: int = max(1, int(radius * angle / 0.5))
+		var da := angle / steps
+		for i in steps:
+			st.pts.append(st.p)
+			var mid: float = st.h + da * 0.5
+			st.p += Vector2(cos(mid), sin(mid)) * (2.0 * radius * sin(da * 0.5))
+			st.h += da
+	straight.call(lc * 0.5)
+	if phi > 0.0:
+		arc.call(rd, phi)
+	straight.call(ls)
+	arc.call(R, PI - phi)
+	straight.call(S)
+	arc.call(R, PI - phi)
+	straight.call(ls)
+	if phi > 0.0:
+		arc.call(rd, phi)
+	straight.call(lc * 0.5)
+	var pts: PackedVector2Array = st.pts
+	# Centre the layout on the origin.
+	var mn := Vector2(INF, INF)
+	var mx := Vector2(-INF, -INF)
+	for q in pts:
+		mn = mn.min(q)
+		mx = mx.max(q)
+	var c := (mn + mx) * 0.5
+	for i in pts.size():
+		pts[i] -= c
 	return pts
 
 
@@ -212,22 +226,37 @@ func car_transform(s: float, d: float, yaw: float) -> Transform3D:
 	return Transform3D(basis.orthonormalized(), p)
 
 
-## Lateral grip limit (m/s^2) including banking.
-func grip_limit(s: float, mu: float) -> float:
-	var b := bank_at(s)
-	var denom: float = max(cos(b) - mu * sin(b), 0.38)
-	return G * (sin(b) + mu * cos(b)) / denom
+## Fastest steady speed through sample i for a nominal car: the tyres (with load
+## sensitivity and downforce) must supply the in-plane lateral force the banking
+## doesn't. Mirrors the model in car.gd.
+func corner_speed(i: int, mu0: float, cla_v: float) -> float:
+	var k: float = curv[i]
+	if abs(k) < 0.00002:
+		return 200.0
+	var b: float = bank[i]
+	var lo := 5.0
+	var hi := 160.0
+	for _it in 28:
+		var u := (lo + hi) * 0.5
+		var nz: float = CAR_MASS * (G * cos(b) + u * u * k * sin(b)) + 0.5 * 1.2 * cla_v * u * u * 0.95
+		nz = max(nz, CAR_MASS * 2.0)
+		var mu_e: float = mu0 * pow(nz / (CAR_MASS * G), -0.3)
+		var need: float = abs(u * u * k * cos(b) - G * sin(b))
+		if need <= mu_e * nz / CAR_MASS * 0.96:
+			lo = u
+		else:
+			hi = u
+	return lo
 
 
 func _build_profile() -> void:
-	# Speed a nominal car can carry, with a backwards pass for braking zones.
+	# Corner speeds for a nominal car, then a backwards pass for the braking zones.
 	speed_profile.resize(n)
 	var seg := length / n
+	var cla_v: float = cfg.get("cla", 2.2)
 	for i in n:
-		var k: float = abs(curv[i])
-		var lim := grip_limit(i * seg, 1.0) * 0.94
-		speed_profile[i] = 200.0 if k < 0.0001 else sqrt(lim / k)
-	var decel := 11.0
+		speed_profile[i] = corner_speed(i, 1.0, cla_v)
+	var decel := 13.0
 	for _pass in 2:
 		for idx in range(n - 1, -1, -1):
 			var nxt := speed_profile[(idx + 1) % n]
@@ -420,10 +449,10 @@ func _build_scenery() -> void:
 	var rng := RandomNumberGenerator.new()
 	rng.seed = hash(cfg.name)
 	var hw := width * 0.5
-	var S: float = cfg.straight
 	var night: bool = cfg.get("night", false)
 	# Grandstands along the frontstretch, outside the wall.
-	var stand_len := S * 0.9 + float(cfg.bump) * 1.5
+	var stand_len := float(cfg.get("front_mid", 0.0)) + 2.0 * float(cfg.get("front_side", 0.0)) + 2.0 * float(cfg.get("dog_r", 0.0)) * deg_to_rad(float(cfg.get("dog_phi", 0.0)))
+	stand_len *= 0.9
 	var crowd := [Color(0.9, 0.2, 0.2), Color(0.2, 0.3, 0.9), Color(1, 1, 1), Color(1, 0.8, 0.2), Color(0.3, 0.8, 0.3), Color(0.9, 0.5, 0.1), Color(0.6, 0.2, 0.7)]
 	var seg := length / n
 	var rows := 14

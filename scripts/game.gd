@@ -4,7 +4,7 @@ extends Node
 const TITLE := "SPEEDWAY THUNDER"
 const SUBTITLE := "STOCK CAR ARCADE  '99"
 const MPS_TO_MPH := 2.23694
-const FIELD_SIZE := 12
+const FIELD_SIZE := 40
 const RECORDS_PATH := "user://records.cfg"
 
 ## Oval layout: two straights of `straight` metres joined by 180 degree turns of
@@ -15,11 +15,11 @@ var tracks: Array[Dictionary] = [
 		"short": "THUNDER BEACH",
 		"kind": "SUPERSPEEDWAY",
 		"level": "BEGINNER",
-		"shape": "trioval",
-		"straight": 900.0, "radius": 260.0, "bump": 110.0,
+		"back": 900.0, "radius": 260.0, "dog_phi": 12.0, "dog_r": 700.0, "front_mid": 0.0, "front_side": 330.0,
 		"width": 20.0, "apron": 9.0, "infield": 14.0,
 		"bank_turn": 31.0, "bank_straight": 4.0,
-		"laps": 3, "draft": 1.0, "grid_player": 9,
+		"laps": 3, "draft": 1.0, "grid_player": 24,
+		"hp": 510, "cda": 1.05, "cla": 1.6,
 		"sky_top": Color(0.18, 0.38, 0.78), "sky_horizon": Color(0.72, 0.84, 0.95),
 		"grass": Color(0.24, 0.55, 0.18), "fog": Color(0.70, 0.80, 0.92),
 		"lake": true, "sun_elev": 58.0, "sun_az": 35.0,
@@ -29,11 +29,11 @@ var tracks: Array[Dictionary] = [
 		"short": "LONE STAR",
 		"kind": "QUAD-OVAL SPEEDWAY",
 		"level": "ADVANCED",
-		"shape": "quadoval",
-		"straight": 560.0, "radius": 190.0, "bump": 45.0,
+		"back": 560.0, "radius": 190.0, "dog_phi": 10.0, "dog_r": 250.0, "front_mid": 250.0, "front_side": 110.0,
 		"width": 18.0, "apron": 8.0, "infield": 12.0,
 		"bank_turn": 24.0, "bank_straight": 5.0,
-		"laps": 4, "draft": 0.7, "grid_player": 9,
+		"laps": 4, "draft": 0.35, "grid_player": 24,
+		"hp": 670, "cda": 1.0, "cla": 2.4,
 		"sky_top": Color(0.35, 0.45, 0.80), "sky_horizon": Color(0.98, 0.78, 0.55),
 		"grass": Color(0.42, 0.52, 0.20), "fog": Color(0.93, 0.78, 0.62),
 		"lake": false, "sun_elev": 14.0, "sun_az": 205.0,
@@ -43,11 +43,11 @@ var tracks: Array[Dictionary] = [
 		"short": "THUNDER VALLEY",
 		"kind": "SHORT TRACK",
 		"level": "EXPERT",
-		"shape": "oval",
-		"straight": 190.0, "radius": 78.0, "bump": 0.0,
+		"back": 190.0, "radius": 78.0, "dog_phi": 0.0, "front_mid": 190.0, "front_side": 0.0,
 		"width": 15.0, "apron": 6.0, "infield": 8.0,
 		"bank_turn": 36.0, "bank_straight": 12.0,
-		"laps": 8, "draft": 0.35, "grid_player": 9,
+		"laps": 8, "draft": 0.2, "grid_player": 24,
+		"hp": 750, "cda": 1.0, "cla": 2.4,
 		"sky_top": Color(0.05, 0.05, 0.20), "sky_horizon": Color(0.25, 0.20, 0.40),
 		"grass": Color(0.16, 0.36, 0.14), "fog": Color(0.12, 0.10, 0.22),
 		"lake": false, "night": true, "sun_elev": 40.0, "sun_az": 120.0,
@@ -72,6 +72,9 @@ var teams: Array[Dictionary] = [
 ## The first N teams can be picked by the player.
 const SELECTABLE_TEAMS := 6
 
+var assists := true # steering/stability/traction help for the player
+var manual_shift := false
+var debug_seed := 0 # fixed randomness for tests
 var selected_track := 0
 var selected_team := 0
 var scanlines := true
@@ -97,8 +100,38 @@ func _ready() -> void:
 	# Slant the glyphs for that italic arcade cabinet look.
 	arcade_font.variation_transform = Transform2D(Vector2(1, 0), Vector2(-0.22, 1), Vector2.ZERO)
 	records.load(RECORDS_PATH)
+	_fill_teams()
 	modern_supported = RenderingServer.get_rendering_device() != null
 	modern = modern_supported
+
+
+## Pads the hand-made teams out to a full 40-car field with generated ones.
+func _fill_teams() -> void:
+	var first := ["JIMMY", "CARL", "DENNY", "KYLE", "RYAN", "CHASE", "TYLER", "BRAD", "JOEY", "AUSTIN", "CODY", "DANIEL", "ERIK", "MICHAEL", "ROSS", "TODD", "CHRIS", "JUSTIN", "HARRISON", "CORY", "NOAH", "ZANE", "TY", "JOSH", "RILEY", "COLE", "BUBBA", "SHANE"]
+	var last := ["WALKER", "HAYES", "BOONE", "MERCER", "DUVALL", "PIKE", "RANDALL", "CROWE", "LANGSTON", "TATE", "WHITLOCK", "BRADY", "COLLINS", "FARRIS", "HOLLOWAY", "KEENE", "LOWRY", "MADDOX", "NASH", "ODOM", "PRATT", "QUINLAN", "REEVES", "SUTTON", "TRAMMELL", "VAUGHN", "WEBB", "YANCEY"]
+	var sponsors := ["PEAK AUTO PARTS", "RIVER BANK", "DIXIE DOGS", "IRONHORSE TRUCKS", "COOL BREEZE HVAC", "BLUEGRASS INSURANCE", "SPARK PLUG CO", "GULF COAST SEAFOOD", "HIGHWAY LUBE", "LONGHORN JERKY", "SUMMIT ROOFING", "PIONEER SEED", "RAPID FREIGHT", "COASTAL CREDIT", "ACE HARDWARE", "MOONSHINE ENERGY", "TITAN TOOLS", "GOLD STAR PIZZA", "CLEARVIEW GLASS", "BIG SKY BOOTS", "NORTHSTAR CABLE", "VELOCITY SODA", "FARMHAND FEED", "SUNRISE PANCAKES", "BRAVO BATTERIES", "TRAILBLAZER RV", "HARBOR PAINT", "OLD TOWN CHILI"]
+	var used := {}
+	for t in teams:
+		used[t.num] = true
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 2026
+	var i := 0
+	while teams.size() < max(FIELD_SIZE, 43):
+		var num := str(rng.randi_range(1, 99))
+		if used.has(num):
+			continue
+		used[num] = true
+		var c1 := Color.from_hsv(rng.randf(), rng.randf_range(0.5, 0.95), rng.randf_range(0.45, 0.95))
+		var c2 := Color.from_hsv(fmod(c1.h + 0.5, 1.0), rng.randf_range(0.0, 0.8), rng.randf_range(0.7, 1.0))
+		teams.append({
+			"num": num,
+			"driver": "%s %s" % [first[i % first.size()], last[(i * 7 + 3) % last.size()]],
+			"sponsor": sponsors[i % sponsors.size()],
+			"c1": c1, "c2": c2, "cn": Color.WHITE if c1.v < 0.6 else Color(0.05, 0.05, 0.05),
+			"speed": rng.randf_range(0.985, 1.0), "accel": 1.0, "handling": rng.randf_range(0.975, 1.0),
+			"skill": rng.randf_range(0.94, 0.985),
+		})
+		i += 1
 
 
 func toggle_graphics() -> void:
@@ -289,6 +322,8 @@ func _setup_input() -> void:
 		"start": [KEY_ENTER, KEY_KP_ENTER, KEY_SPACE, "btn:%d" % JOY_BUTTON_START, "btn:%d" % JOY_BUTTON_A],
 		"back": [KEY_BACKSPACE, "btn:%d" % JOY_BUTTON_B],
 		"camera": [KEY_C, "btn:%d" % JOY_BUTTON_Y],
+		"shift_up": [KEY_E, "btn:%d" % JOY_BUTTON_RIGHT_SHOULDER],
+		"shift_down": [KEY_Q, "btn:%d" % JOY_BUTTON_LEFT_SHOULDER],
 		"pause": [KEY_ESCAPE, KEY_P, "btn:%d" % JOY_BUTTON_BACK],
 		"quit_race": [KEY_Q],
 		"toggle_scanlines": [KEY_F2],

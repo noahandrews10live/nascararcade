@@ -1,40 +1,86 @@
 extends Node3D
-## A stock car. Physics runs entirely in track space (s, d, yaw) which keeps the
-## handling predictable and arcade-like while the banking comes for free.
+## A Next Gen-style stock car.
+##
+## The car is a planar rigid body riding on the banked track surface. Position lives
+## in track space (`dist` along the centre line, `d` lateral, + = towards the outside
+## wall), heading `yaw` is relative to the track tangent (+ = pointing right), and the
+## body-frame state is forward speed `v`, lateral speed `vy` (+ = right) and yaw rate
+## `r` (+ = clockwise seen from above). Tyres use a Pacejka-style curve with a grip
+## peak and fall-off, so cars can be loose, tight, spin and wreck.
 
-const LENGTH := 4.9
-const WIDTH := 1.9
-const HALF_W := 0.95
-const GEAR_TOPS := [22.0, 42.0, 62.0, 999.0]
+const LENGTH := 5.0
+const WIDTH := 1.95
+const HALF_L := 2.5
+const HALF_W := 0.975
+const MASS := 1600.0
+const IZ := 3800.0
+const CG_F := 1.40 # CG to front axle
+const CG_R := 1.36 # CG to rear axle
+const WHEELBASE := 2.76
+const CG_H := 0.42
+const RHO := 1.2
+const G := 9.81
+const TYRE_B_F := 14.0 # slip stiffness (front): peak grip at ~0.12 rad
+const TYRE_B_R := 19.0 # rear is stiffer and grippier: a slightly tight, stable setup
+const TYRE_C := 1.35 # shape: grip falls to ~85% when fully sliding, so slides are catchable
+const RPM_PER_MPS := [260.0, 190.0, 150.0, 120.0, 100.0] # 5-speed sequential
+const REDLINE := 9300.0
+const FUEL_CAPACITY := 75.0 # litres (20 US gal)
+const SUBSTEPS := 4
 
 var team: Dictionary
 var is_player := false
 var track: Node3D
 
 # Track-space state
-var dist := 0.0 # total distance travelled along the centre line; laps = floor(dist / L)
+var dist := 0.0 # total distance along the centre line; laps = floor(dist / L)
 var d := 0.0
 var yaw := 0.0
-var v := 0.0
+var v := 0.0 # forward speed, body frame
+var vy := 0.0 # lateral speed, body frame
+var r := 0.0 # yaw rate
 
 # Controls (0..1, steer -1..1)
 var throttle := 0.0
 var brake := 0.0
 var steer_in := 0.0
 var steer := 0.0
+var assisted := true # steering / stability / traction assists
+var manual := false
+var shift_request := 0
 
-# Tuning (scaled by team stats)
-var top_speed := 90.0
-var accel := 9.0
+# Car spec (scaled by team stats and track package)
+var power := 380000.0 # watts at the peak
+var cda := 1.0
+var cla := 2.0
 var mu := 1.0
+var grip_front := 0.98 # setup balance (wedge / track bar / stagger all end up here)
+var grip_rear := 1.07
+var gear := 1
+var rpm_now := 3000.0
 
-# Race info
-var draft := 0.0
+# Aero from other cars (set by the race each frame)
+var drag_mult := 1.0
+var df_front_mult := 1.0
+var draft := 0.0 # 0..1, for the HUD
+
+# Condition
+var damage := {"front": 0.0, "rear": 0.0, "left": 0.0, "right": 0.0}
+var tyre_wear := 0.0 # 0 = new
+var fuel := FUEL_CAPACITY
+var out := false # wrecked / retired
+var out_reason := ""
+
+# Per-frame feedback
 var scrub := 0.0
-var wall_hit := 0.0 # impact strength this frame (for sfx/shake)
+var slide := 0.0 # rear slip beyond the grip peak, 0..1+
+var wall_hit := 0.0
 var bump := 0.0
 var scraping := false
 var on_grass := false
+var spinning := false
+
+# Race info
 var finished := false
 var finish_time := 0.0
 var finish_order := 0
@@ -52,19 +98,35 @@ var ai := true
 var ai_lane := 0.0
 var ai_lane_timer := 0.0
 var ai_skill := 1.0
+var ai_aggression := 0.5
+var ai_r_des := 0.0 # AI asks the steering assist for a yaw rate
+var ai_stuck := 0.0
+var ai_reverse := 0.0
 
 var model: Node3D
 var sparks: CPUParticles3D
+var smoke: CPUParticles3D
+var tyre_smoke: CPUParticles3D
 var wheels: Array[Node3D] = []
+var panels: Array[MeshInstance3D] = []
 var wheel_spin := 0.0
+var _delta_f := 0.0 # current front wheel angle
+var dbg := []
+var r_max_now := 1.0 # yaw rate the grip allows right now (for the AI)
+var _fy_f_prev := 0.0
+var _fy_r_prev := 0.0
+var _r_ref := 0.0
+var _steer_int := 0.0
 
 
 func setup(t: Dictionary, trk: Node3D) -> void:
 	team = t
 	track = trk
-	top_speed = 90.0 * float(t.speed)
-	accel = 9.0 * float(t.accel)
-	mu = 1.0 * float(t.handling)
+	var pkg: Dictionary = trk.cfg if trk else {}
+	power = float(pkg.get("hp", 670)) * 745.7 * float(t.get("speed", 1.0))
+	cda = float(pkg.get("cda", 1.0)) / pow(float(t.get("speed", 1.0)), 0.5)
+	cla = float(pkg.get("cla", 2.2))
+	mu = 1.0 * float(t.get("handling", 1.0))
 	_build_model()
 
 
@@ -76,150 +138,345 @@ func lap() -> int:
 	return int(floor(dist / track.length))
 
 
-func gear() -> int:
-	var av: float = abs(v)
-	for g in GEAR_TOPS.size():
-		if av < GEAR_TOPS[g]:
-			return g + 1
-	return 4
+func speed() -> float:
+	return sqrt(v * v + vy * vy)
 
 
 func rpm() -> float:
-	var g := gear()
-	var lo: float = 0.0 if g == 1 else GEAR_TOPS[g - 2]
-	var hi: float = GEAR_TOPS[g - 1] if g < 4 else top_speed * 1.08
-	var t: float = clamp((abs(v) - lo) / max(hi - lo, 1.0), 0.0, 1.0)
-	return 3000.0 + t * 6000.0 + throttle * 400.0
+	return rpm_now
+
+
+func total_damage() -> float:
+	return (damage.front + damage.rear + damage.left + damage.right) * 0.25
+
+
+func tyre_grip() -> float:
+	return 1.0 - 0.14 * clamp(tyre_wear, 0.0, 1.5)
+
+
+func _engine_power(rpm_v: float) -> float:
+	# Broad V8 curve peaking near 8,500 rpm.
+	var x: float = (rpm_v - 8500.0) / 6500.0
+	return power * clamp(1.0 - x * x, 0.2, 1.0)
+
+
+func _auto_shift() -> void:
+	var u: float = abs(v)
+	if manual and is_player:
+		if shift_request != 0:
+			gear = clamp(gear + shift_request, 1, 5)
+			shift_request = 0
+		return
+	if gear < 5 and u * RPM_PER_MPS[gear - 1] > 9000.0:
+		gear += 1
+	elif gear > 1 and u * RPM_PER_MPS[gear - 2] < 8200.0:
+		gear -= 1
+
+
+## Pacejka-ish lateral force for a slip angle, as a fraction of the grip limit.
+static func _tyre(alpha: float, stiff: float) -> float:
+	return sin(TYRE_C * atan(stiff * alpha))
+
+
+func _mu_eff(load_ratio: float) -> float:
+	# Tyres lose relative grip as load rises (why real cars lift at banked tracks).
+	var surf := 1.0
+	if on_grass:
+		surf = 0.5
+	elif d < track.inner_edge():
+		surf = 0.95
+	return mu * tyre_grip() * surf * pow(max(load_ratio, 0.3), -0.3)
 
 
 func step(delta: float) -> void:
 	wall_hit = 0.0
+	scraping = false
 	bump = max(bump - delta * 4.0, 0.0)
-	var L: float = track.length
 	var ss := s()
 	var k: float = track.curvature_at(ss)
 
 	if pace_mode:
-		# Rolling start formation: glide to the assigned lane at pace speed.
+		# Formation / caution: glide to the assigned lane at pace speed.
 		v = move_toward(v, pace_speed, 6.0 * delta)
+		vy = 0.0
 		d = move_toward(d, pace_lane, 1.5 * delta)
 		yaw = 0.0
+		r = -k * cos(track.bank_at(ss)) * v
 		dist += v * delta / (1.0 + k * d)
 		steer = 0.0
+		rpm_now = 3000.0 + v * 60.0
 		_update_visual(delta)
 		return
 
-	on_grass = d < track.apron_edge()
-	var grip_mu := mu * (0.55 if on_grass else 1.0)
-	var lat_limit: float = track.grip_limit(ss, grip_mu)
+	if out:
+		throttle = 0.0
+		brake = 1.0
+		steer_in = 0.0
 
-	# Longitudinal
-	var vmax := top_speed * rubber * (1.0 + 0.075 * draft * float(track.cfg.draft))
-	var a := 0.0
-	if v >= 0.0:
-		a += throttle * accel * max(1.0 - v / vmax, -0.6)
-		a -= brake * 15.0
-		a -= 0.8 + 1.5 * pow(v / top_speed, 2) * (1.0 - throttle)
-		if on_grass:
-			a -= 0.03 * v * v / 10.0 + 2.0
-		v += a * delta
-		if v < 0.0 and brake < 0.5:
-			v = 0.0
-		if v < 0.0 and brake >= 0.5:
-			v = max(v, -0.1)
-	else:
-		# Reversing (hold brake when stopped)
-		v += (brake * -6.0 + throttle * 12.0 + 2.0) * delta
-		v = clamp(v, -8.0, 0.0)
-		if throttle > 0.5 and v > -0.2:
-			v = 0.0
-
-	# Steering. Keyboard input ramps in, and full lock shrinks with speed.
-	var ramp := 3.5 if abs(steer_in) > abs(steer) else 6.0
-	steer = move_toward(steer, steer_in, ramp * delta)
-	var av: float = max(abs(v), 0.1)
-	var rate: float = steer * _steer_rate(lat_limit) * sign(v if v != 0.0 else 1.0)
-	var lat_acc: float = abs(rate) * av
-	scrub = 0.0
-	if lat_acc > lat_limit:
-		scrub = (lat_acc - lat_limit) / lat_limit
-		rate = sign(rate) * lat_limit / av
-		v -= sign(v) * min(scrub * 9.0, 12.0) * delta
-	# Understeer drift if the car simply cannot carry this speed around the turn.
-	var need: float = abs(k) * av * av
-	if need > lat_limit * 1.02 and abs(steer) > 0.2:
-		scrub = max(scrub, (need - lat_limit) / lat_limit)
-
-	var ds := v * cos(yaw) / (1.0 + k * d)
-	var dd := v * sin(yaw)
-	yaw += (k * ds + rate) * delta
-	# Mild self-aligning so the car settles on straights.
-	if abs(steer_in) < 0.05:
-		yaw -= yaw * min(1.2 * delta, 1.0) * clamp(av / 20.0, 0.0, 1.0)
-	yaw = clamp(yaw, -1.1, 1.1)
-	dist += ds * delta
-	d += dd * delta
-
-	# Walls
-	scraping = false
-	var dmax: float = track.outer_edge() - HALF_W
-	var dmin: float = track.inner_wall() + HALF_W
-	if d > dmax:
-		d = dmax
-		_hit_wall(1.0)
-	elif d < dmin:
-		d = dmin
-		_hit_wall(-1.0)
-
-	# Lap timing handled by race manager; clamp absurd values.
-	if dist < -L:
-		dist += L
+	var h := delta / SUBSTEPS
+	for _i in SUBSTEPS:
+		_integrate(h)
+	_walls()
+	# Wear and fuel
+	var travelled: float = abs(v) * delta
+	tyre_wear += travelled / 1000.0 * (0.006 + 0.08 * slide * slide + 0.01 * scrub)
+	fuel = max(0.0, fuel - travelled / 1000.0 * 0.62 * (0.3 + 0.7 * throttle))
+	spinning = abs(yaw) > 0.6 and speed() > 8.0
+	if total_damage() > 0.72 and not out:
+		out = true
+		out_reason = "ACCIDENT"
 	_update_visual(delta)
 
 
-func _steer_rate(lat_limit: float) -> float:
-	var av: float = max(abs(v), 0.1)
-	return min(1.5, lat_limit * 1.3 / av) * clamp(av / 6.0, 0.0, 1.0)
+func _integrate(h: float) -> void:
+	var ss := s()
+	var k: float = track.curvature_at(ss)
+	var b: float = track.bank_at(ss)
+	if d < track.inner_edge():
+		b = atan(0.35 / track.apron) if d > track.apron_edge() else 0.0
+	on_grass = d < track.apron_edge()
+	var u: float = v
+	var au: float = max(abs(u), 3.0)
 
+	# --- engine / gearbox
+	_auto_shift()
+	rpm_now = clamp(abs(u) * RPM_PER_MPS[gear - 1], 2800.0, REDLINE + 200.0)
+	var dmg_power: float = 1.0 - 0.45 * clamp(damage.front - 0.35, 0.0, 1.0)
+	var p_avail: float = _engine_power(rpm_now) * dmg_power
+	if rpm_now >= REDLINE or fuel <= 0.0:
+		p_avail = 0.0
+	var fx_drive: float = throttle * p_avail * 0.88 / max(abs(u), 4.0)
+	var fx_brake: float = brake * 2.3 * MASS * G * (1.0 if u > 0.3 else 0.0)
+	var reverse := false
+	if u <= 0.3 and brake > 0.5 and throttle < 0.1 and ((is_player and not ai) or ai_reverse > 0.0):
+		# Hold brake when stopped to reverse off a wall.
+		reverse = true
+		fx_brake = 0.0
+		fx_drive = -brake * 0.25 * MASS * G if u > -6.0 else 0.0
 
-func max_steer_rate() -> float:
-	var grip_mu := mu * (0.55 if d < track.apron_edge() else 1.0)
-	return _steer_rate(track.grip_limit(s(), grip_mu))
+	# --- aero
+	var dmg_aero: float = damage.front + damage.rear
+	var q: float = 0.5 * RHO * u * u
+	var f_drag: float = q * cda * drag_mult * (1.0 + 0.35 * dmg_aero) * sign(u)
+	var f_down: float = q * cla * (1.0 - 0.3 * dmg_aero)
+	var f_down_front: float = f_down * 0.45 * df_front_mult
+	var f_down_rear: float = f_down * 0.55
 
+	# --- normal loads on the banked surface
+	var n_body: float = MASS * (G * cos(b) + u * u * k * sin(b))
+	n_body = max(n_body, MASS * 2.0)
+	var ax_est: float = (fx_drive - fx_brake - f_drag) / MASS
+	var transfer: float = MASS * ax_est * CG_H / WHEELBASE
+	var nf: float = max(n_body * CG_R / WHEELBASE - transfer + f_down_front, 500.0)
+	var nr: float = max(n_body * CG_F / WHEELBASE + transfer + f_down_rear, 500.0)
+	var load_ratio: float = (nf + nr) / (MASS * G)
+	var m_eff: float = _mu_eff(load_ratio)
+	var cap_f: float = m_eff * nf * grip_front
+	var cap_r: float = m_eff * nr * grip_rear
 
-func _hit_wall(side: float) -> void:
-	scraping = true
-	var into: float = sin(yaw) * side
-	if into > 0.0:
-		var impact: float = into * abs(v)
-		wall_hit = impact
-		v *= 1.0 - clamp(into * 1.4, 0.04, 0.6)
-		yaw = -yaw * 0.25
+	# --- steering
+	var steer_ramp: float = 3.5 if abs(steer_in) > abs(steer) else 6.0
+	steer = move_toward(steer, steer_in, steer_ramp * h)
+	var max_delta: float = 0.35 / (1.0 + au / 18.0)
+	var alpha_r: float = atan2(vy - r * CG_R, au)
+	var delta_f: float
+	if assisted:
+		# The wheel asks for a yaw rate; the assist finds the steering angle and
+		# counter-steers slides. Grip limits still apply.
+		# Banking helps turn the car too, so count its in-plane gravity.
+		var lat_cap: float = (cap_f + cap_r) / MASS + G * abs(sin(b))
+		var r_max: float = min(lat_cap * (1.1 if ai else 1.2) / au, 1.6)
+		r_max_now = lat_cap * 1.05 / au
+		var r_des: float = clamp(ai_r_des, -r_max, r_max) if (ai and ai_reverse <= 0.0) else steer * r_max
+		_r_ref = r_des
+		# Proportional + integral: like a driver winding on more lock until the car
+		# actually rotates at the rate asked for.
+		_steer_int = clamp(_steer_int + (r_des - r) * h * 0.8, -0.06, 0.06)
+		if abs(v) < 5.0:
+			_steer_int = 0.0
+		delta_f = r_des * WHEELBASE / au + 0.3 * (r_des - r) + _steer_int
+		# Catch the slide: counter-steer as the rear breaks away.
+		if abs(alpha_r) > 0.06:
+			delta_f += -(alpha_r - 0.06 * sign(alpha_r)) * 1.2
+		delta_f = clamp(delta_f, -max_delta * 1.6, max_delta * 1.6)
 	else:
-		wall_hit = max(wall_hit, 0.5)
-	v *= 1.0 - 0.25 * get_physics_process_delta_time()
-	yaw -= side * 0.02
+		delta_f = steer * max_delta
+	# Damage bends the toe: the car pulls to the damaged side.
+	delta_f += (damage.right - damage.left) * 0.012
+	_delta_f = delta_f
+
+	# --- tyre forces (friction circle)
+	var fx_f: float = -fx_brake * 0.64
+	var fx_r: float = fx_drive - fx_brake * 0.36
+	if assisted and not reverse:
+		# Traction control / ABS: only use the grip cornering isn't already using.
+		var spare_r: float = sqrt(max(cap_r * cap_r - pow(_fy_r_prev * 1.15, 2.0), pow(cap_r * 0.2, 2.0)))
+		var spare_f: float = sqrt(max(cap_f * cap_f - pow(_fy_f_prev * 1.15, 2.0), pow(cap_f * 0.25, 2.0)))
+		fx_r = clamp(fx_r, -spare_r * 0.6, spare_r * 0.9)
+		fx_f = max(fx_f, -spare_f * 0.9)
+	fx_f = clamp(fx_f, -cap_f, cap_f)
+	fx_r = clamp(fx_r, -cap_r, cap_r)
+	var lat_f: float = sqrt(max(cap_f * cap_f - fx_f * fx_f, 0.0))
+	var lat_r: float = sqrt(max(cap_r * cap_r - fx_r * fx_r, 0.0))
+	var alpha_f: float = atan2(vy + r * CG_F, au) - delta_f
+	var fy_f: float = -lat_f * _tyre(alpha_f, TYRE_B_F)
+	var fy_r: float = -lat_r * _tyre(alpha_r, TYRE_B_R)
+	dbg = [alpha_f, alpha_r, fy_f, fy_r, lat_f, lat_r, delta_f, nf, nr]
+	_fy_f_prev = fy_f
+	_fy_r_prev = fy_r
+	scrub = clamp((abs(alpha_f) - 0.1) * 6.0, 0.0, 1.0)
+	slide = clamp((abs(alpha_r) - 0.1) * 5.0, 0.0, 2.0)
+
+	# --- in-plane gravity (downhill = towards the inside)
+	var g_along: float = -G * sin(b) * sin(yaw)
+	var g_right: float = -G * sin(b) * cos(yaw)
+
+	var roll_res: float = 0.012 * MASS * G * sign(u) if abs(u) > 0.2 else 0.0
+	var ax: float = (fx_f * cos(delta_f) - fy_f * sin(delta_f) + fx_r - f_drag - roll_res) / MASS + g_along
+	var ay: float = (fy_f * cos(delta_f) + fx_f * sin(delta_f) + fy_r) / MASS + g_right
+	var rdot: float = (CG_F * (fy_f * cos(delta_f) + fx_f * sin(delta_f)) - CG_R * fy_r) / IZ
+	var u_new: float = u + (ax + r * vy) * h
+	if not reverse and u > 0.0 and u_new < 0.0 and brake > 0.0:
+		u_new = 0.0
+	v = u_new
+	vy += (ay - r * u) * h
+	r += rdot * h
+	# Driver skill / stability assist: gathers up small slides (a yaw moment like a
+	# driver catching it). It backs off after a hard hit so real wrecks still happen.
+	if assisted and abs(v) > 8.0:
+		var catch_strength: float = (1.6 if ai else 1.1) * ai_skill if ai else 1.1
+		catch_strength *= clamp(1.0 - (bump - 4.0) / 6.0, 0.0, 1.0)
+		if abs(yaw) < 0.9:
+			r += (_r_ref - r) * min(catch_strength * h, 1.0)
+			vy -= vy * min(0.6 * catch_strength * h, 1.0) * clamp(abs(alpha_r) * 6.0, 0.0, 1.0)
+	# Low-speed damping so stopped cars settle.
+	if abs(v) < 2.0:
+		vy *= 1.0 - min(6.0 * h, 1.0)
+		r *= 1.0 - min(6.0 * h, 1.0)
+
+	# --- kinematics in track space. On a banked surface the turn curves less within
+	# the road plane (geodesic curvature = k * cos(bank)).
+	var ds: float = (v * cos(yaw) - vy * sin(yaw)) / (1.0 + k * d)
+	var dd: float = v * sin(yaw) + vy * cos(yaw)
+	yaw = wrapf(yaw + (r + k * cos(b) * ds) * h, -PI, PI)
+	dist += ds * h
+	d += dd * h
+
+
+## Velocity of the car's body in track axes (along, right).
+func track_velocity() -> Vector2:
+	return Vector2(v * cos(yaw) - vy * sin(yaw), v * sin(yaw) + vy * cos(yaw))
+
+
+## Body offset (forward, right) -> track axes (along, right).
+func body_to_track(p: Vector2) -> Vector2:
+	return Vector2(p.x * cos(yaw) - p.y * sin(yaw), p.x * sin(yaw) + p.y * cos(yaw))
+
+
+func track_to_body(p: Vector2) -> Vector2:
+	return Vector2(p.x * cos(yaw) + p.y * sin(yaw), -p.x * sin(yaw) + p.y * cos(yaw))
+
+
+## Velocity (track axes) of a point at track-axes offset `rp` from the CG.
+func point_velocity(rp: Vector2) -> Vector2:
+	var rb: Vector2 = track_to_body(rp)
+	return body_to_track(Vector2(v - r * rb.y, vy + r * rb.x))
+
+
+## Applies an impulse `j` (track axes, N*s) at track-axes offset `rp` from the CG.
+func apply_impulse(j: Vector2, rp: Vector2) -> void:
+	var jb: Vector2 = track_to_body(j)
+	var rb: Vector2 = track_to_body(rp)
+	v += jb.x / MASS
+	vy += jb.y / MASS
+	r += (rb.x * jb.y - rb.y * jb.x) / IZ
+
+
+## Effective inverse mass of the car along a direction for a contact at `rp`.
+func inv_mass_along(n: Vector2, rp: Vector2) -> float:
+	var c: float = rp.x * n.y - rp.y * n.x
+	return 1.0 / MASS + c * c / IZ
+
+
+func add_damage(j: float, rp_track: Vector2) -> void:
+	var rb: Vector2 = track_to_body(rp_track)
+	var amount: float = j / (MASS * 55.0)
+	if amount < 0.01:
+		return
+	if abs(rb.x) > 1.2:
+		var key := "front" if rb.x > 0.0 else "rear"
+		damage[key] = min(1.0, damage[key] + amount)
+	if abs(rb.y) > 0.5 or abs(rb.x) <= 1.2:
+		var side := "right" if rb.y > 0.0 else "left"
+		damage[side] = min(1.0, damage[side] + amount * 0.8)
+	_update_damage_visual()
+
+
+func corners_track() -> Array[Vector2]:
+	var out_c: Array[Vector2] = []
+	for c in [Vector2(HALF_L, HALF_W), Vector2(HALF_L, -HALF_W), Vector2(-HALF_L, HALF_W), Vector2(-HALF_L, -HALF_W)]:
+		out_c.append(body_to_track(c))
+	return out_c
+
+
+func _walls() -> void:
+	var outer: float = track.outer_edge()
+	var inner: float = track.inner_wall()
+	for side in [1.0, -1.0]:
+		var deepest := 0.0
+		var contact := Vector2.ZERO
+		for c in corners_track():
+			var pen: float = (d + c.y - outer) if side > 0.0 else (inner - (d + c.y))
+			if pen > deepest:
+				deepest = pen
+				contact = c
+		if deepest <= 0.0:
+			continue
+		scraping = true
+		var n := Vector2(0, -side) # points back onto the track
+		var vp: Vector2 = point_velocity(contact)
+		var vn: float = vp.dot(n)
+		d -= side * deepest
+		if vn < 0.0:
+			var j: float = -(1.0 + 0.25) * vn / inv_mass_along(n, contact)
+			var t := Vector2(1, 0)
+			var vt: float = vp.dot(t)
+			var jt: float = clamp(-vt / inv_mass_along(t, contact), -0.35 * j, 0.35 * j)
+			apply_impulse(n * j + t * jt, contact)
+			wall_hit = max(wall_hit, -vn)
+			add_damage(j, contact)
+		else:
+			wall_hit = max(wall_hit, 0.5)
+			# grinding along the wall
+			v *= 1.0 - 0.15 * get_physics_process_delta_time()
+
+
+func sync_visual() -> void:
+	_update_visual(0.0)
 
 
 func _update_visual(delta: float) -> void:
 	if track == null:
 		return
 	var tr: Transform3D = track.car_transform(s(), d, yaw)
-	# Body roll & pitch for some 90s wobble.
-	var roll: float = -steer * clamp(abs(v) / 80.0, 0.0, 1.0) * 0.05
+	# Body roll & pitch from the tyre loads.
+	var roll: float = clamp(-r * v * 0.0022, -0.07, 0.07)
 	var pitch: float = (brake - throttle * 0.4) * 0.015 * clamp(abs(v) / 30.0, 0.0, 1.0)
-	model.transform = Transform3D(Basis.from_euler(Vector3(pitch, 0.0, roll)), Vector3(0, 0, 0))
+	model.transform = Transform3D(Basis.from_euler(Vector3(pitch, 0.0, roll)), Vector3.ZERO)
 	global_transform = tr
 	wheel_spin += v * delta / 0.36
-	for w in wheels:
-		w.rotation.x = -wheel_spin
+	for i in wheels.size():
+		wheels[i].rotation.x = -wheel_spin
+		if i % 2 == 0: # front wheels
+			wheels[i].get_parent().rotation.y = -_delta_f * 2.0
 	if sparks:
-		sparks.emitting = scraping and abs(v) > 12.0
+		sparks.emitting = scraping and speed() > 12.0
 		sparks.position.x = HALF_W * sign(d)
-
-
-func sync_visual() -> void:
-	_update_visual(0.0)
+	if tyre_smoke:
+		tyre_smoke.emitting = (slide > 0.4 or scrub > 0.6) and speed() > 10.0
+	if smoke:
+		smoke.emitting = total_damage() > 0.3 or out
+		smoke.amount = 24
 
 
 # --- model ---------------------------------------------------------------------
@@ -232,7 +489,27 @@ func _add_box(size: Vector3, p: Vector3, m: Material, parent: Node3D = null) -> 
 	mi.material_override = m
 	mi.position = p
 	(parent if parent else model).add_child(mi)
+	panels.append(mi)
+	mi.set_meta("home", p)
 	return mi
+
+
+## Crumples body panels in proportion to the damage on that corner of the car.
+func _update_damage_visual() -> void:
+	var rng := RandomNumberGenerator.new()
+	rng.seed = hash(team.num)
+	for mi in panels:
+		var home: Vector3 = mi.get_meta("home")
+		var amt := 0.0
+		if home.z < -1.0:
+			amt += damage.front
+		if home.z > 1.0:
+			amt += damage.rear
+		amt += damage.right if home.x > 0.2 else (damage.left if home.x < -0.2 else 0.0)
+		amt = min(amt, 1.0)
+		var jitter := Vector3(rng.randf_range(-1, 1), rng.randf_range(-1, 0.3), rng.randf_range(-1, 1))
+		mi.position = home + jitter * amt * 0.12
+		mi.rotation = Vector3(rng.randf_range(-1, 1), rng.randf_range(-1, 1), rng.randf_range(-1, 1)) * amt * 0.18
 
 
 func _build_model() -> void:
@@ -351,6 +628,43 @@ func _build_model() -> void:
 	sparks.mesh = qm
 	sparks.position = Vector3(HALF_W, 0.4, 0.5)
 	add_child(sparks)
+	tyre_smoke = _smoke_emitter(Color(0.85, 0.85, 0.85, 0.5), 2.5)
+	tyre_smoke.position = Vector3(0, 0.3, 1.5)
+	smoke = _smoke_emitter(Color(0.25, 0.25, 0.27, 0.6), 1.6)
+	smoke.position = Vector3(0, 0.8, -2.0)
+
+
+func _smoke_emitter(col: Color, size: float) -> CPUParticles3D:
+	var p := CPUParticles3D.new()
+	p.emitting = false
+	p.amount = 28
+	p.lifetime = 1.4
+	p.local_coords = false
+	p.direction = Vector3(0, 1, 0.3)
+	p.spread = 40.0
+	p.initial_velocity_min = 1.0
+	p.initial_velocity_max = 3.0
+	p.gravity = Vector3(0, 1.2, 0)
+	p.scale_amount_min = size * 0.6
+	p.scale_amount_max = size
+	var curve := Curve.new()
+	curve.add_point(Vector2(0, 0.4))
+	curve.add_point(Vector2(1, 1.0))
+	p.scale_amount_curve = curve
+	var grad := Gradient.new()
+	grad.set_color(0, col)
+	grad.set_color(1, Color(col.r, col.g, col.b, 0.0))
+	p.color_ramp = grad
+	var qm := QuadMesh.new()
+	var m := StandardMaterial3D.new()
+	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	m.vertex_color_use_as_albedo = true
+	m.billboard_mode = BaseMaterial3D.BILLBOARD_PARTICLES
+	qm.material = m
+	p.mesh = qm
+	add_child(p)
+	return p
 
 
 func _num_label(text: String, col: Color, size: int) -> Label3D:
