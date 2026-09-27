@@ -27,6 +27,7 @@ func _run() -> void:
 	var force_at := float(OS.get_environment("FORCE")) if OS.get_environment("FORCE") != "" else 25.0
 	game.tracks[tidx].full_laps = 140 # 14 laps at the default SHORT length
 	game.settings.length = 1
+	game.settings.field = 3 # 40 cars
 	main.mode = "race"
 	main._use_track(tidx)
 	main._enter_track_select()
