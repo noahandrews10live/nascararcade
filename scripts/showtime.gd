@@ -911,12 +911,12 @@ func _update_showroom(delta: float) -> void:
 		var k: float = clamp((_paint_t - 0.15) / 0.7, 0.0, 1.0)
 		(car._body.paint as StandardMaterial3D).albedo_color = Color(0.3, 0.31, 0.33).lerp(Color.WHITE, k * k * (3.0 - 2.0 * k))
 	if showroom and is_instance_valid(showroom):
-		showroom.visible = main.state in [main.State.CAR_SELECT, main.State.MENU] and car != null and is_instance_valid(car)
+		showroom.visible = main.state in [main.State.CAR_SELECT, main.State.MENU, main.State.MODE_SELECT] and car != null and is_instance_valid(car)
 
 
 ## A blip of the throttle on the car in the showroom. Returns true while it plays.
 func engine_blip() -> bool:
-	if _rev_t > 1.6 or not main.state in [main.State.CAR_SELECT, main.State.MENU]:
+	if _rev_t > 1.6 or not main.state in [main.State.CAR_SELECT, main.State.MENU, main.State.MODE_SELECT]:
 		return false
 	var synth = main.synth
 	synth.engine_on = true

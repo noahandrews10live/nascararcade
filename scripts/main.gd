@@ -22,6 +22,7 @@ const Atmosphere := preload("res://scripts/atmosphere.gd")
 const RainFx := preload("res://scripts/rain_fx.gd")
 const RaceDay := preload("res://scripts/race_day.gd")
 const TouchControls := preload("res://scripts/touch_controls.gd")
+const Tutorial := preload("res://scripts/tutorial.gd")
 const Menu := preload("res://scripts/menu.gd")
 
 enum State { TITLE, MODE_SELECT, TRACK_SELECT, CAR_SELECT, MENU, COUNTDOWN, RACE, FINISHED, RESULTS, SESSION_RESULTS, STANDINGS, REPLAY }
@@ -42,6 +43,7 @@ var sun: DirectionalLight3D
 var synth: Node
 var soundscape: Node3D
 var hud: Control
+var tutorial: Control # first race on a phone: short prompts
 var ui_layer: CanvasLayer
 var ui_root: Control # the 640x480 menu frame, centred however wide the screen is
 var screen: Control
@@ -91,18 +93,29 @@ var autopilot := false
 ## "arcade" = the 1999 cabinet game (clock, 16 cars). "race" = full NASCAR rules.
 var mode := "arcade"
 const MODES := [
-	["QUICK RACE", "STRAIGHT TO THE GRID: A SHORT RACE AT A RANDOM TRACK IN YOUR CAR."],
-	["ARCADE", "BEAT THE CLOCK. 16 CARS, SHORT RACES, NO CAUTIONS."],
-	["SINGLE RACE", "A FULL RACE WEEKEND: PRACTICE, QUALIFYING, CAUTIONS, PITS, STAGES."],
-	["SEASON", "RUN A CHAMPIONSHIP. POINTS, WINS AND STANDINGS ARE SAVED."],
-	["CAREER", "ROOKIE TO CHAMPION: PRIZE MONEY, SPONSORS AND R&D UPGRADES."],
-	["2 PLAYER", "SPLIT SCREEN. PLAYER 2: I J K L, U = PIT, OR A SECOND GAMEPAD."],
-	["LIGHTNING CHALLENGES", "RACE-DEFINING MOMENTS. BEAT FIVE TO UNLOCK A LEGEND."],
-	["PAINT SHOP", "CREATE YOUR OWN CAR: NUMBER, DRIVER, SPONSOR AND COLORS."],
-	["ONLINE", "RACE FRIENDS OVER THE INTERNET OR YOUR LOCAL NETWORK."],
-	["TRACK EDITOR", "BUILD YOUR OWN TRACK, TEST-DRIVE IT AND SAVE IT AS A MOD."],
-	["OPTIONS", "GRAPHICS, SOUND, WHEEL AND RECORDS."],
+	["QUICK RACE", "STRAIGHT TO THE GRID: A SHORT RACE AT A RANDOM TRACK IN YOUR CAR.", "quick"],
+	["ARCADE", "BEAT THE CLOCK. 16 CARS, SHORT RACES, NO CAUTIONS.", "arcade"],
+	["SINGLE RACE", "A FULL RACE WEEKEND: PRACTICE, QUALIFYING, CAUTIONS, PITS, STAGES.", "race"],
+	["SEASON", "RUN A CHAMPIONSHIP. POINTS, WINS AND STANDINGS ARE SAVED.", "season"],
+	["CAREER", "ROOKIE TO CHAMPION: PRIZE MONEY, SPONSORS AND R&D UPGRADES.", "career"],
+	["ONLINE", "RACE FRIENDS: HOST A ROOM AND SHARE THE CODE, OR JOIN ONE.", "online"],
+	["CHALLENGES", "RACE-DEFINING MOMENTS, AND A NEW ONE EVERY DAY.", "challenges"],
+	["PAINT SHOP", "CREATE YOUR OWN CAR: NUMBER, DRIVER, SPONSOR, SCHEME AND COLORS.", "paint"],
+	["OPTIONS", "CONTROLS, GRAPHICS, SOUND AND RECORDS.", "options"],
+	["2 PLAYER", "SPLIT SCREEN. PLAYER 2: I J K L, U = PIT, OR A SECOND GAMEPAD.", "2p"],
+	["TRACK EDITOR", "BUILD YOUR OWN TRACK, TEST-DRIVE IT AND SAVE IT AS A MOD.", "editor"],
 ]
+## Modes that need a keyboard or two controllers aren't offered on a phone.
+const DESK_MODES := ["2p", "editor"]
+
+
+## The modes on offer on this device.
+func _modes() -> Array:
+	if Game.touch_device() or Game.touch_active:
+		return MODES.filter(func(m): return not DESK_MODES.has(m[2]))
+	return MODES
+
+
 var mode_idx := 0
 ## Intro, showroom, TV package, replays, last-lap drama and victory lane.
 var showtime: Node
@@ -184,6 +197,9 @@ func _ready() -> void:
 	hud_layer.layer = 1
 	add_child(hud_layer)
 	hud_layer.add_child(hud)
+	tutorial = Tutorial.new()
+	tutorial.main = self
+	hud_layer.add_child(tutorial)
 	telemetry = TelemetryHud.new()
 	telemetry.visible = false
 	hud_layer.add_child(telemetry)
@@ -914,8 +930,8 @@ func _enter_title() -> void:
 	_label("logo1", "SPEEDWAY", 64, Color(0.95, 0.15, 0.1), Vector2(0, 44), HORIZONTAL_ALIGNMENT_CENTER, 10)
 	_label("logo2", "THUNDER", 72, Color(1.0, 0.85, 0.1), Vector2(0, 100), HORIZONTAL_ALIGNMENT_CENTER, 12)
 	_label("", Game.SUBTITLE, 18, Color(0.5, 0.9, 1.0), Vector2(0, 176), HORIZONTAL_ALIGNMENT_CENTER, 5)
-	_label("start", "PRESS START", 30, Color.WHITE, Vector2(0, 300), HORIZONTAL_ALIGNMENT_CENTER, 7)
-	_label("", "ARROWS / WASD  STEER + GAS + BRAKE     C  CAMERA     ESC  PAUSE", 11, Color(0.85, 0.85, 0.85), Vector2(0, 420), HORIZONTAL_ALIGNMENT_CENTER, 3)
+	_label("start", _press("START"), 30, Color.WHITE, Vector2(0, 300), HORIZONTAL_ALIGNMENT_CENTER, 7)
+	_label("", "TILT OR DRAG TO STEER    GREEN GAS    RED BRAKE" if _touchy() else "ARROWS / WASD  STEER + GAS + BRAKE     C  CAMERA     ESC  PAUSE", 11, Color(0.85, 0.85, 0.85), Vector2(0, 420), HORIZONTAL_ALIGNMENT_CENTER, 3)
 	_label("", "FREE PLAY", 16, Color(0.3, 1.0, 0.4), Vector2(0, 446), HORIZONTAL_ALIGNMENT_CENTER, 4)
 	_label("gfx", _graphics_text(), 12, Color(0.5, 0.9, 1.0), Vector2(0, 400), HORIZONTAL_ALIGNMENT_CENTER, 3)
 	_label("", "(C)1999  THUNDER ARCADE WORKS", 11, Color(0.8, 0.8, 0.8), Vector2(0, 462), HORIZONTAL_ALIGNMENT_CENTER, 3)
@@ -935,26 +951,121 @@ func _quick_race() -> void:
 	_enter_countdown()
 
 
+func _start_mode(id: String) -> void:
+	match id:
+		"quick":
+			_quick_race()
+		"arcade", "race":
+			mode = id
+			_enter_track_select()
+		"season":
+			mode = "season"
+			if Game.season.is_empty():
+				_enter_car_select()
+			else:
+				_enter_season_hub()
+		"career":
+			mode = "career"
+			if Game.career.is_empty():
+				_enter_car_select()
+			else:
+				_enter_career_hub()
+		"2p":
+			mode = "2p"
+			choosing_p2 = false
+			_enter_track_select()
+		"challenges":
+			_enter_challenges()
+		"paint":
+			_enter_paint_shop()
+		"online":
+			_enter_online()
+		"editor":
+			_enter_track_editor()
+		"options":
+			_enter_options()
+
+
+## The garage: your car in the showroom on the left, the modes as big tiles on
+## the right (Quick Race across the top). Tap a tile, or move with the arrows.
+var _tiles: Array = [] # [Rect2 in frame units, index]
+
+
 func _enter_mode_select() -> void:
 	_set_state(State.MODE_SELECT)
 	synth.beep(1320.0, 0.08)
 	_clear_screen()
-	_label("", "SELECT MODE", 34, Color(1.0, 0.85, 0.1), Vector2(0, 30), HORIZONTAL_ALIGNMENT_CENTER, 8)
-	var step := 27
-	_panel(Rect2(60, 80, 520, MODES.size() * step + 12), Color(0, 0, 0, 0.6))
-	for i in MODES.size():
-		_label("mode%d" % i, MODES[i][0], 20, Color.WHITE, Vector2(0, 84 + i * step), HORIZONTAL_ALIGNMENT_CENTER, 6)
-	_label("mdesc", "", 12, Color(0.7, 0.85, 1.0), Vector2(0, 400), HORIZONTAL_ALIGNMENT_CENTER, 3)
-	_label("", "UP / DOWN   CHOOSE        START  SELECT", 14, Color(0.85, 0.85, 0.85), Vector2(0, 424))
+	var modes: Array = _modes()
+	mode_idx = clamp(mode_idx, 0, modes.size() - 1)
+	# Your car on the turntable.
+	if preview_car == null or not is_instance_valid(preview_car):
+		preview_car = Car.new()
+		add_child(preview_car)
+		preview_car.setup(Game.teams[Game.selected_team] if Game.selected_team < Game.teams.size() else Game.teams[0], null)
+		preview_car.position = showtime.showroom_spot()
+		showtime.present_car(preview_car)
+	var t: Dictionary = Game.teams[clamp(Game.selected_team, 0, Game.teams.size() - 1)]
+	_label("", "SPEEDWAY THUNDER", 26, Color(1.0, 0.85, 0.1), Vector2(18, 14), HORIZONTAL_ALIGNMENT_LEFT, 7)
+	_label("", "#%s  %s" % [t.num, t.driver], 16, Color.WHITE, Vector2(18, 348), HORIZONTAL_ALIGNMENT_LEFT, 5)
+	_label("", "%s  -  %s" % [t.sponsor, CarBody.MAKES[CarBody.make_of(t)].name], 12, Color(1.0, 0.85, 0.3), Vector2(18, 370), HORIZONTAL_ALIGNMENT_LEFT, 4)
+	_tiles.clear()
+	var x0 := 322.0
+	var y := 18.0
+	var w := 300.0
+	for i in modes.size():
+		var r: Rect2
+		if i == 0:
+			r = Rect2(x0, y, w, 62)
+			y += 70.0
+		else:
+			var col := (i - 1) % 2
+			r = Rect2(x0 + col * (w * 0.5 + 3.0), y, w * 0.5 - 3.0, 50)
+			if col == 1 or i == modes.size() - 1:
+				y += 56.0
+		_tiles.append([r, i])
+		var bg := Panel.new()
+		bg.position = r.position
+		bg.size = r.size
+		bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		screen.add_child(bg)
+		menu_labels["tile%d" % i] = bg
+		var l := Game.make_label(modes[i][0], 20 if i == 0 else 14, Color.WHITE, 5)
+		l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		l.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+		l.position = r.position
+		l.size = r.size
+		screen.add_child(l)
+		menu_labels["mode%d" % i] = l
+	_label("mdesc", "", 12, Color(0.75, 0.88, 1.0), Vector2(0, 446), HORIZONTAL_ALIGNMENT_CENTER, 3)
 	_refresh_mode_select()
 
 
 func _refresh_mode_select() -> void:
-	for i in MODES.size():
-		var l: Label = menu_labels["mode%d" % i]
-		l.label_settings.font_color = Color(1.0, 0.85, 0.1) if i == mode_idx else Color(0.6, 0.6, 0.65)
-		l.text = ("> %s <" % MODES[i][0]) if i == mode_idx else MODES[i][0]
-	menu_labels.mdesc.text = MODES[mode_idx][1]
+	var modes: Array = _modes()
+	for i in modes.size():
+		var sel := i == mode_idx
+		var sb := StyleBoxFlat.new()
+		sb.bg_color = Color(0.85, 0.12, 0.1, 0.92) if i == 0 else Color(0.05, 0.07, 0.12, 0.82)
+		if sel:
+			sb.bg_color = sb.bg_color.lightened(0.15)
+		sb.set_corner_radius_all(8)
+		sb.set_border_width_all(3 if sel else 1)
+		sb.border_color = Color(1.0, 0.85, 0.1) if sel else Color(1, 1, 1, 0.18)
+		(menu_labels["tile%d" % i] as Panel).add_theme_stylebox_override("panel", sb)
+		(menu_labels["mode%d" % i] as Label).label_settings.font_color = Color(1.0, 0.9, 0.3) if sel else Color.WHITE
+	menu_labels.mdesc.text = modes[mode_idx][1]
+
+
+## A tap on the garage screen (frame units): pick that tile and go.
+func _mode_tap(p: Vector2) -> bool:
+	for t in _tiles:
+		if (t[0] as Rect2).grow(3.0).has_point(p):
+			mode_idx = t[1]
+			_refresh_mode_select()
+			synth.beep(1320.0, 0.06)
+			_start_mode(String(_modes()[mode_idx][2]))
+			return true
+	return false
 
 
 func _enter_track_select() -> void:
@@ -970,7 +1081,7 @@ func _enter_track_select() -> void:
 	_label("kind", "", 16, Color(0.5, 0.9, 1.0), Vector2(0, 322))
 	_label("info", "", 16, Color.WHITE, Vector2(0, 350))
 	_label("rec", "", 14, Color(1, 0.85, 0.3), Vector2(0, 380))
-	_label("", "<   LEFT / RIGHT   >        START  SELECT", 14, Color(0.85, 0.85, 0.85), Vector2(0, 414))
+	_label("", "SWIPE OR TAP < >  TO BROWSE        GO  TO SELECT" if _touchy() else "<   LEFT / RIGHT   >        START  SELECT", 14, Color(0.85, 0.85, 0.85), Vector2(0, 414))
 	_refresh_track_select()
 
 
@@ -997,7 +1108,7 @@ func _enter_car_select() -> void:
 	_label("driver", "", 22, Color.WHITE, Vector2(150, 308), HORIZONTAL_ALIGNMENT_LEFT, 6)
 	_label("sponsor", "", 16, Color(1, 0.85, 0.3), Vector2(150, 336), HORIZONTAL_ALIGNMENT_LEFT, 5)
 	_label("stats", "", 14, Color(0.5, 0.9, 1.0), Vector2(60, 364), HORIZONTAL_ALIGNMENT_LEFT, 4)
-	_label("", "<   LEFT / RIGHT   >        START  RACE!", 14, Color(0.85, 0.85, 0.85), Vector2(0, 430))
+	_label("", "SWIPE OR TAP < >  FOR ANOTHER CAR        GO  TO RACE" if _touchy() else "<   LEFT / RIGHT   >        START  RACE!", 14, Color(0.85, 0.85, 0.85), Vector2(0, 430))
 	_refresh_car_select()
 
 
@@ -1026,6 +1137,8 @@ func _enter_countdown() -> void:
 	showtime.reset()
 	showtime.music.stop()
 	_set_state(State.COUNTDOWN)
+	if tutorial and Tutorial.wanted(mode):
+		tutorial.begin()
 	synth.beep(1760.0, 0.12)
 	if preview_car:
 		preview_car.queue_free()
@@ -1071,7 +1184,7 @@ func _enter_countdown() -> void:
 		intro = challenge.name
 		hud.show_timer = false
 	_msg(intro, 2.0, Color(1, 0.9, 0.2))
-	_sub((track.cfg.name if session != "practice" else "ESC THEN Q TO END PRACTICE") if mode != "challenge" else challenge.desc, 3.0)
+	_sub((track.cfg.name if session != "practice" else ("PAUSE THEN QUIT TO END PRACTICE" if _touchy() else "ESC THEN Q TO END PRACTICE")) if mode != "challenge" else challenge.desc, 3.0)
 	countdown_step = 0
 	new_records.clear()
 	game_over_reason = ""
@@ -1138,7 +1251,7 @@ func _enter_results() -> void:
 	for r in new_records:
 		_label("", r, 18, Color(0.3, 1.0, 0.4), Vector2(0, y2), HORIZONTAL_ALIGNMENT_CENTER, 5)
 		y2 += 22
-	_label("start", "PRESS START", 20, Color.WHITE, Vector2(0, 440), HORIZONTAL_ALIGNMENT_CENTER, 5)
+	_label("start", _press("CONTINUE"), 20, Color.WHITE, Vector2(0, 440), HORIZONTAL_ALIGNMENT_CENTER, 5)
 	if race.rec_times.size() > 20:
 		_label("", "R  REPLAY   H  HIGHLIGHTS", 12, Color(0.6, 0.9, 1.0), Vector2(420, 446), HORIZONTAL_ALIGNMENT_LEFT, 3)
 
@@ -1182,6 +1295,8 @@ func _on_lap(car: Node3D, laps_done: int, lap_time: float) -> void:
 func _on_finished(car: Node3D, place: int) -> void:
 	if (car != race.player and car != race.player2) or state != State.RACE:
 		return
+	if tutorial:
+		tutorial.finish()
 	if session == "qualify":
 		_finish_qualifying(car.best_lap)
 		return
@@ -1274,43 +1389,14 @@ func _unhandled_input(event: InputEvent) -> void:
 			if event.is_action_pressed("start"):
 				_enter_mode_select()
 		State.MODE_SELECT:
-			if event.is_action_pressed("menu_up") or event.is_action_pressed("menu_down"):
-				mode_idx = posmod(mode_idx + (1 if event.is_action_pressed("menu_down") else -1), MODES.size())
+			var n_modes: int = _modes().size()
+			if event.is_action_pressed("menu_up") or event.is_action_pressed("menu_down") or event.is_action_pressed("steer_left") or event.is_action_pressed("steer_right"):
+				var step := 1 if (event.is_action_pressed("menu_down") or event.is_action_pressed("steer_right")) else -1
+				mode_idx = posmod(mode_idx + step, n_modes)
 				synth.beep(880.0, 0.05)
 				_refresh_mode_select()
 			elif event.is_action_pressed("start"):
-				match mode_idx:
-					0:
-						_quick_race()
-					1, 2:
-						mode = ["arcade", "race"][mode_idx - 1]
-						_enter_track_select()
-					3:
-						mode = "season"
-						if Game.season.is_empty():
-							_enter_car_select()
-						else:
-							_enter_season_hub()
-					4:
-						mode = "career"
-						if Game.career.is_empty():
-							_enter_car_select()
-						else:
-							_enter_career_hub()
-					5:
-						mode = "2p"
-						choosing_p2 = false
-						_enter_track_select()
-					6:
-						_enter_challenges()
-					7:
-						_enter_paint_shop()
-					8:
-						_enter_online()
-					9:
-						_enter_track_editor()
-					10:
-						_enter_options()
+				_start_mode(String(_modes()[mode_idx][2]))
 			elif event.is_action_pressed("back"):
 				_enter_title()
 		State.TRACK_SELECT:
@@ -1633,10 +1719,84 @@ func _player_input() -> void:
 		p.brake = max(p.brake, wr.brake)
 		p.steer_in = wr.steer
 		wheel.update(p, get_physics_process_delta_time())
+	# AUTO GAS: the car holds the speed it can take through the corner ahead (the
+	# way the AI does, with a little margin); you steer. The brake pedal still
+	# brakes, and the gas pedal can push harder.
+	if int(Game.settings.get("auto_gas", 0)) == 1 and race and race.track:
+		var look: float = max(p.v, 0.0) * 0.8 + 10.0
+		var target: float = race.track.profile_at(p.s() + look) * 0.94 * sqrt(max(p.tyre_grip(), 0.3))
+		target = min(target, race.track.profile_at(p.s()) * 0.96 * sqrt(max(p.tyre_grip(), 0.3)))
+		var auto_thr: float = clamp((target - p.v) * 0.6 + 0.4, 0.0, 1.0)
+		var auto_brk: float = clamp((p.v - target) * 0.25, 0.0, 1.0)
+		if p.brake < 0.05:
+			p.throttle = max(p.throttle, auto_thr)
+			p.brake = auto_brk
+		else:
+			p.throttle = 0.0
 	if Input.is_action_just_pressed("shift_up"):
 		p.shift_request = 1
 	elif Input.is_action_just_pressed("shift_down"):
 		p.shift_request = -1
+
+
+# --- touch: menus are touched directly --------------------------------------
+
+func _touchy() -> bool:
+	return Game.touch_active or Game.touch_device()
+
+
+## "PRESS START" with keys and pads, "TAP TO START" / "TAP TO CONTINUE" on a phone.
+func _press(what: String) -> String:
+	if _touchy():
+		return "TAP TO " + what
+	return "PRESS START"
+
+var _drag_acc := 0.0
+
+
+## A tap at `pos` (screen) on a menu screen. Returns true if something took it.
+func ui_tap(pos: Vector2) -> bool:
+	var p: Vector2 = ui_root.get_global_transform_with_canvas().affine_inverse() * pos
+	if pit_menu and is_instance_valid(pit_menu):
+		return pit_menu.tap(p)
+	match state:
+		State.TITLE:
+			if showtime.intro_active:
+				showtime.skip_intro()
+			else:
+				_enter_mode_select()
+			return true
+		State.MODE_SELECT:
+			return _mode_tap(p)
+		State.MENU:
+			return menu != null and menu.tap(p)
+	return false
+
+
+## A tap that hit nothing: on screens that are waiting for you to carry on
+## (results, standings, replays), that's "continue".
+func ui_continue() -> void:
+	if state in [State.RESULTS, State.SESSION_RESULTS, State.STANDINGS, State.REPLAY]:
+		var ev := InputEventAction.new()
+		ev.action = "start"
+		ev.pressed = true
+		Input.parse_input_event(ev)
+		var up := InputEventAction.new()
+		up.action = "start"
+		up.pressed = false
+		Input.parse_input_event.call_deferred(up)
+
+
+## A finger dragging up or down by `dy` screen pixels: scrolls a long list.
+func ui_drag(dy: float, _pos: Vector2) -> void:
+	var m: Control = pit_menu if pit_menu and is_instance_valid(pit_menu) else (menu if state == State.MENU else null)
+	if m == null:
+		return
+	var sc: float = ui_root.get_global_transform_with_canvas().get_scale().y
+	_drag_acc += dy / max(sc, 0.01)
+	if abs(_drag_acc) >= 54.0:
+		m.drag(_drag_acc)
+		_drag_acc = 0.0
 
 
 ## Quick caution: the race waits while the player makes the pit call.
@@ -1784,6 +1944,12 @@ func _process(delta: float) -> void:
 		_enter_wheel_setup()
 	if showtime:
 		showtime.process(delta)
+		if tutorial and tutorial.active:
+			if state in [State.COUNTDOWN, State.RACE]:
+				tutorial.update(delta)
+			elif state in [State.TITLE, State.MODE_SELECT, State.MENU]:
+				tutorial.visible = false
+				tutorial.active = false
 	if ghost and ghost.active and race and race.player and state in [State.COUNTDOWN, State.RACE]:
 		ghost.update(track, race.player, race.time)
 	if race == null:
@@ -1923,8 +2089,8 @@ func _update_camera(delta: float) -> void:
 					tv_target = focus
 					tv_mode = 2
 					_tv_camera(delta, true)
-		State.CAR_SELECT, State.MENU:
-			if preview_car and (state == State.CAR_SELECT or menu_kind == "paint"):
+		State.CAR_SELECT, State.MENU, State.MODE_SELECT:
+			if preview_car and (state == State.CAR_SELECT or state == State.MODE_SELECT or menu_kind == "paint"):
 				# The turntable slows as the car comes round to a front three-quarter
 				# view (its best side), and speeds up through the rest.
 				var best := 0.6 + PI - 0.55
@@ -1937,7 +2103,8 @@ func _update_camera(delta: float) -> void:
 				cam.global_position = eye
 				var side := (p - eye).cross(Vector3.UP).normalized()
 				# In the paint shop, frame the car on the right, clear of the menu.
-				var shift := -side * 1.9 if state == State.MENU else Vector3.ZERO
+				# In the garage, on the left, clear of the tiles.
+				var shift := -side * 1.9 if state == State.MENU else (side * 2.3 if state == State.MODE_SELECT else Vector3.ZERO)
 				cam.look_at(p + Vector3(0, -0.9, 0) + shift, Vector3.UP)
 			else:
 				_tv_camera(delta)
@@ -2189,6 +2356,7 @@ func _enter_options() -> void:
 		{"id": "smooth", "label": "MOTION SMOOTHING", "values": ["OFF", "ON"], "index": 1 if Game.smoothing else 0, "hint": "SMOOTH MOTION ON 120/144 HZ SCREENS (ADDS UNDER 1 FRAME OF DELAY)"},
 		{"id": "blur", "label": "MOTION BLUR", "values": ["OFF", "LOW", "HIGH"], "index": Game.motion_blur, "hint": "DESKTOP MODERN LOOK ONLY"},
 		{"id": "wheel_setup", "label": "WHEEL SETUP", "hint": "STEERING WHEEL, PEDALS AND FORCE FEEDBACK"},
+		{"id": "auto_gas", "label": "GAS", "values": ["YOU", "AUTO"], "index": int(Game.settings.get("auto_gas", 0)), "hint": "AUTO: THE CAR TAKES EACH CORNER AT A SAFE SPEED, YOU STEER (ONE THUMB). BRAKE STILL WORKS"},
 		{"id": "tilt_sens", "label": "TILT STEERING", "values": ["GENTLE", "NORMAL", "QUICK", "VERY QUICK"], "index": int(Game.settings.get("tilt_sens", 1)), "hint": "PHONES: HOW FAR YOU TILT FOR FULL LOCK (18 / 12 / 9 / 6 DEGREES)"},
 		{"id": "radio", "label": "RADIO VOICE", "values": ["OFF", "ON"], "index": 1 if Game.radio_voice else 0, "hint": "SPOKEN SPOTTER, CREW CHIEF AND TV BOOTH CALLS"},
 		{"id": "commentary", "label": "COMMENTARY", "values": ["OFF", "ON"], "index": int(Game.settings.get("commentary", 1)), "hint": "THE TV BOOTH: PLAY-BY-PLAY AND ANALYST (SPOKEN WITH RADIO VOICE ON)"},
@@ -2268,6 +2436,9 @@ func _on_menu_changed(id: String, idx: int) -> void:
 				Game.save_settings()
 			elif id == "tilt_sens":
 				Game.settings["tilt_sens"] = idx
+				Game.save_settings()
+			elif id == "auto_gas":
+				Game.settings["auto_gas"] = idx
 				Game.save_settings()
 			elif id == "vsync":
 				Game.vsync = idx == 1
@@ -2383,7 +2554,7 @@ func _on_menu_cancelled() -> void:
 		"rnd", "sponsors":
 			_enter_career_hub()
 		"hub", "options":
-			_enter_title()
+			_enter_mode_select()
 		"challenges":
 			_enter_mode_select()
 		"paint":
@@ -2496,7 +2667,7 @@ func _enter_session_results() -> void:
 		_label("", "%s  %.3f MPH" % [Game.format_time(qual_rows[i][1]), mph] if i == 0 else "+%.3f" % (qual_rows[i][1] - pole), 14, col, Vector2(410, y + 2), HORIZONTAL_ALIGNMENT_LEFT, 3)
 		y += 24
 		shown += 1
-	_label("start", "PRESS START FOR THE RACE", 18, Color.WHITE, Vector2(0, 440), HORIZONTAL_ALIGNMENT_CENTER, 5)
+	_label("start", _press("CONTINUE") + " TO THE RACE", 18, Color.WHITE, Vector2(0, 440), HORIZONTAL_ALIGNMENT_CENTER, 5)
 
 
 # --- season -------------------------------------------------------------------------
@@ -2568,7 +2739,7 @@ func _enter_standings(final := false) -> void:
 			Game.career_season_end(my_pos, my_row[1] if my_row.size() else 0, my_row[2] if my_row.size() else 0)
 		else:
 			Game.clear_season()
-	_label("start", "PRESS START", 16, Color.WHITE, Vector2(0, 446), HORIZONTAL_ALIGNMENT_CENTER, 4)
+	_label("start", _press("CONTINUE"), 16, Color.WHITE, Vector2(0, 446), HORIZONTAL_ALIGNMENT_CENTER, 4)
 
 
 # --- paint shop ---------------------------------------------------------------------
@@ -2718,7 +2889,7 @@ func _enter_career_stats() -> void:
 		hist += "Y%d: %s  " % [h.year, Game.ordinal(h.pos)]
 	if hist != "":
 		_label("", hist, 12, Color(0.8, 0.85, 0.9), Vector2(0, 400), HORIZONTAL_ALIGNMENT_CENTER, 3)
-	_label("start", "PRESS START", 16, Color.WHITE, Vector2(0, 432), HORIZONTAL_ALIGNMENT_CENTER, 4)
+	_label("start", _press("CONTINUE"), 16, Color.WHITE, Vector2(0, 432), HORIZONTAL_ALIGNMENT_CENTER, 4)
 
 
 # --- replays ------------------------------------------------------------------------

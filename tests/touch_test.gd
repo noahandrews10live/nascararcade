@@ -1,6 +1,6 @@
 extends SceneTree
 ## Touch controls, with real touch events:
-##   - in the menus the on-screen A button starts things (title -> track select);
+##   - in the menus a tap on the screen moves on (title -> the garage);
 ##   - in a race the GAS pedal opens the throttle and BRAKE brakes;
 ##   - dragging a thumb on the left steers (right drag = right, left = left);
 ##   - a keyboard press hides the touch controls again.
@@ -63,14 +63,12 @@ func _run() -> void:
 	await _frames(3)
 	_check(t.active and t.visible, "the touch controls appear on the first touch")
 	var state0 = main.state
-	var a := _button("start")
-	_check(a.size.x > 0.0, "menus have an A button")
-	_touch(1, a.get_center(), true)
+	_touch(1, Vector2(320, 240), true)
 	await _frames(2)
-	_touch(1, a.get_center(), false)
+	_touch(1, Vector2(320, 240), false)
 	await _frames(20)
 	print("   state %s -> %s" % [state0, main.state])
-	_check(main.state != state0, "tapping A moves on from the title screen")
+	_check(main.state != state0, "tapping the title screen moves on")
 	# --- a race
 	main._use_track(1)
 	main._enter_track_select()

@@ -101,8 +101,12 @@ func _layout() -> void:
 		var upright := sr.size.y > sr.size.x
 		var gas_c := Vector2(R - 20.0 * k - pr, T + sr.size.y * (0.7 if upright else 0.58))
 		var brake_c := gas_c + Vector2(-pr * 2.0 - 22.0 * k, pr * 0.5)
-		_buttons.append([Rect2(gas_c - Vector2.ONE * pr, Vector2.ONE * pr * 2.0), "GAS", "accelerate", "gas"])
-		_buttons.append([Rect2(brake_c - Vector2.ONE * pr, Vector2.ONE * pr * 2.0), "BRAKE", "brake", "brake"])
+		if _one_thumb():
+			# AUTO GAS: no gas pedal; the brake sits where the gas was.
+			_buttons.append([Rect2(gas_c - Vector2.ONE * pr, Vector2.ONE * pr * 2.0), "BRAKE", "brake", "brake"])
+		else:
+			_buttons.append([Rect2(gas_c - Vector2.ONE * pr, Vector2.ONE * pr * 2.0), "GAS", "accelerate", "gas"])
+			_buttons.append([Rect2(brake_c - Vector2.ONE * pr, Vector2.ONE * pr * 2.0), "BRAKE", "brake", "brake"])
 		# Small buttons beside the course map (which sits under the position
 		# readout, top right).
 		var bw := 48.0 * k
@@ -128,21 +132,35 @@ func _layout() -> void:
 		_buttons.append([Rect2(c.x - w - 10.0 * k, y2, w, h * 0.8), "TILT STEER" if tilt else "DRAG STEER", "_toggle_tilt", "tap"])
 		if tilt and _tilt_ok:
 			_buttons.append([Rect2(c.x + 10.0 * k, y2, w, h * 0.8), "CENTRE", "_recenter", "tap"])
-	else:
-		# D-pad bottom left, A/B bottom right.
-		var d := 48.0 * k
-		var c := Vector2(L + 8.0 * k + d * 1.5, B - 8.0 * k - d * 1.5)
-		_buttons.append([Rect2(c + Vector2(-0.5, -1.5) * d, Vector2(d, d)), "^", "menu_up", "tap"])
-		_buttons.append([Rect2(c + Vector2(-0.5, 0.5) * d, Vector2(d, d)), "v", "menu_down", "tap"])
-		_buttons.append([Rect2(c + Vector2(-1.5, -0.5) * d, Vector2(d, d)), "<", "steer_left", "tap"])
-		_buttons.append([Rect2(c + Vector2(0.5, -0.5) * d, Vector2(d, d)), ">", "steer_right", "tap"])
-		reserve.append(Rect2(c - Vector2.ONE * d * 1.5, Vector2.ONE * d * 3.0).grow(6.0))
-		var a := Rect2(R - 16.0 * k - 72.0 * k, B - 36.0 * k - 72.0 * k, 72.0 * k, 72.0 * k)
-		var bb := Rect2(a.position.x - 8.0 * k - 60.0 * k, B - 16.0 * k - 60.0 * k, 60.0 * k, 60.0 * k)
-		_buttons.append([a, "A", "start", "tap"])
-		_buttons.append([bb, "B", "back", "tap"])
-		reserve.append(a.merge(bb).grow(6.0))
+	elif main:
+		# Menus are touched directly (cards, tiles); a BACK button top left, and
+		# on the course and car pickers < > to browse and GO to choose.
+		var bw := 84.0 * k
+		var bh := 38.0 * k
+		if main.state != main.State.TITLE and not (main.state == main.State.MODE_SELECT):
+			var back := Rect2(L + 8.0, T + 8.0, bw, bh)
+			_buttons.append([back, "< BACK", "back", "tap"])
+			reserve.append(back.grow(4.0))
+		if main.state in [main.State.TRACK_SELECT, main.State.CAR_SELECT]:
+			var aw := 52.0 * k
+			var ah := 88.0 * k
+			var mid: float = T + sr.size.y * 0.42
+			var la := Rect2(L + 8.0, mid - ah * 0.5, aw, ah)
+			var ra := Rect2(R - 8.0 - aw, mid - ah * 0.5, aw, ah)
+			var go := Rect2(R - 12.0 - 120.0 * k, B - 12.0 - 56.0 * k, 120.0 * k, 56.0 * k)
+			_buttons.append([la, "<", "steer_left", "tap"])
+			_buttons.append([ra, ">", "steer_right", "tap"])
+			_buttons.append([go, "GO", "start", "tap"])
+			reserve.append(la.grow(4.0))
+			reserve.append(ra.grow(4.0))
+			reserve.append(go.grow(4.0))
 	Game.touch_reserve = reserve if visible else []
+
+
+## AUTO GAS is on: one thumb (or none, with tilt) drives. Drag steering then
+## works anywhere on the screen, not just the left half.
+func _one_thumb() -> bool:
+	return int(Game.settings.get("auto_gas", 0)) == 1
 
 
 ## Steering (-1..1) for the phone turned `a` degrees from straight: a small dead
@@ -196,12 +214,30 @@ func _touch(event: InputEvent) -> void:
 					if b[3] == "tap":
 						_tap(b[2])
 					return
-			if _racing() and p.x < get_viewport_rect().size.x * 0.5:
-				_fingers[idx] = {"zone": "steer", "start": p, "pos": p}
+			if _racing():
+				if p.x < get_viewport_rect().size.x * 0.5 or _one_thumb():
+					_fingers[idx] = {"zone": "steer", "start": p, "pos": p}
+			else:
+				# Menus: a tap, a swipe or a drag (scrolling a list); decided on release.
+				_fingers[idx] = {"zone": "ui", "start": p, "pos": p, "last": p, "t": Time.get_ticks_msec()}
 		else:
+			var f: Dictionary = _fingers.get(idx, {})
 			_fingers.erase(idx)
+			if f.get("zone", "") == "ui" and main:
+				var mv: Vector2 = p - f.start
+				var quick: bool = Time.get_ticks_msec() - int(f.t) < 450
+				if mv.length() < 14.0 * max(_k, 0.6):
+					if not main.ui_tap(p):
+						main.ui_continue()
+				elif quick and abs(mv.x) > abs(mv.y) * 1.3 and abs(mv.x) > 40.0:
+					# Swipe: the content follows the finger, so a swipe left shows the next one.
+					_tap("steer_right" if mv.x < 0.0 else "steer_left")
 	elif _fingers.has(idx):
-		_fingers[idx].pos = p
+		var f2: Dictionary = _fingers[idx]
+		if f2.zone == "ui" and main:
+			main.ui_drag(p.y - f2.last.y, p)
+			f2.last = p
+		f2.pos = p
 
 
 func _tap(action) -> void:
