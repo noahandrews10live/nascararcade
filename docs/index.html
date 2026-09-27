@@ -251,7 +251,7 @@
 <script src="index.js"></script>
 <script>
   (function () {
-    const config = {"args":[],"canvasResizePolicy":2,"emscriptenPoolSize":8,"ensureCrossOriginIsolationHeaders":false,"executable":"index","experimentalVK":false,"fileSizes":{"index.pck":428272,"index.wasm":39513091},"focusCanvas":true,"gdextensionLibs":[],"godotPoolSize":4,"serviceWorker":"index.service.worker.js"};
+    const config = {"args":[],"canvasResizePolicy":2,"emscriptenPoolSize":8,"ensureCrossOriginIsolationHeaders":false,"executable":"index","experimentalVK":false,"fileSizes":{"index.pck":432816,"index.wasm":39513091},"focusCanvas":true,"gdextensionLibs":[],"godotPoolSize":4,"serviceWorker":"index.service.worker.js"};
     config.canvasResizePolicy = 2; // the canvas follows the window: full screen at any size
     const $ = function (id) { return document.getElementById(id); };
     const overlay = $("overlay"), startBtn = $("start"), meter = $("meter"), bar = $("bar");
@@ -324,6 +324,28 @@
         requestAnimationFrame(tick);
       }
       requestAnimationFrame(tick);
+    })();
+
+    // --- Safe area: the screen edges a notch, rounded corners or the home bar
+    // cover (CSS safe-area insets), as fractions of the game's canvas: left, top,
+    // right, bottom. The game keeps its HUD, menus and buttons inside the rest.
+    window.stSafe = [0, 0, 0, 0];
+    (function () {
+      const probe = document.createElement("div");
+      probe.style.cssText = "position:fixed;left:0;top:0;width:0;height:0;visibility:hidden;pointer-events:none;" +
+        "padding:env(safe-area-inset-top,0px) env(safe-area-inset-right,0px) env(safe-area-inset-bottom,0px) env(safe-area-inset-left,0px)";
+      document.body.appendChild(probe);
+      function readSafe() {
+        const cs = getComputedStyle(probe);
+        const w = canvas.clientWidth || window.innerWidth, h = canvas.clientHeight || window.innerHeight;
+        if (!w || !h) return;
+        window.stSafe = [parseFloat(cs.paddingLeft) / w || 0, parseFloat(cs.paddingTop) / h || 0,
+          parseFloat(cs.paddingRight) / w || 0, parseFloat(cs.paddingBottom) / h || 0];
+      }
+      window.addEventListener("resize", readSafe);
+      window.addEventListener("orientationchange", function () { setTimeout(readSafe, 250); });
+      readSafe();
+      setInterval(readSafe, 1000);
     })();
 
     // --- Portrait: phones race sideways only. The game reads window.stPortrait
