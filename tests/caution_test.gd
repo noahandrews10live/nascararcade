@@ -111,6 +111,12 @@ func _run() -> void:
 	main.pit_menu.set_value("plan", idx2)
 	main._pit_hint()
 	var rs_before: float = p.tyre_wear4[1]
+	# Each car's stop time as the stops are called (making the stop repairs the
+	# damage, which changes what _stop_time would say afterwards).
+	var stop_t := {}
+	for c in race.cars:
+		for o in ["4", "2", "F", "W"]:
+			stop_t[[c, o]] = ctl._stop_time(c, o)
 	await _press("start")
 	await _frames(3)
 	_check(main.pit_menu == null and not main.paused, "confirming the call resumes the race")
@@ -166,8 +172,8 @@ func _run() -> void:
 	for i in range(1, pitters.size()):
 		var a = pitters[i - 1]
 		var b = pitters[i]
-		var ta: float = entry_rank.get(a, 0) * 0.45 + ctl._stop_time(a, calls[a])
-		var tb: float = entry_rank.get(b, 0) * 0.45 + ctl._stop_time(b, calls[b])
+		var ta: float = entry_rank.get(a, 0) * 0.45 + float(stop_t.get([a, calls[a]], 0.0))
+		var tb: float = entry_rank.get(b, 0) * 0.45 + float(stop_t.get([b, calls[b]], 0.0))
 		if tb + 0.01 < ta:
 			exit_ok = false
 	_check(exit_ok, "cars that pitted come out in the order they get off pit road")

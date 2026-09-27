@@ -111,6 +111,17 @@ func _run() -> void:
 	await process_frame
 	var fc: Array = main.race_day._flag_colours()
 	_check((fc[0] as Color).is_equal_approx(Color(1.0, 0.85, 0.05)), "the flagman shows the yellow under caution")
+	# Quick cautions make their stops off-screen, so once it's green again send
+	# a car in for a green-flag stop.
+	var gw := 0
+	while race.control.flag == race.control.Flag.YELLOW and gw < 60 * 60:
+		await physics_frame
+		gw += 1
+	for c in race.order:
+		if not c.is_player and not c.out and c.pit_state == 0:
+			c.want_pit = true
+			c.pit_plan = "4"
+			break
 	var saw_crew := false
 	for i in 60 * 120:
 		await physics_frame
