@@ -24,6 +24,10 @@ func _initialize() -> void:
 	_run.call_deferred()
 
 
+func _g() -> Node:
+	return root.get_node("Game")
+
+
 func _check(ok: bool, what: String) -> void:
 	print(("  ok   " if ok else "  FAIL ") + what)
 	if not ok:
@@ -91,7 +95,7 @@ func _in(r: Rect2, box: Rect2, tol := 3.0) -> bool:
 
 func _screen(name: String) -> void:
 	await _frames(8)
-	var sr: Rect2 = Game.safe_rect(root)
+	var sr: Rect2 = _g().safe_rect(root)
 	var texts := []
 	_labels(main.ui_root, texts)
 	if main.pause_layer.visible:
@@ -134,7 +138,7 @@ func _run() -> void:
 	if touch_on:
 		main.touch.active = true
 		main.touch.visible = true
-	print("%s: window %s, canvas %s, safe %s, frame scale %.2f, touch scale %.2f" % [device, str(root.size), str(root.get_visible_rect().size), str(Game.safe_rect(root)), main.ui_root.scale.x, Game.touch_scale()])
+	print("%s: window %s, canvas %s, safe %s, frame scale %.2f, touch scale %.2f" % [device, str(root.size), str(root.get_visible_rect().size), str(_g().safe_rect(root)), main.ui_root.scale.x, _g().touch_scale()])
 	var game := root.get_node("Game")
 	game.settings.weather = 0
 	game.settings.cautions = 1
