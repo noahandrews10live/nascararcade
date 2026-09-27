@@ -34,11 +34,11 @@ const RIM := [[0.236, -0.149], [0.229, -0.142], [0.222, -0.12], [0.221, 0.02], [
 
 # The three bodies, as Cup's makes each put their own nose, roof and tail on the
 # same chassis (unbranded, styled after a fastback pony car, a long-hood V8
-# coupe and a Japanese sports coupe). Each changes the study's tables above.
+# coupe and a Japanese grand-touring coupe). Each changes the study's tables above.
 const MAKES := [
 	{"name": "FASTBACK", "yt": {3: 1.0, 8: 0.64, 9: 0.52, 10: 0.40}, "yl": {}, "flare": 0.035},
 	{"name": "LONG HOOD", "yt": {4: 1.23, 5: 1.23, 6: 0.82, 7: 0.74, 8: 0.58, 9: 0.43, 10: 0.31}, "yl": {7: 0.79, 8: 0.59, 9: 0.44, 10: 0.31}, "flare": 0.04},
-	{"name": "SPORT COUPE", "yt": {1: 0.93, 3: 0.96, 4: 1.27, 9: 0.43, 10: 0.30}, "yl": {9: 0.44, 10: 0.30}, "flare": 0.06},
+	{"name": "SPORT COUPE", "yt": {1: 0.92, 3: 0.97, 4: 1.23, 5: 1.23, 6: 0.83, 7: 0.74, 8: 0.58, 9: 0.43, 10: 0.30}, "yl": {7: 0.79, 8: 0.59, 9: 0.44, 10: 0.30}, "flare": 0.065},
 ]
 
 # Shared by every car (they don't depend on the team): built once.
@@ -571,10 +571,14 @@ static func _build_make(mk: int) -> Dictionary:
 			for s in [1.0, -1.0]:
 				for k in 3:
 					_bx(st, Vector3(0.006, 0.16 - k * 0.03, 0.035), _g(0.86 - k * 0.07, 0.55, s * (sec(0.86 - k * 0.07).hw_m + 0.003)))
-		2: # SPORT COUPE: big corner intakes, a groove down the double-bubble roof.
+		2: # SPORT COUPE: an hourglass mesh grille filling the nose, deep scoops
+			# behind the doors, swept corner intakes.
+			for g in [[2.2, 0.56, 0.1], [2.29, 0.44, 0.08], [2.37, 0.58, 0.08], [2.44, 0.7, 0.06]]:
+				_on_nose(st, g[0], 0.0, g[2], g[1])
 			for s in [1.0, -1.0]:
-				_bx(st, Vector3(0.3, 0.17, 0.02), _g(2.36, 0.32, s * 0.6), Vector3(-0.3, s * 0.4, 0))
-			_bx(st, Vector3(0.03, 0.006, 0.9), _g(-0.35, float(sec(-0.35).yt) + 0.004, 0))
+				_bx(st, Vector3(0.22, 0.15, 0.02), _g(2.38, 0.31, s * 0.62), Vector3(-0.3, s * 0.45, 0))
+				_bx(st, Vector3(0.006, 0.26, 0.2), _g(-0.72, 0.46, s * (sec(-0.72).hw_m + 0.004)), Vector3(0.25, 0, 0))
+				_bx(st, Vector3(0.006, 0.06, 0.55), _g(-0.45, 0.33, s * (sec(-0.45).hw_m + 0.004)))
 	out.trim = st.commit()
 	# Headlights.
 	st = SurfaceTool.new()
@@ -585,8 +589,10 @@ static func _build_make(mk: int) -> Dictionary:
 				_bx(st, Vector3(0.32, 0.012, 0.16), _g(2.31, 0.565, s * 0.6), Vector3(-0.72, 0, 0))
 			1:
 				_bx(st, Vector3(0.44, 0.012, 0.07), _g(2.24, float(sec(2.24).yt) + 0.004, s * 0.62), Vector3(-0.6, s * 0.25, 0))
-			2:
-				_bx(st, Vector3(0.36, 0.012, 0.09), _g(2.3, float(sec(2.3).yt) + 0.004, s * 0.6), Vector3(-0.7, s * 0.15, 0))
+			2: # slim swept headlight, the arrow running light beneath it
+				_bx(st, Vector3(0.38, 0.012, 0.07), _g(2.26, float(sec(2.26).yt) + 0.004, s * 0.62), Vector3(-0.62, s * 0.3, 0))
+				_on_nose(st, 2.36, s * 0.47, 0.14, 0.02, s * 0.5)
+				_on_nose(st, 2.42, s * 0.52, 0.02, 0.1)
 			_:
 				_bx(st, Vector3(0.36, 0.012, 0.22), _g(2.31, 0.565, s * 0.56), Vector3(-0.72, 0, 0))
 	out.head = st.commit()
@@ -602,8 +608,11 @@ static func _build_make(mk: int) -> Dictionary:
 			for s in [1.0, -1.0]:
 				for zz in [0.36, 0.62]:
 					_bx(st, Vector3(0.2, 0.07, 0.02), _g(-2.445, 0.64, s * zz), Vector3(0, 0, s * 0.15))
-		2: # one slim bar right across
-			_bx(st, Vector3(1.6, 0.035, 0.02), _g(-2.445, 0.66, 0))
+		2: # thin L-shaped lamps
+			for s in [1.0, -1.0]:
+				_bx(st, Vector3(0.3, 0.025, 0.02), _g(-2.445, 0.68, s * 0.62))
+				_bx(st, Vector3(0.025, 0.16, 0.02), _g(-2.445, 0.6, s * 0.76))
+				_bx(st, Vector3(0.2, 0.02, 0.02), _g(-2.445, 0.53, s * 0.68))
 		_:
 			_bx(st, Vector3(1.5, 0.07, 0.02), _g(-2.445, 0.5, 0))
 	out.tail = st.commit()
@@ -618,6 +627,14 @@ static func _build_make(mk: int) -> Dictionary:
 		_pipe(st, _g(-2.47, 0.2, z), Vector3(PI * 0.5, 0, 0), 0.04)
 	out.pipes = st.commit()
 	return out
+
+
+## A flat panel lying on the sloping top of the nose at station x (length along
+## the car, width across it, turned by `yaw` on the surface).
+static func _on_nose(st: SurfaceTool, x: float, z: float, length: float, width: float, yaw := 0.0) -> void:
+	var y: float = float(sec(x).yt)
+	var slope: float = atan((float(sec(x + 0.03).yt) - float(sec(x - 0.03).yt)) / 0.06)
+	_bx(st, Vector3(width, 0.012, length), _g(x, y + 0.004, z), Vector3(slope, yaw, 0))
 
 
 static func _pipe(st: SurfaceTool, p: Vector3, rot: Vector3, r: float) -> void:

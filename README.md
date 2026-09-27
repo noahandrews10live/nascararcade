@@ -28,9 +28,10 @@ audio. The project has no imported assets.
   - three bodies on that chassis, as Cup's makes each run their own (unbranded):
     **FASTBACK** (sloping fastback roof, louvred back glass, three-bar tail lamps,
     shark nose), **LONG HOOD** (long low hood, thin angular headlights, gills behind
-    the front wheels, split tail lamps, quad centre exhausts) and **SPORT COUPE**
-    (double-bubble roof, swollen haunches, low pointed nose, a slim full-width tail
-    light, big corner intakes). Same speed; teams are spread across the three and
+    the front wheels, split tail lamps, quad centre exhausts) and **SPORT COUPE** (a
+    widebody grand-touring coupe: long low hood, a big hourglass mesh grille, slim
+    swept headlights with arrow running lights, deep scoops behind the doors, the
+    widest haunches, thin L-shaped tail lamps). Same speed; teams are spread across the three and
     you pick yours in the Paint Shop (BODY);
   - race-track asphalt generated stone by stone (grey aggregate in dark binder, sealed
     cracks, a bump map so the stones catch the light) at a real asphalt brightness,

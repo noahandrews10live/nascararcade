@@ -40,7 +40,8 @@ func _run() -> void:
 	world.add_child(floor)
 	var car := Node3D.new()
 	world.add_child(car)
-	var team := {"c1": Color(0.07, 0.07, 0.08), "c2": Color(0.07, 0.07, 0.08), "cn": Color(0.07, 0.07, 0.08), "num": "", "sponsor": "", "make": int(OS.get_environment("MAKE")) if OS.get_environment("MAKE") != "" else 0}
+	var paint := Color(OS.get_environment("PAINT")) if OS.get_environment("PAINT") != "" else Color(0.07, 0.07, 0.08)
+	var team := {"c1": paint, "c2": paint, "cn": paint, "num": "", "sponsor": "", "make": int(OS.get_environment("MAKE")) if OS.get_environment("MAKE") != "" else 0}
 	var CB = load("res://scripts/car_body.gd")
 	var info = CB.build(car, team, car)
 	if OS.get_environment("DENT") == "1":
