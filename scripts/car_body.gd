@@ -146,11 +146,11 @@ static func _stations(step: float, arch_step: float) -> PackedFloat32Array:
 
 ## The lofted body at one level of detail. Returns the vertex data and, per
 ## surface (paint, carbon, glass, net), the triangles.
-static func _loft(xs: PackedFloat32Array, seg: int, c1: Color, c2: Color) -> Dictionary:
+static func _loft(xs: PackedFloat32Array, seg: int) -> Dictionary:
 	var half := (NC - 1) * seg + 1
 	var ring := 2 * (half - 1)
 	var pos := PackedVector3Array()
-	var cols := PackedColorArray()
+	var stripe := PackedByteArray() # 1 where the livery's second colour goes
 	var uvs := PackedVector2Array()
 	var code := PackedByteArray()
 	var ns := xs.size()
@@ -183,12 +183,8 @@ static func _loft(xs: PackedFloat32Array, seg: int, c1: Color, c2: Color) -> Dic
 				core = ci >= 10.25 and x > -1.75 and x < -0.79 and gh > 0.45
 			code.append((3 if open else 2) if (r > 0 and core) else (1 if r > 0 else (4 if ci <= 3.3 else 0)))
 			# Livery: a stripe along the lower doors, and one down the hood and deck.
-			var col := c1
-			if ci >= 4.0 and ci <= 4.75 and x > -2.3 and x < 2.3:
-				col = c2
-			elif ci >= 11.4 and gh < 0.3 and (x > 1.0 or x < -1.9):
-				col = c2
-			cols.append(col)
+			var two := (ci >= 4.0 and ci <= 4.75 and x > -2.3 and x < 2.3) or (ci >= 11.4 and gh < 0.3 and (x > 1.0 or x < -1.9))
+			stripe.append(1 if two else 0)
 	var tris := [PackedInt32Array(), PackedInt32Array(), PackedInt32Array(), PackedInt32Array()] # paint, carbon, glass, net
 	for i in ns - 1:
 		for k in ring:
@@ -231,12 +227,12 @@ static func _loft(xs: PackedFloat32Array, seg: int, c1: Color, c2: Color) -> Dic
 		for k in ring:
 			var v: int = end * ring + k
 			pos.append(pos[v])
-			cols.append(c1)
+			stripe.append(0)
 			uvs.append(Vector2.ZERO)
 			nrm.append(facing)
 			sy += pos[v].y
 		pos.append(Vector3(0, sy / ring, pos[end * ring].z))
-		cols.append(c1)
+		stripe.append(0)
 		uvs.append(Vector2.ZERO)
 		nrm.append(facing)
 		var ctr := base + ring
@@ -250,17 +246,21 @@ static func _loft(xs: PackedFloat32Array, seg: int, c1: Color, c2: Color) -> Dic
 				tris[0].append_array(PackedInt32Array([ctr, base + (k + 1) % ring, base + k]))
 	for n in nrm.size():
 		nrm[n] = nrm[n].normalized() if nrm[n].length_squared() > 0.0 else Vector3.UP
-	return {"pos": pos, "nrm": nrm, "col": cols, "uv": uvs, "tris": tris}
+	return {"pos": pos, "nrm": nrm, "stripe": stripe, "uv": uvs, "tris": tris}
 
 
-## One body mesh (four surfaces) from lofted data, with the vertices moved to `pos`.
-static func _body_mesh(lod: Dictionary, pos: PackedVector3Array, mats: Array) -> ArrayMesh:
-	var am := ArrayMesh.new()
+## The body at one level of detail, split into its four surfaces (paint,
+## carbon, glass, net), each with just the vertices it uses. Built once; every
+## car shares it and only adds its colours (and its dents).
+static func _lod_data(level: int) -> Dictionary:
+	var key := "lod%d" % level
+	if _shared.has(key):
+		return _shared[key]
+	var lv: Array = [[0.08, 0.035, 6], [0.16, 0.09, 2]][level]
+	var lod := _loft(_stations(lv[0], lv[1]), lv[2])
+	var surfaces := []
 	for si in 4:
 		var t: PackedInt32Array = lod.tris[si]
-		if t.is_empty():
-			continue
-		# Only the vertices this surface uses.
 		var remap := {}
 		var ids := PackedInt32Array()
 		var idx := PackedInt32Array()
@@ -273,20 +273,44 @@ static func _body_mesh(lod: Dictionary, pos: PackedVector3Array, mats: Array) ->
 			idx[n] = remap[v]
 		var sp := PackedVector3Array()
 		var sn := PackedVector3Array()
-		var sc := PackedColorArray()
 		var su := PackedVector2Array()
+		var sm := PackedByteArray()
+		var jit := PackedVector3Array()
+		var noise := FastNoiseLite.new()
+		noise.noise_type = FastNoiseLite.TYPE_SIMPLEX_SMOOTH
+		noise.frequency = 3.5 # dents about a hand's width across
+		noise.seed = 7
 		for v in ids:
-			sp.append(pos[v])
+			var p: Vector3 = lod.pos[v]
+			sp.append(p)
 			sn.append(lod.nrm[v])
-			sc.append(lod.col[v])
 			su.append(lod.uv[v])
+			sm.append(lod.stripe[v])
+			# Crumple: smooth noise over the body, so a hit leaves dents rather
+			# than foil, and the edges shared between surfaces stay together.
+			jit.append(Vector3(noise.get_noise_3dv(p), noise.get_noise_3dv(p + Vector3(17.3, 0, 0)) - 0.3, noise.get_noise_3dv(p + Vector3(0, 0, 31.7))) * 1.6)
+		surfaces.append({"pos": sp, "nrm": sn, "uv": su, "stripe": sm, "idx": idx, "jit": jit})
+	var data := {"surfaces": surfaces}
+	_shared[key] = data
+	return data
+
+
+## A body mesh from shared LOD data: this car's colours, its vertices at `pos`
+## (one array per surface; null = undented).
+static func _body_mesh(data: Dictionary, cols: PackedColorArray, pos: Array, mats: Array) -> ArrayMesh:
+	var am := ArrayMesh.new()
+	for si in 4:
+		var sf: Dictionary = data.surfaces[si]
+		if sf.idx.is_empty():
+			continue
 		var arr := []
 		arr.resize(Mesh.ARRAY_MAX)
-		arr[Mesh.ARRAY_VERTEX] = sp
-		arr[Mesh.ARRAY_NORMAL] = sn
-		arr[Mesh.ARRAY_COLOR] = sc
-		arr[Mesh.ARRAY_TEX_UV] = su
-		arr[Mesh.ARRAY_INDEX] = idx
+		arr[Mesh.ARRAY_VERTEX] = pos[si] if pos.size() > si and pos[si] != null else sf.pos
+		arr[Mesh.ARRAY_NORMAL] = sf.nrm
+		arr[Mesh.ARRAY_TEX_UV] = sf.uv
+		if si == 0:
+			arr[Mesh.ARRAY_COLOR] = cols
+		arr[Mesh.ARRAY_INDEX] = sf.idx
 		am.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arr)
 		am.surface_set_material(am.get_surface_count() - 1, mats[si])
 	return am
@@ -310,18 +334,20 @@ static func build(root: Node3D, team: Dictionary, wheels_parent: Node3D) -> Dict
 
 	# The body: a fine mesh up close, a coarse one further away.
 	var lods := []
-	var levels := [[_stations(0.08, 0.035), 6, 0.0, 30.0], [_stations(0.16, 0.09), 2, 30.0, 0.0]]
-	for lv in levels:
-		var lod := _loft(lv[0], lv[1], c1, c2)
+	for level in 2:
+		var data := _lod_data(level)
+		var sm: PackedByteArray = data.surfaces[0].stripe
+		var cols := PackedColorArray()
+		cols.resize(sm.size())
+		for i in sm.size():
+			cols[i] = c2 if sm[i] == 1 else c1
 		var mi := MeshInstance3D.new()
-		mi.name = "Body" if lods.is_empty() else "BodyFar"
-		mi.mesh = _body_mesh(lod, lod.pos, mats)
-		mi.visibility_range_begin = lv[2]
-		mi.visibility_range_end = lv[3]
+		mi.name = "Body" if level == 0 else "BodyFar"
+		mi.mesh = _body_mesh(data, cols, [], mats)
+		mi.visibility_range_begin = 0.0 if level == 0 else 30.0
+		mi.visibility_range_end = 30.0 if level == 0 else 0.0
 		root.add_child(mi)
-		lod["mi"] = mi
-		lod["mats"] = mats
-		lods.append(lod)
+		lods.append({"data": data, "mi": mi, "mats": mats, "cols": cols})
 
 	# Trim, wheel wells, lights and the cage inside: the same for every car.
 	if not _shared.has("trim"):
@@ -403,29 +429,26 @@ static func build(root: Node3D, team: Dictionary, wheels_parent: Node3D) -> Dict
 
 
 ## Pushes the body in where it's been hit. `damage` is the car's per-side damage.
-static func dent(info: Dictionary, damage: Dictionary, seed_v: int) -> void:
-	var rng := RandomNumberGenerator.new()
+static func dent(info: Dictionary, damage: Dictionary, _seed_v: int) -> void:
+	var df: float = damage.front
+	var dr: float = damage.rear
+	var dl: float = damage.left
+	var dg: float = damage.right
 	for lod: Dictionary in info.lods:
-		var base: PackedVector3Array = lod.pos
-		var verts := PackedVector3Array()
-		verts.resize(base.size())
-		for i in base.size():
-			var p: Vector3 = base[i]
-			var amt := 0.0
-			amt += float(damage.front) * clamp((-p.z - 1.2) / 1.3, 0.0, 1.0)
-			amt += float(damage.rear) * clamp((p.z - 1.2) / 1.3, 0.0, 1.0)
-			amt += float(damage.right) * clamp((p.x - 0.4) / 0.6, 0.0, 1.0)
-			amt += float(damage.left) * clamp((-p.x - 0.4) / 0.6, 0.0, 1.0)
-			amt = min(amt, 1.2)
-			if amt <= 0.0:
-				verts[i] = p
-				continue
-			# Same position always gets the same crumple, so the mesh doesn't tear.
-			rng.seed = hash(Vector3i(roundi(p.x * 50.0), roundi(p.y * 50.0), roundi(p.z * 50.0))) ^ seed_v
-			var push := Vector3(-p.x * 0.25, -0.12, -p.z * 0.05) * amt
-			push += Vector3(rng.randf_range(-1, 1), rng.randf_range(-1, 0.4), rng.randf_range(-1, 1)) * 0.07 * amt
-			verts[i] = p + push
-		(lod.mi as MeshInstance3D).mesh = _body_mesh(lod, verts, lod.mats)
+		var moved := []
+		for sf: Dictionary in lod.data.surfaces:
+			var base: PackedVector3Array = sf.pos
+			var jit: PackedVector3Array = sf.jit
+			var verts := base.duplicate()
+			for i in base.size():
+				var p: Vector3 = base[i]
+				var amt: float = df * clamp((-p.z - 1.2) / 1.3, 0.0, 1.0) + dr * clamp((p.z - 1.2) / 1.3, 0.0, 1.0) \
+					+ dg * clamp((p.x - 0.4) / 0.6, 0.0, 1.0) + dl * clamp((-p.x - 0.4) / 0.6, 0.0, 1.0)
+				if amt > 0.0:
+					amt = min(amt, 1.2)
+					verts[i] = p + (Vector3(-p.x * 0.25, -0.12, -p.z * 0.05) + jit[i] * 0.07) * amt
+			moved.append(verts)
+		(lod.mi as MeshInstance3D).mesh = _body_mesh(lod.data, lod.cols, moved, lod.mats)
 
 
 ## --- Parts every car shares

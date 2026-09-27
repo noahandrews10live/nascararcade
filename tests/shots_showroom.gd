@@ -41,7 +41,10 @@ func _run() -> void:
 	var car := Node3D.new()
 	world.add_child(car)
 	var team := {"c1": Color(0.53, 0.75, 0.88), "c2": Color(0.53, 0.75, 0.88), "cn": Color(0.53, 0.75, 0.88), "num": "", "sponsor": ""}
-	load("res://scripts/car_body.gd").build(car, team, car)
+	var CB = load("res://scripts/car_body.gd")
+	var info = CB.build(car, team, car)
+	if OS.get_environment("DENT") == "1":
+		CB.dent(info, {"front": 0.6, "rear": 0.0, "left": 0.0, "right": 0.5}, 1)
 	var cam := Camera3D.new()
 	cam.fov = 30.0
 	world.add_child(cam)
