@@ -1252,7 +1252,7 @@ func _update_visual(delta: float) -> void:
 	for j in wheels.size():
 		var holder: Node3D = wheels[j].get_parent()
 		var wi: int = WHEEL_OF_HOLDER[j]
-		holder.position.y = 0.345 + clamp(_defl[wi], -0.12, 0.14) - (1.0 - tyre_air[wi]) * 0.09
+		holder.position.y = CarBody.WHEEL_Y + clamp(_defl[wi], -0.12, 0.14) - (1.0 - tyre_air[wi]) * 0.09
 	_tr_prev = _tr_cur if _has_tr and _tr_cur.origin.distance_squared_to(tr.origin) < 400.0 else tr
 	_tr_cur = tr
 	_has_tr = true

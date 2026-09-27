@@ -6,8 +6,10 @@ extends Node3D
 ## Built into the car's sprung body (it rolls and pitches with the chassis) and
 ## only shown while you're in the cockpit view. Car space: -Z forward, +X right.
 
-const EYE := Vector3(-0.26, 1.10, 0.42)
-const WHEEL_POS := Vector3(-0.26, 0.9, 0.08)
+# Fitted to the Cup-class body (see car_body.gd): the seat sits just behind the
+# middle of the car, under the front of the roof, with a long raked windshield.
+const EYE := Vector3(-0.36, 1.02, 0.04)
+const WHEEL_POS := Vector3(-0.36, 0.8, -0.38)
 const WHEEL_R := 0.175
 const STEER_TURNS := 2.4 # wheel rotation (rad) at full steering lock
 
@@ -39,34 +41,36 @@ func build(c: Node3D, with_mirror: bool) -> void:
 	_glove.albedo_color = livery.lerp(Color(0.1, 0.1, 0.1), 0.35)
 	_glove.roughness = 0.9
 	# Shell: roof lining, door panels, floor, rear bulkhead.
-	_box(Vector3(0, 1.255, 0.45), Vector3(1.40, 0.02, 1.05), _dark)
-	_box(Vector3(-0.935, 0.62, 0.35), Vector3(0.02, 0.72, 1.4), _dark)
-	_box(Vector3(0.935, 0.62, 0.35), Vector3(0.02, 0.72, 1.4), _dark)
-	_box(Vector3(0, 0.22, 0.35), Vector3(1.85, 0.02, 1.6), _dark)
-	_box(Vector3(0, 0.75, 1.05), Vector3(1.85, 1.0, 0.02), _dark)
-	# Dash and cowl (with a lip that hides the gap to the windshield).
-	_box(Vector3(0, 0.84, -0.22), Vector3(1.85, 0.24, 0.42), _dark)
-	_box(Vector3(0, 0.975, -0.40), Vector3(1.85, 0.03, 0.2), _dark)
-	# Roll cage: main hoop, A-pillar bars, halo, the centre windshield bar, door bars.
+	_box(Vector3(0, 1.255, 0.32), Vector3(1.0, 0.02, 0.74), _dark)
+	_box(Vector3(-0.935, 0.55, -0.1), Vector3(0.02, 0.62, 1.7), _dark)
+	_box(Vector3(0.935, 0.55, -0.1), Vector3(0.02, 0.62, 1.7), _dark)
+	_box(Vector3(0, 0.22, -0.15), Vector3(1.85, 0.02, 1.6), _dark)
+	_box(Vector3(0, 0.72, 0.64), Vector3(1.85, 0.98, 0.02), _dark)
+	# Dash and cowl, reaching forward to the foot of the windshield.
+	_box(Vector3(0, 0.78, -0.62), Vector3(1.85, 0.16, 0.4), _dark)
+	_box(Vector3(0, 0.855, -0.885), Vector3(1.85, 0.02, 0.14), _dark)
+	# Roll cage: main hoop behind the seat, A-pillar bars up the windshield, the
+	# roof rails, the centre windshield bar and the door bars on the driver's side.
 	for x in [-0.8, 0.8]:
-		_tube(Vector3(x, 0.24, 0.95), Vector3(x * 0.95, 1.24, 0.95))
-		_tube(Vector3(x, 0.97, -0.45), Vector3(x * 0.86, 1.24, -0.06))
-		_tube(Vector3(x * 0.86, 1.24, -0.06), Vector3(x * 0.95, 1.24, 0.95))
-	_tube(Vector3(-0.76, 1.24, 0.95), Vector3(0.76, 1.24, 0.95))
-	_tube(Vector3(-0.69, 1.24, -0.06), Vector3(0.69, 1.24, -0.06))
-	_tube(Vector3(0, 0.97, -0.48), Vector3(0, 1.245, -0.08))
+		_tube(Vector3(x, 0.24, 0.33), Vector3(x * 0.98, 0.83, 0.33))
+		_tube(Vector3(x * 0.98, 0.83, 0.33), Vector3(x * 0.78, 1.22, 0.33))
+		_tube(Vector3(x * 0.92, 0.87, -0.92), Vector3(x * 0.72, 1.22, -0.1))
+		_tube(Vector3(x * 0.72, 1.22, -0.1), Vector3(x * 0.78, 1.22, 0.33))
+	_tube(Vector3(-0.62, 1.22, 0.33), Vector3(0.62, 1.22, 0.33))
+	_tube(Vector3(-0.58, 1.22, -0.1), Vector3(0.58, 1.22, -0.1))
+	_tube(Vector3(0, 0.88, -0.93), Vector3(0, 1.235, -0.12))
 	for k in 3:
 		var y := 0.42 + k * 0.14
-		_tube(Vector3(-0.86, y, -0.3), Vector3(-0.86, y + 0.08, 0.9))
+		_tube(Vector3(-0.86, y, -0.8), Vector3(-0.86, y + 0.06, 0.3))
 	# Window net on the driver's (left) side.
 	for k in 7:
-		var z := 0.05 + k * 0.11
-		_box(Vector3(-0.9, 1.1, z), Vector3(0.01, 0.24, 0.018), _net)
+		var z := -0.55 + k * 0.12
+		_box(Vector3(-0.84, 1.02, z), Vector3(0.01, 0.26, 0.018), _net)
 	for k in 4:
-		var y := 0.99 + k * 0.07
-		_box(Vector3(-0.9, y, 0.38), Vector3(0.01, 0.018, 0.72), _net)
+		var y := 0.91 + k * 0.07
+		_box(Vector3(-0.84, y, -0.19), Vector3(0.01, 0.018, 0.74), _net)
 	# Steering column and wheel (with gloved hands at a quarter to three).
-	_tube(Vector3(-0.26, 0.80, -0.30), WHEEL_POS + Vector3(0, -0.03, -0.05), 0.022)
+	_tube(Vector3(-0.36, 0.74, -0.72), WHEEL_POS + Vector3(0, -0.03, -0.05), 0.022)
 	wheel = Node3D.new()
 	wheel.position = WHEEL_POS
 	wheel.rotation.x = deg_to_rad(-68.0) # tilted back towards the driver
@@ -99,7 +103,7 @@ func build(c: Node3D, with_mirror: bool) -> void:
 	# Digital dash, straight ahead through the wheel.
 	display = Label3D.new()
 	# The dash display sits right of the wheel, where the driver can glance at it.
-	display.position = Vector3(0.0, 0.99, -0.08)
+	display.position = Vector3(-0.08, 0.905, -0.5)
 	display.rotation = Vector3(deg_to_rad(-30.0), deg_to_rad(-25.0), 0.0) # turned towards the driver
 	display.pixel_size = 0.00045
 	display.font_size = 32
@@ -121,7 +125,7 @@ func build(c: Node3D, with_mirror: bool) -> void:
 		mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 		mat.albedo_color = Color(0.1, 0.1, 0.1)
 		m.material_override = mat
-		m.position = Vector3(-0.26 - 0.1 + k * 0.022, 0.985, -0.12)
+		m.position = Vector3(-0.36 - 0.1 + k * 0.022, 0.868, -0.5)
 		add_child(m)
 		shift_lights.append(m)
 	if with_mirror:
@@ -179,7 +183,7 @@ func _build_mirror() -> void:
 	mirror_vp.add_child(mirror_cam)
 	var quad := MeshInstance3D.new()
 	var qm := QuadMesh.new()
-	qm.size = Vector2(0.46, 0.09)
+	qm.size = Vector2(0.36, 0.07)
 	quad.mesh = qm
 	var mat := StandardMaterial3D.new()
 	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
@@ -187,16 +191,16 @@ func _build_mirror() -> void:
 	mat.uv1_scale = Vector3(-1, 1, 1) # a mirror flips left and right
 	mat.uv1_offset = Vector3(1, 0, 0)
 	quad.material_override = mat
-	quad.position = Vector3(0.0, 1.195, -0.08)
+	quad.position = Vector3(0.0, 1.115, -0.3)
 	quad.rotation.x = deg_to_rad(-6.0)
 	# (A quad faces +Z, which is towards the driver.)
 	add_child(quad)
 	var frame := MeshInstance3D.new()
 	var fb := BoxMesh.new()
-	fb.size = Vector3(0.49, 0.11, 0.02)
+	fb.size = Vector3(0.39, 0.09, 0.02)
 	frame.mesh = fb
 	frame.material_override = _dark
-	frame.position = Vector3(0.0, 1.195, -0.092)
+	frame.position = Vector3(0.0, 1.115, -0.312)
 	add_child(frame)
 
 
@@ -211,6 +215,9 @@ func show_inside(on: bool) -> void:
 	if visible == on:
 		return
 	visible = on
+	# The car's own simple interior (seen through its glass) makes way.
+	if car and car.get("_body") is Dictionary and car._body.has("interior"):
+		car._body.interior.visible = not on
 	if on:
 		_set_layers(self)
 	if mirror_vp:
@@ -242,7 +249,7 @@ func update(delta: float) -> void:
 		(shift_lights[k].material_override as StandardMaterial3D).albedo_color = col
 	if mirror_cam:
 		# Mirror camera: at the mirror, looking out the back window.
-		var t: Transform3D = global_transform * Transform3D(Basis(Vector3.UP, PI), Vector3(0.0, 1.22, 0.9))
+		var t: Transform3D = global_transform * Transform3D(Basis(Vector3.UP, PI), Vector3(0.0, 1.18, 0.7))
 		mirror_cam.global_transform = t
 		# Every other frame is plenty for a mirror.
 		_frame += 1
