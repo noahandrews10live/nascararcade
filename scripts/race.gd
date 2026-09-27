@@ -60,6 +60,10 @@ func _exit_tree() -> void:
 		track.wear = null
 
 
+## The field stays near the player (Race Setup, CATCH-UP).
+var catchup := false
+
+
 func setup(trk: Node3D, player_team: int, lap_count: int, size := 40, grid: Array = [], player2_team := -1) -> void:
 	track = trk
 	track.rubber_laps = 0.0
@@ -129,6 +133,7 @@ func setup(trk: Node3D, player_team: int, lap_count: int, size := 40, grid: Arra
 				best = m
 		makes[p] = best
 		counts[best] += 1
+	catchup = player_team >= 0 and int(Game.settings.get("catchup", 0)) == 1
 	for p in roster.size():
 		var c: Node3D = Car.new()
 		c.name = "Car%s" % Game.teams[roster[p]].num
@@ -683,6 +688,9 @@ func _drive_ai(c: Node3D, delta: float) -> void:
 	var target: float = track.profile_at(ss + look) * grip_scale * c.ai_skill * 0.95
 	# In the wet drivers leave a margin: less feel, spray, and puddles off line.
 	target *= 1.0 - 0.05 * c._wet
+	# Catch-up (optional): the field stays near the player, ahead or behind.
+	if catchup and player and player != c and not player.finished:
+		target *= clamp(1.0 - (c.dist - player.dist) / 4000.0, 0.97, 1.025)
 	if c.flat_time > 1.2:
 		target *= 0.55 # limp it back to pit road (after the moment it takes to react)
 	if controlled:

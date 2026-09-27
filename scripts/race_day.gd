@@ -50,7 +50,43 @@ func setup(r: Node3D, s: Node, a: Node) -> void:
 			people.append(p)
 		crews.append([root, people, null])
 	_build_flag_stand()
+	if Game.modern:
+		_build_grills()
 	race.car_finished.connect(_on_finished)
+
+
+## Race-day life in the infield: smoke drifting up from the campers' grills.
+func _build_grills() -> void:
+	var qm := QuadMesh.new()
+	qm.size = Vector2(1.6, 1.6)
+	var m := StandardMaterial3D.new()
+	m.billboard_mode = BaseMaterial3D.BILLBOARD_PARTICLES
+	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	m.vertex_color_use_as_albedo = true
+	qm.material = m
+	var fade := Gradient.new()
+	fade.set_color(0, Color(0.75, 0.75, 0.75, 0.0))
+	fade.add_point(0.15, Color(0.72, 0.72, 0.72, 0.35))
+	fade.set_color(fade.get_point_count() - 1, Color(0.85, 0.85, 0.88, 0.0))
+	for k in 6:
+		var i: int = int(track.n * (0.08 + 0.84 * k / 5.0)) % track.n
+		var p := CPUParticles3D.new()
+		p.amount = 14
+		p.lifetime = 7.0
+		p.mesh = qm
+		p.direction = Vector3(0.3, 1, 0.1)
+		p.spread = 12.0
+		p.initial_velocity_min = 0.6
+		p.initial_velocity_max = 1.1
+		p.gravity = Vector3(0.25, 0.15, 0.0)
+		p.scale_amount_min = 1.0
+		p.scale_amount_max = 3.0
+		p.color_ramp = fade
+		p.visibility_range_end = 380.0
+		p.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		add_child(p)
+		p.global_position = track.pos[i] + track.right[i] * (track.inner_wall() - 40.0 - 8.0 * (k % 2)) + Vector3.UP * 1.0
 
 
 ## A crew member in a firesuit and helmet.

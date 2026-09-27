@@ -468,7 +468,7 @@ const WEEKENDS := ["RACE ONLY", "QUALIFY + RACE", "PRACTICE + QUALIFY + RACE"]
 var settings := {
 	# Browsers get a 20-car field by default (GDScript runs slower there).
 	"length": 1, "difficulty": 1, "field": 0 if OS.has_feature("web") else 2, "cautions": 1, "damage": 1, "wear": 1, "weather": 0,
-	"assists": 2, "manual": 0, "weekend": 1, "touch_tilt": true, "tilt_sens": 1, "res_mode": 0,
+	"assists": 2, "manual": 0, "weekend": 1, "touch_tilt": true, "tilt_sens": 1, "res_mode": 0, "commentary": 1, "catchup": 0,
 }
 ## Garage setup (applied to the player's car): -3..3 balance (tight..loose),
 ## tyre pressure 0 low / 1 std / 2 high, gearing 0 short / 1 std / 2 long.
@@ -1153,6 +1153,7 @@ func _setup_input() -> void:
 		"telemetry": [KEY_T, "btn:%d" % JOY_BUTTON_LEFT_STICK],
 		"highlights": [KEY_H, "btn:%d" % JOY_BUTTON_MISC1],
 		"photo": [KEY_F, "btn:%d" % JOY_BUTTON_TOUCHPAD],
+		"clip": [KEY_F9],
 		"toggle_graphics": [KEY_F3],
 		"toggle_fullscreen": [KEY_F11],
 	}

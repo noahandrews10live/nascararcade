@@ -323,6 +323,45 @@ $GODOT_HEAD_INCLUDE
       requestAnimationFrame(tick);
     })();
 
+    // --- Clips: while the game replays the last 15 seconds, record the canvas
+    // and hand the video to the phone's share sheet (or download it).
+    window.stClipStart = function () {
+      try {
+        const stream = canvas.captureStream(30);
+        const types = ["video/mp4;codecs=avc1", "video/mp4", "video/webm;codecs=vp9", "video/webm"];
+        const mt = types.find(function (t) { return window.MediaRecorder && MediaRecorder.isTypeSupported(t); }) || "";
+        const rec = new MediaRecorder(stream, mt ? { mimeType: mt, videoBitsPerSecond: 8000000 } : {});
+        const chunks = [];
+        rec.ondataavailable = function (e) { if (e.data && e.data.size) chunks.push(e.data); };
+        rec.onstop = function () {
+          const type = rec.mimeType || "video/webm";
+          const blob = new Blob(chunks, { type: type });
+          const name = "speedway-thunder-clip." + (type.indexOf("mp4") >= 0 ? "mp4" : "webm");
+          const file = new File([blob], name, { type: type });
+          window.stLastClip = file;
+          const save = function () {
+            const a = document.createElement("a");
+            a.href = URL.createObjectURL(blob);
+            a.download = name;
+            document.body.appendChild(a);
+            a.click();
+            setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 5000);
+          };
+          if (navigator.canShare && navigator.canShare({ files: [file] })) {
+            navigator.share({ files: [file], title: "Speedway Thunder" }).catch(save);
+          } else {
+            save();
+          }
+        };
+        rec.start();
+        window.stRec = rec;
+      } catch (e) { console.log("clip:", e); }
+    };
+    window.stClipStop = function () {
+      if (window.stRec && window.stRec.state !== "inactive") window.stRec.stop();
+      window.stRec = null;
+    };
+
     // --- Safe area: the screen edges a notch, rounded corners or the home bar
     // cover (CSS safe-area insets), as fractions of the game's canvas: left, top,
     // right, bottom. The game keeps its HUD, menus and buttons inside the rest.

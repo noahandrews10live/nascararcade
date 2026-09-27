@@ -110,6 +110,7 @@ func _layout() -> void:
 		_buttons.append([Rect2(x, y + bh + gap, bw, bh), "CAM", "camera", "tap"])
 		if main.race.control:
 			_buttons.append([Rect2(x, y + (bh + gap) * 2.0, bw, bh), "PIT", "pit", "tap"])
+		_buttons.append([Rect2(x, y + (bh + gap) * 3.0, bw, bh), "CLIP", "clip", "tap"])
 		_buttons.append([Rect2(x - bw - gap - 2.0 * k, y, bw + 2.0 * k, bh), "TILT" if tilt else "DRAG", "_toggle_tilt", "tap"])
 		if tilt and _tilt_ok:
 			_buttons.append([Rect2(x - bw - gap - 2.0 * k, y + bh + gap, bw + 2.0 * k, bh), "CTR", "_recenter", "tap"])

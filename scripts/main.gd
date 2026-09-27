@@ -16,6 +16,7 @@ const Soundscape := preload("res://scripts/soundscape.gd")
 const CamFeel := preload("res://scripts/cam_feel.gd")
 const Cockpit := preload("res://scripts/cockpit.gd")
 const CarBody := preload("res://scripts/car_body.gd")
+const Showtime := preload("res://scripts/showtime.gd")
 const Atmosphere := preload("res://scripts/atmosphere.gd")
 const RainFx := preload("res://scripts/rain_fx.gd")
 const RaceDay := preload("res://scripts/race_day.gd")
@@ -89,6 +90,7 @@ var autopilot := false
 ## "arcade" = the 1999 cabinet game (clock, 16 cars). "race" = full NASCAR rules.
 var mode := "arcade"
 const MODES := [
+	["QUICK RACE", "STRAIGHT TO THE GRID: A SHORT RACE AT A RANDOM TRACK IN YOUR CAR."],
 	["ARCADE", "BEAT THE CLOCK. 16 CARS, SHORT RACES, NO CAUTIONS."],
 	["SINGLE RACE", "A FULL RACE WEEKEND: PRACTICE, QUALIFYING, CAUTIONS, PITS, STAGES."],
 	["SEASON", "RUN A CHAMPIONSHIP. POINTS, WINS AND STANDINGS ARE SAVED."],
@@ -101,6 +103,9 @@ const MODES := [
 	["OPTIONS", "GRAPHICS, SOUND, WHEEL AND RECORDS."],
 ]
 var mode_idx := 0
+## Intro, showroom, TV package, replays, last-lap drama and victory lane.
+var showtime: Node
+var _quick_saved := {}
 
 # menus and race weekends
 var menu: Control
@@ -211,6 +216,10 @@ func _ready() -> void:
 	touch = TouchControls.new()
 	touch.main = self
 	touch_layer.add_child(touch)
+	showtime = Showtime.new()
+	showtime.name = "Showtime"
+	add_child(showtime)
+	showtime.setup(self)
 
 	var scan_layer := CanvasLayer.new()
 	scan_layer.layer = 10
@@ -334,9 +343,9 @@ func _apply_graphics() -> void:
 		env.ssr_fade_in = 0.2
 		env.ssr_fade_out = 2.0
 		env.glow_enabled = true
-		env.glow_intensity = 0.6
-		env.glow_bloom = 0.04
-		env.glow_hdr_threshold = 1.1
+		env.glow_intensity = 0.6 if not night else 0.95
+		env.glow_bloom = 0.04 if not night else 0.08
+		env.glow_hdr_threshold = 1.1 if not night else 0.85
 		env.glow_blend_mode = Environment.GLOW_BLEND_MODE_ADDITIVE
 		env.fog_density = 0.00035 if not night else 0.0012
 		env.fog_sun_scatter = 0.35
@@ -870,6 +879,11 @@ func _start_attract() -> void:
 
 
 func _enter_title() -> void:
+	showtime.reset()
+	if not _quick_saved.is_empty():
+		for k in _quick_saved:
+			Game.settings[k] = _quick_saved[k]
+		_quick_saved.clear()
 	_teardown_split()
 	choosing_p2 = false
 	_set_state(State.TITLE)
@@ -890,6 +904,20 @@ func _enter_title() -> void:
 	_label("", "FREE PLAY", 16, Color(0.3, 1.0, 0.4), Vector2(0, 446), HORIZONTAL_ALIGNMENT_CENTER, 4)
 	_label("gfx", _graphics_text(), 12, Color(0.5, 0.9, 1.0), Vector2(0, 400), HORIZONTAL_ALIGNMENT_CENTER, 3)
 	_label("", "(C)1999  THUNDER ARCADE WORKS", 11, Color(0.8, 0.8, 0.8), Vector2(0, 462), HORIZONTAL_ALIGNMENT_CENTER, 3)
+	showtime.start_intro()
+	if not showtime.intro_active:
+		showtime.music.play("menu")
+
+
+## Quick Race: a short race at a random track, straight to the grid.
+func _quick_race() -> void:
+	mode = "race"
+	session = "race"
+	_quick_saved = {"length": Game.settings.length, "weekend": Game.settings.weekend}
+	Game.settings.length = 1
+	Game.settings.weekend = 0
+	_use_track(randi() % Game.tracks.size())
+	_enter_countdown()
 
 
 func _enter_mode_select() -> void:
@@ -897,11 +925,11 @@ func _enter_mode_select() -> void:
 	synth.beep(1320.0, 0.08)
 	_clear_screen()
 	_label("", "SELECT MODE", 34, Color(1.0, 0.85, 0.1), Vector2(0, 30), HORIZONTAL_ALIGNMENT_CENTER, 8)
-	var step := 29
-	_panel(Rect2(60, 84, 520, MODES.size() * step + 16), Color(0, 0, 0, 0.6))
+	var step := 27
+	_panel(Rect2(60, 80, 520, MODES.size() * step + 12), Color(0, 0, 0, 0.6))
 	for i in MODES.size():
-		_label("mode%d" % i, MODES[i][0], 21, Color.WHITE, Vector2(0, 90 + i * step), HORIZONTAL_ALIGNMENT_CENTER, 6)
-	_label("mdesc", "", 12, Color(0.7, 0.85, 1.0), Vector2(0, 396), HORIZONTAL_ALIGNMENT_CENTER, 3)
+		_label("mode%d" % i, MODES[i][0], 20, Color.WHITE, Vector2(0, 84 + i * step), HORIZONTAL_ALIGNMENT_CENTER, 6)
+	_label("mdesc", "", 12, Color(0.7, 0.85, 1.0), Vector2(0, 400), HORIZONTAL_ALIGNMENT_CENTER, 3)
 	_label("", "UP / DOWN   CHOOSE        START  SELECT", 14, Color(0.85, 0.85, 0.85), Vector2(0, 424))
 	_refresh_mode_select()
 
@@ -975,11 +1003,13 @@ func _refresh_car_select() -> void:
 	preview_car = Car.new()
 	add_child(preview_car)
 	preview_car.setup(t, null)
-	var base: Vector3 = track.pos[0] + track.right[0] * (track.inner_wall() - 14.0)
-	preview_car.position = base + Vector3.UP * 0.02
+	preview_car.position = showtime.showroom_spot()
+	showtime.present_car(preview_car)
 
 
 func _enter_countdown() -> void:
+	showtime.reset()
+	showtime.music.stop()
 	_set_state(State.COUNTDOWN)
 	synth.beep(1760.0, 0.12)
 	if preview_car:
@@ -1156,6 +1186,9 @@ func _on_finished(car: Node3D, place: int) -> void:
 		if challenge.goal == "time":
 			challenge_result += "   LAP %s" % Game.format_time(car.best_lap)
 	_set_state(State.FINISHED)
+	showtime.on_finished(car, place)
+	if place == 1 and mode != "2p" and mode != "online" and game_over_reason == "":
+		showtime.start_victory(car)
 	hud.show_timer = false
 	var col := Color(1, 0.9, 0.2) if place == 1 else Color.WHITE
 	_msg("WINNER!" if place == 1 else "FINISH!", 4.0, col)
@@ -1174,6 +1207,9 @@ func _unhandled_input(event: InputEvent) -> void:
 		return
 	if photo_mode and state != State.REPLAY:
 		_photo_input(event)
+		return
+	if event.is_action_pressed("clip") and state == State.RACE and split_cams.is_empty():
+		showtime.request_clip() # the last 15 seconds, as a video
 		return
 	if event.is_action_pressed("photo") and state in [State.RACE, State.FINISHED] and split_cams.is_empty():
 		# Freeze the race and line up a shot.
@@ -1212,6 +1248,10 @@ func _unhandled_input(event: InputEvent) -> void:
 		return
 	match state:
 		State.TITLE:
+			if showtime.intro_active:
+				if event.is_pressed():
+					showtime.skip_intro()
+				return
 			if event.is_action_pressed("start"):
 				_enter_mode_select()
 		State.MODE_SELECT:
@@ -1221,34 +1261,36 @@ func _unhandled_input(event: InputEvent) -> void:
 				_refresh_mode_select()
 			elif event.is_action_pressed("start"):
 				match mode_idx:
-					0, 1:
-						mode = ["arcade", "race"][mode_idx]
+					0:
+						_quick_race()
+					1, 2:
+						mode = ["arcade", "race"][mode_idx - 1]
 						_enter_track_select()
-					2:
+					3:
 						mode = "season"
 						if Game.season.is_empty():
 							_enter_car_select()
 						else:
 							_enter_season_hub()
-					3:
+					4:
 						mode = "career"
 						if Game.career.is_empty():
 							_enter_car_select()
 						else:
 							_enter_career_hub()
-					4:
+					5:
 						mode = "2p"
 						choosing_p2 = false
 						_enter_track_select()
-					5:
-						_enter_challenges()
 					6:
-						_enter_paint_shop()
+						_enter_challenges()
 					7:
-						_enter_online()
+						_enter_paint_shop()
 					8:
-						_enter_track_editor()
+						_enter_online()
 					9:
+						_enter_track_editor()
+					10:
 						_enter_options()
 			elif event.is_action_pressed("back"):
 				_enter_title()
@@ -1366,6 +1408,8 @@ func _physics_process(delta: float) -> void:
 	state_time += delta
 	if net and net.in_race:
 		net.tick(delta)
+	if showtime.physics(delta):
+		return # a replay holds the race
 	match state:
 		State.TITLE, State.MODE_SELECT, State.TRACK_SELECT, State.CAR_SELECT, State.MENU, State.SESSION_RESULTS, State.STANDINGS:
 			_loop_attract()
@@ -1390,6 +1434,8 @@ func _physics_process(delta: float) -> void:
 				race.player.ai = false
 				_set_state(State.FINISHED)
 		State.FINISHED:
+			if showtime.victory_physics(delta):
+				return
 			if game_over_reason != "":
 				race.player.throttle = 0.0
 				race.player.brake = 0.3
@@ -1700,6 +1746,7 @@ func _on_control_message(text: String, kind: String) -> void:
 
 
 func _on_flag(flag: String) -> void:
+	showtime.on_flag(flag)
 	match flag:
 		"YELLOW":
 			synth.beep(440.0, 0.4)
@@ -1712,6 +1759,8 @@ func _on_flag(flag: String) -> void:
 func _process(delta: float) -> void:
 	if wheel and wheel.poll_detect() and state == State.MENU and menu_kind == "wheel":
 		_enter_wheel_setup()
+	if showtime:
+		showtime.process(delta)
 	if race == null:
 		return
 	race.interpolate(Engine.get_physics_interpolation_fraction() if Game.smoothing else 1.0)
@@ -1760,6 +1809,8 @@ func _process(delta: float) -> void:
 
 
 func _update_audio() -> void:
+	if showtime.engine_blip():
+		return # the showroom car revving
 	var focus: Node3D = null
 	if state in [State.COUNTDOWN, State.RACE, State.FINISHED] and race.player:
 		focus = race.player
@@ -1796,6 +1847,8 @@ func _update_audio() -> void:
 func _update_camera(delta: float) -> void:
 	if not (state in [State.COUNTDOWN, State.RACE, State.FINISHED] and cam_mode == 3 and not photo_mode):
 		_hide_cockpit()
+	if showtime.camera(delta):
+		return
 	shake = max(shake - delta * 2.5, 0.0)
 	var sh := Vector3(rng.randf_range(-1, 1), rng.randf_range(-1, 1), 0) * shake * 0.25
 	match state:
@@ -1804,6 +1857,7 @@ func _update_camera(delta: float) -> void:
 				_photo_camera(delta)
 				return
 			_chase_camera(race.player, delta, cam_mode)
+			cam.fov += showtime.fov_offset
 			sh = Vector3.ZERO # the chase and in-car cameras shake through the camera feel
 			if split_cams.size() == 2:
 				_split_camera(split_cams[0], split_state[0], race.player, delta)
@@ -1967,6 +2021,7 @@ func _enter_race_setup(return_to := "") -> void:
 		{"id": "difficulty", "label": "DIFFICULTY", "values": diffs, "index": Game.settings.difficulty, "hint": "HOW FAST AND SHARP THE OTHER DRIVERS ARE"},
 		{"id": "field", "label": "FIELD SIZE", "values": Game.FIELDS.map(func(f): return "%d CARS" % f), "index": Game.settings.field},
 		{"id": "weekend", "label": "WEEKEND", "values": Game.WEEKENDS, "index": Game.settings.weekend, "hint": "QUALIFY TO SET YOUR STARTING SPOT"},
+		{"id": "catchup", "label": "CATCH-UP", "values": ["OFF", "ON"], "index": int(Game.settings.get("catchup", 0)), "hint": "ON: THE FIELD STAYS CLOSE TO YOU, AHEAD OR BEHIND"},
 		{"id": "cautions", "label": "CAUTIONS", "values": ["OFF", "QUICK", "FULL"], "index": Game.settings.cautions, "hint": "QUICK: ABOUT 15 S FROM YELLOW TO GREEN. FULL: REAL CAUTION LAPS BEHIND THE PACE CAR"},
 		{"id": "weather", "label": "WEATHER", "values": ["CLEAR", "CHANGEABLE", "RAIN"], "index": int(Game.settings.get("weather", 0)), "hint": "RAIN HOLDS OVALS UNDER CAUTION.  ROAD COURSES RACE ON WET TIRES"},
 		{"id": "damage", "label": "DAMAGE", "values": ["OFF", "ON"], "index": Game.settings.damage, "hint": "DAMAGE HURTS SPEED, HANDLING AND CAN END YOUR RACE"},
@@ -2095,7 +2150,8 @@ func _enter_options() -> void:
 		{"id": "blur", "label": "MOTION BLUR", "values": ["OFF", "LOW", "HIGH"], "index": Game.motion_blur, "hint": "DESKTOP MODERN LOOK ONLY"},
 		{"id": "wheel_setup", "label": "WHEEL SETUP", "hint": "STEERING WHEEL, PEDALS AND FORCE FEEDBACK"},
 		{"id": "tilt_sens", "label": "TILT STEERING", "values": ["GENTLE", "NORMAL", "QUICK", "VERY QUICK"], "index": int(Game.settings.get("tilt_sens", 1)), "hint": "PHONES: HOW FAR YOU TILT FOR FULL LOCK (18 / 12 / 9 / 6 DEGREES)"},
-		{"id": "radio", "label": "RADIO VOICE", "values": ["OFF", "ON"], "index": 1 if Game.radio_voice else 0, "hint": "SPOKEN SPOTTER AND CREW CHIEF CALLS"},
+		{"id": "radio", "label": "RADIO VOICE", "values": ["OFF", "ON"], "index": 1 if Game.radio_voice else 0, "hint": "SPOKEN SPOTTER, CREW CHIEF AND TV BOOTH CALLS"},
+		{"id": "commentary", "label": "COMMENTARY", "values": ["OFF", "ON"], "index": int(Game.settings.get("commentary", 1)), "hint": "THE TV BOOTH: PLAY-BY-PLAY AND ANALYST (SPOKEN WITH RADIO VOICE ON)"},
 		{"id": "vsync", "label": "VSYNC", "values": ["OFF", "ON"], "index": 1 if Game.vsync else 0, "hint": "OFF: LOWEST INPUT DELAY, MAY TEAR"},
 		{"id": "scan", "label": "SCANLINES (1999)", "values": ["OFF", "ON"], "index": 1 if Game.scanlines else 0},
 		{"id": "reset", "label": "RESET LAP RECORDS"},
@@ -2167,6 +2223,9 @@ func _on_menu_changed(id: String, idx: int) -> void:
 				Game.save_settings()
 				menu.rows[menu.cursor].hint = _display_hint()
 				menu._refresh()
+			elif id == "commentary":
+				Game.settings["commentary"] = idx
+				Game.save_settings()
 			elif id == "tilt_sens":
 				Game.settings["tilt_sens"] = idx
 				Game.save_settings()
@@ -2500,8 +2559,8 @@ func _paint_preview() -> void:
 	preview_car = Car.new()
 	add_child(preview_car)
 	preview_car.setup(Game.custom_team(), null)
-	var base: Vector3 = track.pos[0] + track.right[0] * (track.inner_wall() - 14.0)
-	preview_car.position = base + Vector3.UP * 0.02
+	preview_car.position = showtime.showroom_spot()
+	showtime.present_car(preview_car)
 
 
 # --- Lightning Challenges ---------------------------------------------------------

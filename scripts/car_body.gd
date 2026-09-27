@@ -444,6 +444,22 @@ static func build(root: Node3D, team: Dictionary, wheels_parent: Node3D) -> Dict
 	rim_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
 	var chrome := Game.make_mat("chrome", Color(0.72, 0.73, 0.75))
 	var lug_mat := Game.make_mat("chrome", Color(0.94, 0.62, 0.15))
+	# Brake discs that glow when they're worked hard (seen through the spokes).
+	var glow_mat := StandardMaterial3D.new()
+	glow_mat.albedo_color = Color(0.55, 0.55, 0.57)
+	glow_mat.metallic = 0.9
+	glow_mat.roughness = 0.35
+	glow_mat.emission_enabled = true
+	glow_mat.emission = Color(1.0, 0.32, 0.05)
+	glow_mat.emission_energy_multiplier = 0.0
+	if not _shared.has("disc"):
+		var dm := CylinderMesh.new()
+		dm.top_radius = 0.195
+		dm.bottom_radius = 0.195
+		dm.height = 0.036
+		dm.radial_segments = 20
+		dm.rings = 0
+		_shared.disc = dm
 	var wheels: Array = []
 	var holders: Array = []
 	for x in [-WHEEL_X, WHEEL_X]:
@@ -462,10 +478,38 @@ static func build(root: Node3D, team: Dictionary, wheels_parent: Node3D) -> Dict
 			_instance(modern, _shared["wheel_" + side], rim_mat)
 			_instance(modern, _shared["chrome_" + side], chrome).visibility_range_end = 70.0
 			_instance(modern, _shared["lug_" + side], lug_mat).visibility_range_end = 50.0
+			var disc := _instance(modern, _shared.disc, glow_mat)
+			disc.rotation.z = PI * 0.5
+			disc.visibility_range_end = 45.0
 			wheels.append(spinner)
 			holders.append(holder)
+	# Flames out of the side pipes when the driver lifts at high revs.
+	var flame_mat := StandardMaterial3D.new()
+	flame_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	flame_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	flame_mat.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
+	flame_mat.albedo_color = Color(1.0, 0.55, 0.2, 0.9)
+	flame_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+	var cone := CylinderMesh.new()
+	cone.top_radius = 0.0
+	cone.bottom_radius = 0.05
+	cone.height = 0.34
+	cone.radial_segments = 8
+	cone.rings = 0
+	var flames: Array = []
+	for sx in [1.0, -1.0]:
+		for z in [0.75, 0.88]:
+			var f := MeshInstance3D.new()
+			f.mesh = cone
+			f.material_override = flame_mat
+			f.position = Vector3(sx * 1.17, 0.23, z)
+			f.rotation.z = -sx * PI * 0.5
+			f.visible = false
+			f.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+			root.add_child(f)
+			flames.append(f)
 	_mk = -1
-	return {"lods": lods, "wheels": wheels, "holders": holders, "interior": interior, "paint": paint, "make": mk}
+	return {"tail": tail_mat, "glow": glow_mat, "flames": flames, "lods": lods, "wheels": wheels, "holders": holders, "interior": interior, "paint": paint, "make": mk}
 
 
 ## Pushes the body in where it's been hit. `damage` is the car's per-side damage.

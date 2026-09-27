@@ -1278,11 +1278,43 @@ func _update_visual(delta: float) -> void:
 		if abs(hs - _haze_s) > 0.05:
 			_haze_s = hs
 			_haze.set_instance_shader_parameter("strength", hs)
+	if delta > 0.0 and _body.has("glow"):
+		_update_fx(delta)
 	if tyre_smoke:
 		# Tyre smoke when sliding, spray off the tyres on a wet track.
 		_set_emitting(tyre_smoke, ((slide > 0.4 or scrub > 0.6 or (spinning and speed() > 6.0)) and speed() > 6.0) or (_wet > 0.25 and speed() > 25.0))
 	if smoke:
 		_set_emitting(smoke, total_damage() > 0.3 or out)
+
+
+## Brake discs glow when they've been worked hard; the tail lights brighten
+## under braking; lifting at high revs spits flames from the side pipes.
+var brake_heat := 0.0
+var _flame_t := 0.0
+var _thr_prev := 0.0
+var _glow_e := -1.0
+var _tail_e := -1.0
+
+
+func _update_fx(delta: float) -> void:
+	brake_heat = clamp(brake_heat + (brake * abs(v) / 40.0 - brake_heat * 0.22) * delta, 0.0, 1.5)
+	var ge: float = clamp((brake_heat - 0.3) * 5.0, 0.0, 4.0)
+	if abs(ge - _glow_e) > 0.05:
+		_glow_e = ge
+		(_body.glow as StandardMaterial3D).emission_energy_multiplier = ge
+	var te: float = 1.3 + 3.2 * clamp(brake * 2.5, 0.0, 1.0)
+	if abs(te - _tail_e) > 0.1:
+		_tail_e = te
+		(_body.tail as StandardMaterial3D).emission_energy_multiplier = te
+	if _thr_prev > 0.75 and throttle < 0.2 and rpm_now > 6500.0 and randf() < 0.7:
+		_flame_t = randf_range(0.15, 0.45)
+	_thr_prev = throttle
+	_flame_t -= delta
+	var on := _flame_t > 0.0
+	for f in _body.flames:
+		f.visible = on and randf() < 0.75
+		if f.visible:
+			f.scale = Vector3(1.0, randf_range(0.6, 1.5), 1.0)
 
 
 ## Only touch `emitting` when it changes (re-setting it can restart GPU particles).
