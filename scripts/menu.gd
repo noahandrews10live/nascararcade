@@ -47,7 +47,9 @@ func build(t: String, r: Array, start_cursor := 0) -> void:
 	_arrows.clear()
 	set_anchors_preset(Control.PRESET_FULL_RECT)
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
-	touch = Game.touch_active or Game.touch_device()
+	# Cards on a touch screen, and for any list too long for the screen (they
+	# scroll; keys and pads move through them the same way).
+	touch = Game.touch_active or Game.touch_device() or top + rows.size() * row_h > 430
 	if touch:
 		_build_touch()
 		return
