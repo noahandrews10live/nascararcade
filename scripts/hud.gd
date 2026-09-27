@@ -96,7 +96,8 @@ func _layout() -> void:
 	l_msg.position = Vector2(0, H * 0.31)
 	l_msg.pivot_offset = Vector2(W * 0.5, 40)
 	l_spot.size = Vector2(W, 30)
-	l_spot.position = Vector2(0, H - 88)
+	# On narrow screens the gauges at the bottom reach the middle: go above them.
+	l_spot.position = Vector2(0, H - (88.0 if W >= 820.0 else 132.0))
 	l_flag.position = Vector2(W * 0.5 - 120, 4)
 	l_sub.size = Vector2(W, 30)
 	l_sub.position = Vector2(0, H * 0.46)

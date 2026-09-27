@@ -322,4 +322,4 @@ func _draw() -> void:
 		draw_line(Vector2(cx - 60, y), Vector2(cx + 60, y), Color(1, 1, 1, 0.2), 4.0)
 		draw_line(Vector2(cx, y), Vector2(cx + _steer * 60.0, y), Color(1, 0.85, 0.2, 0.8), 4.0)
 		if tilt and not _tilt_ok and _race_time < 6.0:
-			draw_string(_font, Vector2(sr.position.x, y - 16.0), "NO TILT SENSOR HERE: DRAG ON THE LEFT TO STEER", HORIZONTAL_ALIGNMENT_CENTER, sr.size.x, 12, Color(1, 1, 1, 0.75))
+			draw_string(_font, Vector2(sr.position.x, sr.position.y + 84.0), "NO TILT SENSOR HERE: DRAG ON THE LEFT TO STEER", HORIZONTAL_ALIGNMENT_CENTER, sr.size.x, 12, Color(1, 1, 1, 0.75))
