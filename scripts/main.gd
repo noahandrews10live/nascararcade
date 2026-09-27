@@ -2479,7 +2479,7 @@ func _enter_paint_shop() -> void:
 		{"id": "first", "label": "FIRST NAME", "values": Game.FIRST_NAMES, "index": Game.custom.first},
 		{"id": "last", "label": "LAST NAME", "values": Game.LAST_NAMES, "index": Game.custom.last},
 		{"id": "sponsor", "label": "SPONSOR", "values": Game.SPONSORS, "index": Game.custom.sponsor},
-		{"id": "make", "label": "BODY", "values": ["FASTBACK", "LONG HOOD", "SPORT COUPE"], "index": Game.custom.make, "hint": "THE THREE CUP BODIES ON ONE CHASSIS: SAME SPEED, DIFFERENT LOOKS"},
+		{"id": "make", "label": "BODY", "values": CarBody.MAKES.map(func(m): return m.name), "index": Game.custom.make, "hint": "FOUR BODIES ON ONE CHASSIS: SAME SPEED, DIFFERENT LOOKS"},
 		{"id": "c1", "label": "BODY COLOR", "values": cols, "index": Game.custom.c1},
 		{"id": "c2", "label": "TRIM COLOR", "values": cols, "index": Game.custom.c2},
 		{"id": "cn", "label": "NUMBER COLOR", "values": cols, "index": Game.custom.cn},

@@ -105,11 +105,37 @@ func setup(trk: Node3D, player_team: int, lap_count: int, size := 40, grid: Arra
 	if player2_team >= 0:
 		grid_p2 = grid_player + 1 if grid_player + 1 < field_size else grid_player - 1
 		roster[grid_p2] = player2_team
+	# Bodies: the four makes split evenly across the field. Human drivers keep the
+	# body they picked; everyone else takes whichever make is scarcest so far.
+	var CarBody = load("res://scripts/car_body.gd")
+	var nm: int = CarBody.MAKES.size()
+	var counts := []
+	counts.resize(nm)
+	counts.fill(0)
+	var makes := []
+	makes.resize(roster.size())
+	makes.fill(-1)
+	for p in roster.size():
+		if (player_team >= 0 and p == grid_player) or p == grid_p2:
+			makes[p] = CarBody.make_of(Game.teams[roster[p]])
+			counts[makes[p]] += 1
+	for p in roster.size():
+		if makes[p] >= 0:
+			continue
+		var best := posmod(p, nm)
+		for k in nm:
+			var m := posmod(p + k, nm)
+			if counts[m] < counts[best]:
+				best = m
+		makes[p] = best
+		counts[best] += 1
 	for p in roster.size():
 		var c: Node3D = Car.new()
 		c.name = "Car%s" % Game.teams[roster[p]].num
 		add_child(c)
-		c.setup(Game.teams[roster[p]], track)
+		var tm: Dictionary = Game.teams[roster[p]].duplicate()
+		tm["make"] = makes[p]
+		c.setup(tm, track)
 		c.is_player = (player_team >= 0 and p == grid_player) or p == grid_p2
 		c.ai = not c.is_player
 		c.assisted = true
