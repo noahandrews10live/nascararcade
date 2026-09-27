@@ -4,7 +4,7 @@
 // Incrementing CACHE_VERSION will kick off the install event and force
 // previously cached resources to be updated from the network.
 /** @type {string} */
-const CACHE_VERSION = '1790475577|3158532';
+const CACHE_VERSION = '1790479698|3323315';
 /** @type {string} */
 const CACHE_PREFIX = 'Speedway Thunder-sw-cache-';
 const CACHE_NAME = CACHE_PREFIX + CACHE_VERSION;
