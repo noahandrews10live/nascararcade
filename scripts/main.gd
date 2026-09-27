@@ -1546,6 +1546,7 @@ func _on_pit_call(info: Dictionary) -> void:
 		pit_menu.queue_free()
 	paused = true
 	pause_layer.visible = false
+	hud.visible = false # the pit call screen has the running order and laps to go
 	synth.beep(660.0, 0.2)
 	var options: Array = info.options
 	var names: Array = []
@@ -1596,6 +1597,7 @@ func _close_pit_menu() -> void:
 	pit_menu.queue_free()
 	pit_menu = null
 	paused = false
+	hud.visible = true
 	synth.beep(1320.0, 0.08)
 	if race and race.control:
 		race.control.resolve_player(call, wedge)
