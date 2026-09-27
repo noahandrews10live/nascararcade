@@ -19,6 +19,7 @@ var _labels: Array = []
 var _values: Array = []
 var _hint: Label
 var _title: Label
+var _keys: Label
 var _blink := 0.0
 
 
@@ -68,6 +69,7 @@ func build(t: String, r: Array, start_cursor := 0) -> void:
 	keys.size = Vector2(640, 20)
 	keys.position = Vector2(0, 452)
 	add_child(keys)
+	_keys = keys
 	_refresh()
 
 
@@ -136,3 +138,5 @@ func handle(event: InputEvent) -> bool:
 
 func _process(delta: float) -> void:
 	_blink += delta
+	if _keys:
+		_keys.visible = not Game.touch_active # the keyboard keys mean nothing on a phone

@@ -146,10 +146,13 @@ func clear_messages() -> void:
 
 func _process(delta: float) -> void:
 	if auto_size and l_msg:
-		var sz: Vector2 = get_viewport().get_visible_rect().size
-		if not sz.is_equal_approx(Vector2(W, H)):
-			W = sz.x
-			H = sz.y
+		# Fill the screen, less any notch, rounded corners or home bar.
+		var sr: Rect2 = Game.safe_rect(get_viewport())
+		if not sr.size.is_equal_approx(Vector2(W, H)) or not sr.position.is_equal_approx(position):
+			W = sr.size.x
+			H = sr.size.y
+			position = sr.position
+			size = sr.size
 			_layout()
 	blink += delta
 	if msg_time > 0.0:

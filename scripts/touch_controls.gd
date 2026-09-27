@@ -36,6 +36,7 @@ var _js_window = null
 var _last_racing := false
 var _font: Font
 var _race_time := 0.0 # seconds since the race controls came up
+var _k := 1.0 # size of the controls (1 = phone-sized; smaller on bigger screens)
 var _portrait := false # the page says the phone is upright: the race waits (paused)
 
 
@@ -80,36 +81,60 @@ const PEDAL_R := 38.0
 
 
 func _layout() -> void:
-	var sz := get_viewport_rect().size
-	var W := sz.x
-	var H := sz.y
+	# Everything stays inside the safe part of the screen (clear of a notch,
+	# rounded corners and the home bar), and is sized for thumbs: k shrinks it on
+	# screens with more room than a phone.
+	var sr := Game.safe_rect(get_viewport())
+	var k := Game.touch_scale()
+	_k = k
+	var L := sr.position.x
+	var T := sr.position.y
+	var R := sr.end.x
+	var B := sr.end.y
 	_buttons.clear()
+	var reserve: Array = []
 	if _racing():
 		# Round pedals under the right thumb: green GAS, red BRAKE just to its left.
-		var gas_c := Vector2(W - 20 - PEDAL_R, H * 0.54)
-		var brake_c := gas_c + Vector2(-PEDAL_R * 2.0 - 22.0, PEDAL_R * 0.5)
-		_buttons.append([Rect2(gas_c - Vector2.ONE * PEDAL_R, Vector2.ONE * PEDAL_R * 2.0), "GAS", "accelerate", "gas"])
-		_buttons.append([Rect2(brake_c - Vector2.ONE * PEDAL_R, Vector2.ONE * PEDAL_R * 2.0), "BRAKE", "brake", "brake"])
-		var x := W - 58.0
-		_buttons.append([Rect2(x, 96, 48, 34), "II", "pause", "tap"])
-		_buttons.append([Rect2(x, 136, 48, 34), "CAM", "camera", "tap"])
+		var pr := PEDAL_R * k
+		var gas_c := Vector2(R - 20.0 * k - pr, T + sr.size.y * 0.54)
+		var brake_c := gas_c + Vector2(-pr * 2.0 - 22.0 * k, pr * 0.5)
+		_buttons.append([Rect2(gas_c - Vector2.ONE * pr, Vector2.ONE * pr * 2.0), "GAS", "accelerate", "gas"])
+		_buttons.append([Rect2(brake_c - Vector2.ONE * pr, Vector2.ONE * pr * 2.0), "BRAKE", "brake", "brake"])
+		# Small buttons under the position readout (top right).
+		var bw := 48.0 * k
+		var bh := 34.0 * k
+		var gap := 6.0 * k
+		var x := R - 10.0 - bw
+		var y := T + 96.0
+		_buttons.append([Rect2(x, y, bw, bh), "II", "pause", "tap"])
+		_buttons.append([Rect2(x, y + bh + gap, bw, bh), "CAM", "camera", "tap"])
 		if main.race.control:
-			_buttons.append([Rect2(x, 176, 48, 34), "PIT", "pit", "tap"])
-		_buttons.append([Rect2(x - 56, 96, 50, 34), "TILT" if tilt else "DRAG", "_toggle_tilt", "tap"])
+			_buttons.append([Rect2(x, y + (bh + gap) * 2.0, bw, bh), "PIT", "pit", "tap"])
+		_buttons.append([Rect2(x - bw - gap - 2.0 * k, y, bw + 2.0 * k, bh), "TILT" if tilt else "DRAG", "_toggle_tilt", "tap"])
 		if tilt and _tilt_ok:
-			_buttons.append([Rect2(x - 56, 136, 50, 34), "CTR", "_recenter", "tap"])
+			_buttons.append([Rect2(x - bw - gap - 2.0 * k, y + bh + gap, bw + 2.0 * k, bh), "CTR", "_recenter", "tap"])
+	elif main and main.paused and main.pit_menu == null:
+		# The pause screen: just RESUME and QUIT, under "PAUSED".
+		var c := sr.get_center()
+		var w := 120.0 * k
+		var h := 46.0 * k
+		_buttons.append([Rect2(c.x - w - 10.0 * k, c.y + 16.0, w, h), "RESUME", "pause", "tap"])
+		_buttons.append([Rect2(c.x + 10.0 * k, c.y + 16.0, w, h), "QUIT", "quit_race", "tap"])
 	else:
 		# D-pad bottom left, A/B bottom right.
-		var c := Vector2(78, H - 82)
-		_buttons.append([Rect2(c + Vector2(-24, -72), Vector2(48, 48)), "^", "menu_up", "tap"])
-		_buttons.append([Rect2(c + Vector2(-24, 24), Vector2(48, 48)), "v", "menu_down", "tap"])
-		_buttons.append([Rect2(c + Vector2(-72, -24), Vector2(48, 48)), "<", "steer_left", "tap"])
-		_buttons.append([Rect2(c + Vector2(24, -24), Vector2(48, 48)), ">", "steer_right", "tap"])
-		_buttons.append([Rect2(W - 96, H - 124, 72, 72), "A", "start", "tap"])
-		_buttons.append([Rect2(W - 176, H - 84, 60, 60), "B", "back", "tap"])
-		if main and main.paused and main.pit_menu == null:
-			_buttons.append([Rect2(W - 116, H - 180, 92, 44), "RESUME", "pause", "tap"])
-			_buttons.append([Rect2(W - 176, H - 150, 60, 44), "QUIT", "quit_race", "tap"])
+		var d := 48.0 * k
+		var c := Vector2(L + 8.0 * k + d * 1.5, B - 8.0 * k - d * 1.5)
+		_buttons.append([Rect2(c + Vector2(-0.5, -1.5) * d, Vector2(d, d)), "^", "menu_up", "tap"])
+		_buttons.append([Rect2(c + Vector2(-0.5, 0.5) * d, Vector2(d, d)), "v", "menu_down", "tap"])
+		_buttons.append([Rect2(c + Vector2(-1.5, -0.5) * d, Vector2(d, d)), "<", "steer_left", "tap"])
+		_buttons.append([Rect2(c + Vector2(0.5, -0.5) * d, Vector2(d, d)), ">", "steer_right", "tap"])
+		reserve.append(Rect2(c - Vector2.ONE * d * 1.5, Vector2.ONE * d * 3.0).grow(6.0))
+		var a := Rect2(R - 16.0 * k - 72.0 * k, B - 36.0 * k - 72.0 * k, 72.0 * k, 72.0 * k)
+		var bb := Rect2(a.position.x - 8.0 * k - 60.0 * k, B - 16.0 * k - 60.0 * k, 60.0 * k, 60.0 * k)
+		_buttons.append([a, "A", "start", "tap"])
+		_buttons.append([bb, "B", "back", "tap"])
+		reserve.append(a.merge(bb).grow(6.0))
+	Game.touch_reserve = reserve if visible else []
 
 
 ## Steering (-1..1) for the phone turned `a` degrees from straight: a small dead
@@ -148,6 +173,7 @@ func _input(event: InputEvent) -> void:
 		# Someone picked up a keyboard or controller.
 		active = false
 		visible = false
+		Game.touch_reserve = []
 		_release_all()
 
 
@@ -205,6 +231,9 @@ func _release_all() -> void:
 
 
 func _process(delta: float) -> void:
+	Game.touch_active = active
+	if main and main.pause_keys:
+		main.pause_keys.visible = not active # the pause screen gets buttons instead
 	if not active:
 		return
 	var racing := _racing()
@@ -242,7 +271,7 @@ func _process(delta: float) -> void:
 					brake = 1.0
 				"steer":
 					dragging = true
-					drag = clamp((f.pos.x - f.start.x) / DRAG_RANGE, -1.0, 1.0)
+					drag = clamp((f.pos.x - f.start.x) / (DRAG_RANGE * _k), -1.0, 1.0)
 		if tilt and _tilt_ok and not dragging:
 			var target: float = tilt_steer(_tilt_value - _tilt_center)
 			_tilt_smooth += (target - _tilt_smooth) * (1.0 - exp(-delta / TILT_SMOOTH))
@@ -272,23 +301,25 @@ func _draw() -> void:
 			var rad := r.size.x * 0.5 * (0.94 if pressed else 1.0)
 			draw_circle(c, rad, Color(hue, 0.75 if pressed else 0.45))
 			draw_arc(c, rad, 0, TAU, 48, Color(hue.lightened(0.5), 0.9), 3.0, true)
-			draw_string(_font, Vector2(r.position.x, c.y + 5.0), String(b[1]), HORIZONTAL_ALIGNMENT_CENTER, r.size.x, 14, Color(1, 1, 1, 0.9))
+			var pfs := maxi(10, roundi(14.0 * _k))
+			draw_string(_font, Vector2(r.position.x, c.y + pfs * 0.35), String(b[1]), HORIZONTAL_ALIGNMENT_CENTER, r.size.x, pfs, Color(1, 1, 1, 0.9))
 			continue
 		var col := Color(1, 1, 1, 0.28 if pressed else 0.14)
 		draw_rect(r, col)
 		draw_rect(r, Color(1, 1, 1, 0.45), false, 2.0)
-		var fs := 18 if r.size.y > 40 else 12
+		var fs := maxi(10, roundi((18.0 if r.size.y > 40.0 * _k else 12.0) * _k))
 		draw_string(_font, Vector2(r.position.x, r.get_center().y + fs * 0.35), String(b[1]), HORIZONTAL_ALIGNMENT_CENTER, r.size.x, fs, Color(1, 1, 1, 0.85))
 	if _racing():
 		# The thumb's steering knob, and the steering amount along the bottom.
 		for f in _fingers.values():
 			if f.zone == "steer":
-				draw_circle(f.start, 34.0, Color(1, 1, 1, 0.08))
-				draw_arc(f.start, 34.0, 0, TAU, 32, Color(1, 1, 1, 0.35), 2.0)
-				draw_circle(Vector2(f.start.x + _steer * DRAG_RANGE, f.start.y), 18.0, Color(1, 1, 1, 0.4))
-		var W := get_viewport_rect().size.x
-		var y := get_viewport_rect().size.y - 8.0
-		draw_line(Vector2(W * 0.5 - 60, y), Vector2(W * 0.5 + 60, y), Color(1, 1, 1, 0.2), 4.0)
-		draw_line(Vector2(W * 0.5, y), Vector2(W * 0.5 + _steer * 60.0, y), Color(1, 0.85, 0.2, 0.8), 4.0)
+				draw_circle(f.start, 34.0 * _k, Color(1, 1, 1, 0.08))
+				draw_arc(f.start, 34.0 * _k, 0, TAU, 32, Color(1, 1, 1, 0.35), 2.0)
+				draw_circle(Vector2(f.start.x + _steer * DRAG_RANGE * _k, f.start.y), 18.0 * _k, Color(1, 1, 1, 0.4))
+		var sr := Game.safe_rect(get_viewport())
+		var cx := sr.get_center().x
+		var y := sr.end.y - 8.0
+		draw_line(Vector2(cx - 60, y), Vector2(cx + 60, y), Color(1, 1, 1, 0.2), 4.0)
+		draw_line(Vector2(cx, y), Vector2(cx + _steer * 60.0, y), Color(1, 0.85, 0.2, 0.8), 4.0)
 		if tilt and not _tilt_ok and _race_time < 6.0:
-			draw_string(_font, Vector2(0, y - 16.0), "NO TILT SENSOR HERE: DRAG ON THE LEFT TO STEER", HORIZONTAL_ALIGNMENT_CENTER, W, 12, Color(1, 1, 1, 0.75))
+			draw_string(_font, Vector2(sr.position.x, y - 16.0), "NO TILT SENSOR HERE: DRAG ON THE LEFT TO STEER", HORIZONTAL_ALIGNMENT_CENTER, sr.size.x, 12, Color(1, 1, 1, 0.75))

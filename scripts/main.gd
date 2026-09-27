@@ -43,6 +43,8 @@ var ui_layer: CanvasLayer
 var ui_root: Control # the 640x480 menu frame, centred however wide the screen is
 var screen: Control
 var pause_layer: CanvasLayer
+## The pause screen's keyboard keys (the touch controls show buttons instead).
+var pause_keys: Label
 var scan_rect: ColorRect
 var preview_car: Node3D
 
@@ -178,7 +180,7 @@ func _ready() -> void:
 	ui_layer = CanvasLayer.new()
 	ui_layer.layer = 2
 	add_child(ui_layer)
-	ui_root = Game.center_frame(Control.new())
+	ui_root = Game.center_frame(Control.new(), true)
 	ui_layer.add_child(ui_root)
 
 	pause_layer = CanvasLayer.new()
@@ -196,11 +198,11 @@ func _ready() -> void:
 	pl.size = Vector2(640, 60)
 	pl.position = Vector2(0, 170)
 	pause_frame.add_child(pl)
-	var pl2 := Game.make_label("ESC  RESUME        Q  QUIT / END SESSION", 18, Color.WHITE, 5)
-	pl2.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	pl2.size = Vector2(640, 30)
-	pl2.position = Vector2(0, 250)
-	pause_frame.add_child(pl2)
+	pause_keys = Game.make_label("ESC  RESUME        Q  QUIT / END SESSION", 18, Color.WHITE, 5)
+	pause_keys.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	pause_keys.size = Vector2(640, 30)
+	pause_keys.position = Vector2(0, 250)
+	pause_frame.add_child(pause_keys)
 
 	var touch_layer := CanvasLayer.new()
 	touch_layer.layer = 6 # above the pause screen, so RESUME / QUIT can be tapped

@@ -1151,15 +1151,146 @@ static func ordinal(n: int) -> String:
 
 
 ## Lays a control out as the 640x480 design frame, centred in the window (the
-## window can be wider or taller in the Modern look).
-static func center_frame(c: Control) -> Control:
+## window can be wider or taller in the Modern look). Every frame is then kept
+## inside the part of the screen that's actually visible (clear of a notch,
+## rounded corners and the home bar), shrinking it if it has to. `avoid_touch`
+## frames (the menus) also keep clear of the on-screen D-pad and A/B buttons.
+func center_frame(c: Control, avoid_touch := false) -> Control:
 	c.set_anchors_preset(Control.PRESET_CENTER)
 	c.offset_left = -320.0
 	c.offset_right = 320.0
 	c.offset_top = -240.0
 	c.offset_bottom = 240.0
 	c.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	frames.append([c, avoid_touch])
 	return c
+
+
+## --- Fitting the screen
+
+const FRAME := Vector2(640, 480)
+## Menus rarely draw in the outer edge of their frame, so an on-screen button may
+## sit over this much of it (in frame units).
+const FRAME_EDGE := 24.0
+## A phone in landscape shows about 0.92 CSS pixels per 640x480 unit; the touch
+## controls are sized for that and scaled down on bigger screens (tablets,
+## touchscreen laptops) so they stay thumb-sized rather than huge.
+const TOUCH_CSS_PER_UNIT := 0.92
+
+var frames: Array = [] # [Control, avoid_touch]
+## The screen edges a notch, rounded corners or the home bar cover, as fractions of
+## the window: left, top, right, bottom. The web page measures them (CSS
+## safe-area insets); ST_SAFE="l,t,r,b" sets them for tests.
+var safe_frac := [0.0, 0.0, 0.0, 0.0]
+## Rectangles (canvas units) the on-screen touch buttons take up in the menus.
+var touch_reserve: Array = []
+## The on-screen touch controls are showing (keyboard hints can hide).
+var touch_active := false
+var _css_per_unit := 0.0
+var _screen_poll := 0.0
+var _js_win = null
+
+
+func _process(delta: float) -> void:
+	_screen_poll -= delta
+	if _screen_poll <= 0.0:
+		_screen_poll = 0.25
+		_read_screen()
+	var i := frames.size() - 1
+	while i >= 0:
+		var c = frames[i][0]
+		if not is_instance_valid(c):
+			frames.remove_at(i)
+		elif c.is_inside_tree():
+			_fit_frame(c, frames[i][1])
+		i -= 1
+
+
+func _read_screen() -> void:
+	var f := [0.0, 0.0, 0.0, 0.0]
+	var cpu := 0.0
+	var env := OS.get_environment("ST_SAFE")
+	if env != "":
+		var parts := env.split(",")
+		for k in min(4, parts.size()):
+			f[k] = clamp(float(parts[k]), 0.0, 0.4)
+	elif OS.has_feature("web"):
+		if _js_win == null:
+			_js_win = JavaScriptBridge.get_interface("window")
+		if _js_win:
+			var a = _js_win.stSafe
+			if a != null:
+				for k in 4:
+					var v = a[k]
+					f[k] = clamp(float(v), 0.0, 0.4) if v != null else 0.0
+			var dpr = _js_win.devicePixelRatio
+			var vis := get_viewport().get_visible_rect().size
+			if dpr != null and float(dpr) > 0.0 and vis.y > 0.0:
+				cpu = float(get_window().size.y) / float(dpr) / vis.y
+	var env_cpu := OS.get_environment("ST_CSS_PER_UNIT")
+	if env_cpu != "":
+		cpu = float(env_cpu)
+	safe_frac = f
+	_css_per_unit = cpu
+
+
+## The part of `vp` (in its canvas units) that's clear of notches, rounded corners
+## and the home bar.
+func safe_rect(vp: Viewport) -> Rect2:
+	var vis := vp.get_visible_rect()
+	if not (vp is Window) or safe_frac == [0.0, 0.0, 0.0, 0.0]:
+		return vis
+	var ws := Vector2((vp as Window).size)
+	var win_r := Rect2(safe_frac[0] * ws.x, safe_frac[1] * ws.y, ws.x * (1.0 - safe_frac[0] - safe_frac[2]), ws.y * (1.0 - safe_frac[1] - safe_frac[3]))
+	var r: Rect2 = vp.get_final_transform().affine_inverse() * win_r
+	r = r.intersection(vis)
+	return r if r.has_area() else vis
+
+
+## How big to draw the touch controls (1 = sized for a phone): smaller on
+## screens with more room, so they stay about thumb-sized.
+func touch_scale() -> float:
+	if _css_per_unit <= 0.0:
+		return 1.0
+	return clamp(TOUCH_CSS_PER_UNIT / _css_per_unit, 0.6, 1.0)
+
+
+func _fit_frame(c: Control, avoid_touch: bool) -> void:
+	var sr := safe_rect(c.get_viewport())
+	var s: float = min(1.0, sr.size.x / FRAME.x, sr.size.y / FRAME.y)
+	var top := false
+	if avoid_touch and not touch_reserve.is_empty() and _frame_hits(sr, s, false):
+		# Either shrink it to fit between the buttons, or put it above them (its
+		# bottom edge may overlap): whichever leaves the menu bigger.
+		var side := 0.0
+		var band := 0.0
+		for r: Rect2 in touch_reserve:
+			if r.get_center().x < sr.get_center().x:
+				side = max(side, r.end.x - sr.position.x)
+			else:
+				side = max(side, sr.end.x - r.position.x)
+			band = max(band, sr.end.y - r.position.y)
+		var s_between: float = min(s, (sr.size.x - 2.0 * side) / (FRAME.x - 2.0 * FRAME_EDGE))
+		var s_above: float = min(1.0, sr.size.x / FRAME.x, (sr.size.y - band) / (FRAME.y - FRAME_EDGE))
+		if s_above > s_between:
+			s = s_above
+			top = true
+		else:
+			s = s_between
+		s = max(s, 0.3)
+	c.pivot_offset = Vector2.ZERO
+	c.scale = Vector2(s, s)
+	var y: float = sr.position.y if top else sr.get_center().y - FRAME.y * 0.5 * s
+	c.position = Vector2(sr.get_center().x - FRAME.x * 0.5 * s, y)
+
+
+func _frame_hits(sr: Rect2, s: float, top: bool) -> bool:
+	var y: float = sr.position.y if top else sr.get_center().y - FRAME.y * 0.5 * s
+	var fr := Rect2(sr.get_center().x - FRAME.x * 0.5 * s, y, FRAME.x * s, FRAME.y * s).grow(-FRAME_EDGE * s)
+	for r: Rect2 in touch_reserve:
+		if fr.intersects(r):
+			return true
+	return false
 
 
 func make_label(text: String, size: int, color := Color.WHITE, outline := 6) -> Label:
