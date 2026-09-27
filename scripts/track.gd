@@ -1020,8 +1020,8 @@ func _build_infield(rng: RandomNumberGenerator) -> void:
 		am.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arr)
 		var img := Image.create(2, 1, false, Image.FORMAT_RGB8)
 		var g: Color = cfg.grass
-		img.set_pixel(0, 0, g.lightened(0.1))
-		img.set_pixel(1, 0, g.darkened(0.12))
+		img.set_pixel(0, 0, g.lightened(0.06))
+		img.set_pixel(1, 0, g.darkened(0.07))
 		var gm := StandardMaterial3D.new()
 		gm.albedo_texture = ImageTexture.create_from_image(img)
 		gm.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR
