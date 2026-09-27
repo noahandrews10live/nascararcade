@@ -50,6 +50,38 @@ func begin(idx: int, show: bool, team: Dictionary) -> void:
 		_car.visible = false
 
 
+## Someone else's lap to chase (a friend's, or the world record), from the
+## leaderboards: drawn in `tint` with their name over it.
+func begin_samples(samples: PackedFloat32Array, team: Dictionary, tint: Color, label: String) -> void:
+	end()
+	track_idx = -1
+	_best = samples
+	active = _best.size() >= 8
+	if not active:
+		return
+	_car = Car.new()
+	add_child(_car)
+	_car.setup(team, null)
+	_mat = StandardMaterial3D.new()
+	_mat.albedo_color = Color(tint.r, tint.g, tint.b, 0.3)
+	_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	_mat.cull_mode = BaseMaterial3D.CULL_BACK
+	_ghostify(_car)
+	var tag := Label3D.new()
+	tag.text = label
+	tag.font = Game.arcade_font
+	tag.font_size = 64
+	tag.pixel_size = 0.012
+	tag.modulate = tint
+	tag.outline_size = 12
+	tag.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	tag.no_depth_test = true
+	tag.position = Vector3(0, 2.6, 0)
+	_car.add_child(tag)
+	_car.visible = false
+
+
 func end() -> void:
 	active = false
 	if _car and is_instance_valid(_car):

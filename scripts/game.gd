@@ -431,6 +431,91 @@ func daily_key() -> String:
 	return "%04d%02d%02d" % [d.year, d.month, d.day]
 
 
+## The key the online daily leaderboard files today's results under.
+func daily_event_key() -> String:
+	var d := Time.get_date_dict_from_system()
+	return "daily-%04d-%02d-%02d" % [d.year, d.month, d.day]
+
+
+## This week's time trial: the same track for everyone all week (ISO weeks),
+## best lap wins. {key, track, name}.
+func weekly_event() -> Dictionary:
+	var unix := int(Time.get_unix_time_from_system())
+	var days := unix / 86400
+	# ISO week: weeks start on Monday; 1970-01-01 was a Thursday.
+	var dow := (days + 3) % 7 # 0 = Monday
+	var thursday := days - dow + 3
+	var td := Time.get_date_dict_from_unix_time(thursday * 86400)
+	var jan1 := int(Time.get_unix_time_from_datetime_dict({"year": td.year, "month": 1, "day": 1})) / 86400
+	var week := (thursday - jan1) / 7 + 1
+	var track: int = (td.year * 53 + week) % mini(tracks.size(), 11)
+	return {"key": "weekly-%04d-W%02d" % [td.year, week], "track": track, "name": String(tracks[track].short) + " TIME TRIAL"}
+
+
+# --- progression ---------------------------------------------------------------
+
+const PROGRESS_PATH := "user://progress.cfg"
+var progress := {"xp": 0}
+## What each level unlocks (the paint schemes, in order).
+const SCHEME_LEVEL := [1, 1, 2, 3, 4, 5, 6] # CLASSIC, TWO-TONE, SWOOSH, TWIN STRIPES, FLAMES, ARROW, SPLIT
+
+
+static func level_for(xp: int) -> int:
+	# The same curve as the server: 500 XP to level 2, each level 15% more.
+	var lvl := 1
+	var need := 500
+	var left := xp
+	while left >= need and lvl < 99:
+		left -= need
+		lvl += 1
+		need = int(round(need * 1.15))
+	return lvl
+
+
+## XP into this level and the XP the level takes: [into, needed].
+static func level_progress(xp: int) -> Array:
+	var need := 500
+	var left := xp
+	var lvl := 1
+	while left >= need and lvl < 99:
+		left -= need
+		lvl += 1
+		need = int(round(need * 1.15))
+	return [left, need]
+
+
+func level() -> int:
+	return level_for(int(progress.xp))
+
+
+func scheme_unlocked(i: int) -> bool:
+	return level() >= int(SCHEME_LEVEL[clamp(i, 0, SCHEME_LEVEL.size() - 1)])
+
+
+func load_progress() -> void:
+	var cf := ConfigFile.new()
+	if cf.load(PROGRESS_PATH) == OK:
+		progress.xp = int(cf.get_value("progress", "xp", 0))
+
+
+## XP for a race: the result, the laps run, a clean race, a win. Returns
+## {xp, total, level, levelled_up}.
+func award_race(place: int, field: int, laps: int, clean: bool) -> Dictionary:
+	var before := level()
+	var xp: int = 60 + maxi(field - place, 0) * 8 + laps * 6
+	if place == 1:
+		xp += 200
+	elif place <= 3:
+		xp += 80
+	if clean:
+		xp += 40
+	progress.xp = int(progress.xp) + xp
+	var cf := ConfigFile.new()
+	cf.set_value("progress", "xp", progress.xp)
+	cf.save(PROGRESS_PATH)
+	return {"xp": xp, "total": progress.xp, "level": level(), "levelled_up": level() > before}
+
+
 func daily_challenge() -> Dictionary:
 	var rng := RandomNumberGenerator.new()
 	rng.seed = hash("daily" + daily_key())
@@ -513,7 +598,7 @@ var settings := {
 	# Browsers get a 20-car field by default (GDScript runs slower there).
 	"length": 1, "difficulty": 1, "field": 0 if OS.has_feature("web") else 2, "cautions": 1, "damage": 1, "wear": 1, "weather": 0,
 	"assists": 2, "manual": 0, "weekend": 1, "touch_tilt": true, "tilt_sens": 1, "res_mode": 0, "commentary": 1, "catchup": 0,
-	"auto_gas": 0, "tutorial_done": 0,
+	"auto_gas": 0, "tutorial_done": 0, "share_stats": 1,
 }
 ## Garage setup (applied to the player's car): -3..3 balance (tight..loose),
 ## tyre pressure 0 low / 1 std / 2 high, gearing 0 short / 1 std / 2 long.
@@ -544,6 +629,7 @@ func _ready() -> void:
 	load_settings()
 	load_season()
 	load_custom()
+	load_progress()
 	load_challenges()
 	load_career()
 

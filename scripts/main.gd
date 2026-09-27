@@ -23,6 +23,7 @@ const RainFx := preload("res://scripts/rain_fx.gd")
 const RaceDay := preload("res://scripts/race_day.gd")
 const TouchControls := preload("res://scripts/touch_controls.gd")
 const Tutorial := preload("res://scripts/tutorial.gd")
+const Cloud := preload("res://scripts/cloud.gd")
 const Menu := preload("res://scripts/menu.gd")
 
 enum State { TITLE, MODE_SELECT, TRACK_SELECT, CAR_SELECT, MENU, COUNTDOWN, RACE, FINISHED, RESULTS, SESSION_RESULTS, STANDINGS, REPLAY }
@@ -44,6 +45,10 @@ var synth: Node
 var soundscape: Node3D
 var hud: Control
 var tutorial: Control # first race on a phone: short prompts
+var cloud: Node # leaderboards, friends, events, progress online
+var rival: Node3D # someone else's best lap to chase (a ghost)
+var last_award := {} # the XP the last race earned
+var _frame_ms: PackedFloat32Array = [] # this race's frame times (for the stats)
 var ui_layer: CanvasLayer
 var ui_root: Control # the 640x480 menu frame, centred however wide the screen is
 var screen: Control
@@ -99,6 +104,7 @@ const MODES := [
 	["SEASON", "RUN A CHAMPIONSHIP. POINTS, WINS AND STANDINGS ARE SAVED.", "season"],
 	["CAREER", "ROOKIE TO CHAMPION: PRIZE MONEY, SPONSORS AND R&D UPGRADES.", "career"],
 	["ONLINE", "RACE FRIENDS: HOST A ROOM AND SHARE THE CODE, OR JOIN ONE.", "online"],
+	["LEADERBOARDS", "WORLD RECORDS, YOUR FRIENDS, AND THE DAILY AND WEEKLY EVENTS.", "boards"],
 	["CHALLENGES", "RACE-DEFINING MOMENTS, AND A NEW ONE EVERY DAY.", "challenges"],
 	["PAINT SHOP", "CREATE YOUR OWN CAR: NUMBER, DRIVER, SPONSOR, SCHEME AND COLORS.", "paint"],
 	["OPTIONS", "CONTROLS, GRAPHICS, SOUND AND RECORDS.", "options"],
@@ -245,6 +251,17 @@ func _ready() -> void:
 	ghost = Ghost.new()
 	ghost.name = "Ghost"
 	add_child(ghost)
+	rival = Ghost.new()
+	rival.name = "Rival"
+	add_child(rival)
+	cloud = Cloud.new()
+	cloud.name = "Cloud"
+	add_child(cloud)
+	if cloud.enabled:
+		cloud.register(func(ok: bool):
+			if ok:
+				cloud.push_profile()
+				cloud.load_friends())
 
 	var scan_layer := CanvasLayer.new()
 	scan_layer.layer = 10
@@ -911,6 +928,7 @@ func _start_attract() -> void:
 func _enter_title() -> void:
 	showtime.reset()
 	ghost.end()
+	rival.end()
 	if not _quick_saved.is_empty():
 		for k in _quick_saved:
 			Game.settings[k] = _quick_saved[k]
@@ -984,6 +1002,8 @@ func _start_mode(id: String) -> void:
 			_enter_track_editor()
 		"options":
 			_enter_options()
+		"boards":
+			_enter_boards()
 
 
 ## The garage: your car in the showroom on the left, the modes as big tiles on
@@ -1008,6 +1028,12 @@ func _enter_mode_select() -> void:
 	_label("", "SPEEDWAY THUNDER", 26, Color(1.0, 0.85, 0.1), Vector2(18, 14), HORIZONTAL_ALIGNMENT_LEFT, 7)
 	_label("", "#%s  %s" % [t.num, t.driver], 16, Color.WHITE, Vector2(18, 348), HORIZONTAL_ALIGNMENT_LEFT, 5)
 	_label("", "%s  -  %s" % [t.sponsor, CarBody.MAKES[CarBody.make_of(t)].name], 12, Color(1.0, 0.85, 0.3), Vector2(18, 370), HORIZONTAL_ALIGNMENT_LEFT, 4)
+	# Your level and how far into it you are.
+	var lp: Array = Game.level_progress(int(Game.progress.xp))
+	_label("", "LEVEL %d" % Game.level(), 16, Color(0.5, 0.9, 1.0), Vector2(18, 392), HORIZONTAL_ALIGNMENT_LEFT, 5)
+	_panel(Rect2(104, 398, 180, 10), Color(0, 0, 0, 0.6))
+	_panel(Rect2(104, 398, 180.0 * float(lp[0]) / max(float(lp[1]), 1.0), 10), Color(0.3, 0.8, 1.0))
+	_label("", "%d / %d XP" % [int(lp[0]), int(lp[1])], 10, Color(0.8, 0.85, 0.9), Vector2(104, 410), HORIZONTAL_ALIGNMENT_LEFT, 3)
 	_tiles.clear()
 	var x0 := 322.0
 	var y := 18.0
@@ -1158,6 +1184,19 @@ func _enter_countdown() -> void:
 	var chase_self: bool = session in ["practice", "qualify"] or (mode == "challenge" and String(challenge.get("goal", "")) == "time")
 	if race.player:
 		ghost.begin(Game.selected_track, chase_self and split_cams.is_empty(), race.player.team)
+	# Online: chase your fastest friend's best lap here (or the world record's).
+	rival.end()
+	_frame_ms = PackedFloat32Array()
+	last_award = {}
+	if chase_self and split_cams.is_empty() and cloud.enabled and race.player:
+		var tidx: int = Game.selected_track
+		var rteam: Dictionary = race.player.team
+		cloud.rival_ghost(tidx, func(r: Dictionary):
+			if r.has("samples") and Game.selected_track == tidx and state in [State.COUNTDOWN, State.RACE] and race and race.player:
+				var t2: Dictionary = rteam.duplicate()
+				t2["make"] = int(r.get("make", 0))
+				rival.begin_samples(r.samples, t2, Color(1.0, 0.55, 0.1), "%s  %s" % [String(r.name), Game.format_time(float(r.lap_ms) / 1000.0)])
+				_sub("CHASING %s's BEST LAP" % String(r.name), 3.0))
 	# Arcade clock: generous first lap, then an extension each lap.
 	var ref := 0.0
 	var seg: float = track.length / track.n
@@ -1251,6 +1290,12 @@ func _enter_results() -> void:
 	for r in new_records:
 		_label("", r, 18, Color(0.3, 1.0, 0.4), Vector2(0, y2), HORIZONTAL_ALIGNMENT_CENTER, 5)
 		y2 += 22
+	if not last_award.is_empty():
+		var lp: Array = Game.level_progress(int(last_award.total))
+		var txt := "+%d XP     LEVEL %d  (%d / %d)" % [int(last_award.xp), int(last_award.level), int(lp[0]), int(lp[1])]
+		if last_award.levelled_up:
+			txt = "LEVEL UP!  LEVEL %d     +%d XP" % [int(last_award.level), int(last_award.xp)]
+		_label("", txt, 16, Color(1.0, 0.85, 0.2), Vector2(0, min(y2, 412)), HORIZONTAL_ALIGNMENT_CENTER, 5)
 	_label("start", _press("CONTINUE"), 20, Color.WHITE, Vector2(0, 440), HORIZONTAL_ALIGNMENT_CENTER, 5)
 	if race.rec_times.size() > 20:
 		_label("", "R  REPLAY   H  HIGHLIGHTS", 12, Color(0.6, 0.9, 1.0), Vector2(420, 446), HORIZONTAL_ALIGNMENT_LEFT, 3)
@@ -1263,6 +1308,8 @@ func _on_lap(car: Node3D, laps_done: int, lap_time: float) -> void:
 		return
 	if Game.submit_record(Game.selected_track, "lap", lap_time):
 		ghost.save_best()
+		# Your best lap here, and its ghost, to the leaderboards.
+		cloud.submit_lap(Game.selected_track, lap_time, CarBody.make_of(race.player.team), ghost._best)
 		if not new_records.has("NEW LAP RECORD!"):
 			new_records.append("NEW LAP RECORD!")
 	if mode != "arcade" and session == "race" and race.control and laps_done % 5 == 0 and laps_done < race.laps:
@@ -1312,6 +1359,8 @@ func _on_finished(car: Node3D, place: int) -> void:
 			"top5": ok = place <= 5
 			"top10": ok = place <= 10
 			"time": ok = car.best_lap > 0.0 and car.best_lap <= float(challenge.time)
+		if challenge_idx < 0:
+			cloud.submit_daily(place, race.time) # today's board, done or not
 		if ok:
 			var first := Game.complete_daily() if challenge_idx < 0 else Game.complete_challenge(challenge_idx)
 			challenge_result = "CHALLENGE COMPLETE!" + ("   LEGEND UNLOCKED: #00 THUNDERBOLT" if first and Game.challenges_done.size() == 5 else "")
@@ -1319,6 +1368,11 @@ func _on_finished(car: Node3D, place: int) -> void:
 			challenge_result = "CHALLENGE FAILED"
 		if challenge.goal == "time":
 			challenge_result += "   LAP %s" % Game.format_time(car.best_lap)
+	# XP for the race (not practice or qualifying), and how the game ran.
+	if session == "race" and car == race.player and mode != "2p":
+		last_award = Game.award_race(place, race.cars.size(), race.laps, car.total_damage() < 0.08)
+		cloud.push_profile()
+		_send_stats()
 	_set_state(State.FINISHED)
 	showtime.on_finished(car, place)
 	if place == 1 and mode != "2p" and mode != "online" and game_over_reason == "":
@@ -1739,6 +1793,25 @@ func _player_input() -> void:
 		p.shift_request = -1
 
 
+## How the game ran this race (frame rate on this device), anonymously.
+func _send_stats() -> void:
+	if _frame_ms.size() < 60:
+		return
+	var sorted := _frame_ms.duplicate()
+	sorted.sort()
+	var total := 0.0
+	for f in _frame_ms:
+		total += f
+	var avg_ms: float = total / _frame_ms.size()
+	var p95: float = sorted[int(sorted.size() * 0.95)]
+	var device := OS.get_name()
+	if OS.has_feature("web"):
+		device = "web-" + ("tablet" if Game.touch_device() and not OS.has_feature("web_android") and not OS.has_feature("web_ios") else ("android" if OS.has_feature("web_android") else ("ios" if OS.has_feature("web_ios") else "desktop")))
+	var sz := get_window().size
+	cloud.submit_session({"device": "%s %dx%d" % [device, sz.x, sz.y], "touch": Game.touch_active, "fps_avg": snappedf(1000.0 / max(avg_ms, 0.1), 0.1),
+		"fps_p5": snappedf(1000.0 / max(p95, 0.1), 0.1), "cars": race.cars.size(), "quality": Game.quality_level(), "secs": int(total / 1000.0), "mode": mode})
+
+
 # --- touch: menus are touched directly --------------------------------------
 
 func _touchy() -> bool:
@@ -1952,6 +2025,10 @@ func _process(delta: float) -> void:
 				tutorial.active = false
 	if ghost and ghost.active and race and race.player and state in [State.COUNTDOWN, State.RACE]:
 		ghost.update(track, race.player, race.time)
+	if rival and rival.active and race and race.player and state in [State.COUNTDOWN, State.RACE]:
+		rival.update(track, race.player, race.time)
+	if state == State.RACE and not paused:
+		_frame_ms.append(delta * 1000.0)
 	if race == null:
 		return
 	race.interpolate(Engine.get_physics_interpolation_fraction() if Game.smoothing else 1.0)
@@ -2104,7 +2181,7 @@ func _update_camera(delta: float) -> void:
 				var side := (p - eye).cross(Vector3.UP).normalized()
 				# In the paint shop, frame the car on the right, clear of the menu.
 				# In the garage, on the left, clear of the tiles.
-				var shift := -side * 1.9 if state == State.MENU else (side * 2.3 if state == State.MODE_SELECT else Vector3.ZERO)
+				var shift := -side * 1.9 if state == State.MENU else (side * 3.4 if state == State.MODE_SELECT else Vector3.ZERO)
 				cam.look_at(p + Vector3(0, -0.9, 0) + shift, Vector3.UP)
 			else:
 				_tv_camera(delta)
@@ -2356,6 +2433,7 @@ func _enter_options() -> void:
 		{"id": "smooth", "label": "MOTION SMOOTHING", "values": ["OFF", "ON"], "index": 1 if Game.smoothing else 0, "hint": "SMOOTH MOTION ON 120/144 HZ SCREENS (ADDS UNDER 1 FRAME OF DELAY)"},
 		{"id": "blur", "label": "MOTION BLUR", "values": ["OFF", "LOW", "HIGH"], "index": Game.motion_blur, "hint": "DESKTOP MODERN LOOK ONLY"},
 		{"id": "wheel_setup", "label": "WHEEL SETUP", "hint": "STEERING WHEEL, PEDALS AND FORCE FEEDBACK"},
+		{"id": "share_stats", "label": "SHARE STATS", "values": ["OFF", "ON"], "index": int(Game.settings.get("share_stats", 1)), "hint": "SENDS YOUR FRAME RATE AND DEVICE TYPE AFTER A RACE (NOTHING PERSONAL) TO HELP TUNE THE GAME"},
 		{"id": "auto_gas", "label": "GAS", "values": ["YOU", "AUTO"], "index": int(Game.settings.get("auto_gas", 0)), "hint": "AUTO: THE CAR TAKES EACH CORNER AT A SAFE SPEED, YOU STEER (ONE THUMB). BRAKE STILL WORKS"},
 		{"id": "tilt_sens", "label": "TILT STEERING", "values": ["GENTLE", "NORMAL", "QUICK", "VERY QUICK"], "index": int(Game.settings.get("tilt_sens", 1)), "hint": "PHONES: HOW FAR YOU TILT FOR FULL LOCK (18 / 12 / 9 / 6 DEGREES)"},
 		{"id": "radio", "label": "RADIO VOICE", "values": ["OFF", "ON"], "index": 1 if Game.radio_voice else 0, "hint": "SPOKEN SPOTTER, CREW CHIEF AND TV BOOTH CALLS"},
@@ -2404,8 +2482,18 @@ func _on_menu_changed(id: String, idx: int) -> void:
 				Game.setup[id] = idx
 			Game.save_settings()
 		"paint":
-			Game.custom[id] = idx + 1 if id == "num" else idx
-			_paint_preview()
+			if id == "scheme" and not Game.scheme_unlocked(idx):
+				# Locked: show what it looks like, but it isn't yours yet.
+				_sub("%s UNLOCKS AT LEVEL %d" % [CarBody.SCHEMES[idx], Game.SCHEME_LEVEL[idx]], 2.5)
+				var keep: int = Game.custom.scheme
+				Game.custom.scheme = idx
+				_paint_preview()
+				Game.custom.scheme = keep
+			else:
+				Game.custom[id] = idx + 1 if id == "num" else idx
+				_paint_preview()
+		"boards":
+			_on_boards_changed(id, idx)
 		"options":
 			if id == "gfx" and Game.modern_supported and (idx == 1) != Game.modern:
 				Game.toggle_graphics()
@@ -2437,8 +2525,8 @@ func _on_menu_changed(id: String, idx: int) -> void:
 			elif id == "tilt_sens":
 				Game.settings["tilt_sens"] = idx
 				Game.save_settings()
-			elif id == "auto_gas":
-				Game.settings["auto_gas"] = idx
+			elif id == "auto_gas" or id == "share_stats":
+				Game.settings[id] = idx
 				Game.save_settings()
 			elif id == "vsync":
 				Game.vsync = idx == 1
@@ -2476,6 +2564,12 @@ func _on_menu_activated(id: String) -> void:
 		return
 	if id.begins_with("net_"):
 		_on_online_menu(id)
+		return
+	if id == "b_add":
+		_add_friend()
+		return
+	if id == "b_back":
+		_enter_mode_select()
 		return
 	if id == "wheel_setup":
 		_enter_wheel_setup()
@@ -2532,6 +2626,10 @@ func _on_menu_activated(id: String) -> void:
 
 func _on_menu_cancelled() -> void:
 	match menu_kind:
+		"boards":
+			if _friend_edit:
+				_friend_edit.visible = false
+			_enter_mode_select()
 		"race_setup":
 			if menu_return == "hub" or mode == "season" or mode == "career":
 				_return_hub()
@@ -2753,7 +2851,7 @@ func _enter_paint_shop() -> void:
 		{"id": "last", "label": "LAST NAME", "values": Game.LAST_NAMES, "index": Game.custom.last},
 		{"id": "sponsor", "label": "SPONSOR", "values": Game.SPONSORS, "index": Game.custom.sponsor},
 		{"id": "make", "label": "BODY", "values": CarBody.MAKES.map(func(m): return m.name), "index": Game.custom.make, "hint": "FOUR BODIES ON ONE CHASSIS: SAME SPEED, DIFFERENT LOOKS"},
-		{"id": "scheme", "label": "SCHEME", "values": CarBody.SCHEMES, "index": Game.custom.scheme, "hint": "HOW YOUR COLORS GO ON: STRIPES, SWOOSH, FLAMES..."},
+		{"id": "scheme", "label": "SCHEME", "values": range(CarBody.SCHEMES.size()).map(func(i): return CarBody.SCHEMES[i] if Game.scheme_unlocked(i) else "%s (LV %d)" % [CarBody.SCHEMES[i], Game.SCHEME_LEVEL[i]]), "index": Game.custom.scheme, "hint": "HOW YOUR COLORS GO ON. RACE TO LEVEL UP AND UNLOCK MORE"},
 		{"id": "c1", "label": "BODY COLOR", "values": cols, "index": Game.custom.c1},
 		{"id": "c2", "label": "TRIM COLOR", "values": cols, "index": Game.custom.c2},
 		{"id": "cn", "label": "NUMBER COLOR", "values": cols, "index": Game.custom.cn},
@@ -2925,6 +3023,117 @@ func _replay_overlay() -> void:
 	synth.engine_on = true
 	synth.engine_rpm = 3000.0 + abs(c.v) * 70.0
 	synth.engine_load = 0.8
+
+
+# --- leaderboards --------------------------------------------------------------
+
+const BOARDS := ["TRACK RECORDS", "FRIENDS", "DAILY CHALLENGE", "WEEKLY TIME TRIAL"]
+var _board := 0
+var _board_track := 0
+var _board_rows: Array = []
+var _board_state := "" # "", "loading", "offline"
+var _friend_edit: LineEdit
+
+
+func _enter_boards(refetch := true) -> void:
+	var names: Array = Game.tracks.slice(0, Cloud.RANKED_TRACKS).map(func(t): return t.short)
+	_board_track = clamp(_board_track, 0, names.size() - 1)
+	var wk: Dictionary = Game.weekly_event()
+	var rows: Array = [
+		{"id": "board", "label": "BOARD", "values": BOARDS, "index": _board},
+	]
+	if _board <= 1:
+		rows.append({"id": "b_track", "label": "TRACK", "values": names, "index": _board_track})
+	var sub := ""
+	match _board:
+		2: sub = "TODAY: " + String(Game.daily_challenge().name)
+		3: sub = "THIS WEEK: " + String(wk.name)
+	if sub != "":
+		rows.append({"id": "b_sub", "label": sub, "disabled": true})
+	if _board_state == "loading":
+		rows.append({"id": "b_wait", "label": "LOADING...", "disabled": true})
+	elif _board_state == "offline" or not cloud.enabled:
+		rows.append({"id": "b_wait", "label": "OFFLINE - CAN'T REACH THE LEADERBOARDS", "disabled": true})
+	elif _board_rows.is_empty():
+		rows.append({"id": "b_wait", "label": "NO TIMES YET - SET ONE!", "disabled": true})
+	for i in _board_rows.size():
+		var r: Dictionary = _board_rows[i]
+		var me: bool = String(r.get("player_id", "")) == cloud.id
+		var val := ""
+		if _board == 2:
+			var det: Dictionary = r.get("detail", {}) if r.get("detail", {}) is Dictionary else {}
+			val = "%s  %s" % [Game.ordinal(int(det.get("place", 0))), Game.format_time(float(det.get("time", 0.0)))]
+		else:
+			val = Game.format_time(float(r.get("lap_ms", r.get("score", 0))) / 1000.0)
+		rows.append({"id": "b_row", "label": "%d  %s  #%s%s" % [i + 1, String(r.name), String(r.num), "  (YOU)" if me else ""], "values": [val], "index": 0, "disabled": true})
+	rows.append({"id": "b_code", "label": "YOUR FRIEND CODE", "values": [cloud.friend_code if cloud.friend_code != "" else "-"], "index": 0, "disabled": true,
+		"hint": "SEND IT TO FRIENDS: THEY ADD YOU, AND YOU RACE EACH OTHER'S GHOSTS"})
+	rows.append({"id": "b_add", "label": "ADD A FRIEND", "hint": "TYPE THEIR 6-CHARACTER FRIEND CODE (%d FRIENDS)" % cloud.friends.size()})
+	rows.append({"id": "b_back", "label": "BACK"})
+	var cur := 0
+	if menu and menu_kind == "boards":
+		cur = min(menu.cursor, rows.size() - 1)
+	_open_menu("boards", "LEADERBOARDS", rows, cur)
+	if refetch:
+		_fetch_board()
+
+
+func _fetch_board() -> void:
+	if not cloud.enabled:
+		return
+	_board_state = "loading"
+	var want := [_board, _board_track]
+	var got := func(rows: Array):
+		if [_board, _board_track] != want:
+			return # moved on
+		_board_rows = rows
+		_board_state = "" if cloud.online else "offline"
+		if state == State.MENU and menu_kind == "boards":
+			_enter_boards(false)
+	match _board:
+		0:
+			cloud.top_laps(_board_track, got)
+		1:
+			cloud.load_friends(func(_ok): cloud.friend_laps(_board_track, got))
+		2:
+			cloud.event_board(Game.daily_event_key(), got)
+		3:
+			cloud.event_board(String(Game.weekly_event().key), got)
+
+
+func _on_boards_changed(id: String, idx: int) -> void:
+	if id == "board":
+		_board = idx
+	elif id == "b_track":
+		_board_track = idx
+	_board_rows = []
+	_enter_boards()
+
+
+func _add_friend() -> void:
+	if _friend_edit == null:
+		_friend_edit = LineEdit.new()
+		_friend_edit.position = Vector2(170, 360)
+		_friend_edit.size = Vector2(300, 40)
+		_friend_edit.max_length = 6
+		_friend_edit.alignment = HORIZONTAL_ALIGNMENT_CENTER
+		_friend_edit.placeholder_text = "FRIEND CODE"
+		_friend_edit.add_theme_font_size_override("font_size", 22)
+		_friend_edit.virtual_keyboard_type = LineEdit.KEYBOARD_TYPE_DEFAULT
+		var go := func(t: String):
+			_friend_edit.visible = false
+			cloud.add_friend(t, func(ok: bool, msg: String):
+				_sub(msg, 3.0)
+				if ok and state == State.MENU and menu_kind == "boards":
+					_enter_boards())
+		_friend_edit.text_submitted.connect(go)
+		_friend_edit.text_changed.connect(func(t: String):
+			if t.length() == 6:
+				go.call(t))
+		ui_root.add_child(_friend_edit)
+	_friend_edit.text = ""
+	_friend_edit.visible = true
+	_friend_edit.grab_focus()
 
 
 # --- online ---------------------------------------------------------------------
