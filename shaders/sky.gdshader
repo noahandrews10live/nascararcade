@@ -1,6 +1,10 @@
 // Sky for the Modern look: gradient sky, sun disk and glow, and a layer of
 // fair-weather cumulus. Static (no TIME) so the reflection cubemap is only
 // rebuilt when the track changes. Works on Forward+ and Compatibility.
+//
+// What the cars reflect (and the ambient light) comes from a real photographed
+// sky (a CC0 Poly Haven HDRI) above the horizon, turned so its sun sits where
+// ours is, over this track's own ground below the horizon.
 shader_type sky;
 
 uniform vec3 zenith : source_color = vec3(0.16, 0.34, 0.72);
@@ -11,6 +15,11 @@ uniform float energy = 1.0;
 uniform float cloud_cover : hint_range(0.0, 1.0) = 0.45;
 uniform float cloud_seed = 0.0;
 uniform bool night = false;
+uniform sampler2D env_map : filter_linear, repeat_enable, hint_default_black;
+uniform float env_mix : hint_range(0.0, 1.0) = 0.0;
+uniform float env_scale = 1.0;
+uniform float env_sun_u = 0.5; // where the photo's sun is across the panorama
+uniform float env_clamp = 12.0; // the photo's sun would double our sun's highlight
 
 float hash(vec2 p) {
 	p = fract(p * vec2(123.34, 456.21));
@@ -74,6 +83,15 @@ void sky() {
 			: mix(vec3(0.55, 0.58, 0.64), vec3(1.05, 1.02, 0.98), clamp((n - lit) * 3.0 + 0.6, 0.0, 1.0));
 		cloud += sun_color * pow(max(mu, 0.0), 6.0) * 0.4 * (night ? 0.0 : 1.0);
 		col = mix(col, cloud, c * 0.92);
+	}
+	if (AT_CUBEMAP_PASS && env_mix > 0.0) {
+		// Turn the photo so its sun lines up with our sun.
+		float phi_light = LIGHT0_ENABLED ? atan(sd.x, sd.z) : 0.0;
+		float phi = atan(d.x, d.z) + (env_sun_u - 0.5) * 6.2831853 - phi_light;
+		vec2 uv = vec2(fract(phi / 6.2831853 + 0.5), acos(clamp(d.y, -1.0, 1.0)) / 3.1415927);
+		vec3 photo = min(texture(env_map, uv).rgb * env_scale, vec3(env_clamp));
+		float above = smoothstep(-0.03, 0.06, h);
+		col = mix(col, mix(col, photo, above), env_mix);
 	}
 	COLOR = col * energy;
 }

@@ -348,7 +348,8 @@ func _update_tyres_after(delta: float, travelled: float) -> void:
 		# Fronts run bigger slip angles for the same work, so less of it is heat.
 		# Wets cook themselves on a dry track; water cools any tyre.
 		var heat_mult: float = 1.0 + 2.0 * (1.0 - _wet) if tyre_compound == "wet" else 1.0
-		t += ((p_slip * (0.000125 if i < 2 else 0.00021) + p_roll * 0.00012) * heat_mult - (t - amb) * cool * (1.0 + 2.0 * _wet)) * delta
+		# (Heat per unit of slip work, calibrated for racing-slick grip.)
+		t += ((p_slip * (0.0000925 if i < 2 else 0.000155) + p_roll * 0.00012) * heat_mult - (t - amb) * cool * (1.0 + 2.0 * _wet)) * delta
 		tyre_temp[i] = clamp(t, amb - 5.0, 260.0)
 		var hot: float = 1.0 + max(t - 115.0, 0.0) / 20.0
 		var psi_wear: float = 1.0 + (1.0 - (psi_l if i % 2 == 0 else psi_r)) * 3.5

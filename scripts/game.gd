@@ -927,6 +927,10 @@ func style(m: StandardMaterial3D) -> void:
 					m.normal_texture = texture(kind, true)
 					m.normal_scale = {"asphalt": 0.9, "grass": 0.6, "concrete": 0.4}[kind]
 					m.albedo_color = Color(1.12, 1.12, 1.12) * base
+					if kind == "asphalt":
+						# Weathered race asphalt reflects about an eighth of the light.
+						m.albedo_color = Color(1.75, 1.75, 1.72)
+						m.uv1_scale = Vector3(0.33, 0.33, 0.33)
 					if kind == "grass":
 						# Tame the arcade-bright greens toward real turf.
 						m.albedo_color = Color(0.78, 0.74, 0.6)
@@ -1002,6 +1006,9 @@ func texture(kind: String, normal: bool) -> Texture2D:
 	var key := kind + ("_n" if normal else "")
 	if _tex.has(key):
 		return _tex[key]
+	if kind == "asphalt" and modern:
+		_make_asphalt()
+		return _tex[key]
 	var noise := FastNoiseLite.new()
 	noise.seed = hash(kind)
 	var t := NoiseTexture2D.new()
@@ -1036,6 +1043,86 @@ func texture(kind: String, normal: bool) -> Texture2D:
 		t.color_ramp = ramp
 	_tex[key] = t
 	return t
+
+
+## Race-track asphalt, close up: grey stone aggregate in dark binder, the odd
+## lighter stone, fine grit, and a few sealed cracks; plus a bump map from the
+## same heights so the stones catch the light. Tileable; about 3 m across.
+func _make_asphalt() -> void:
+	var sz := 512 if OS.has_feature("web") else 1024
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 1999
+	var height := PackedFloat32Array()
+	height.resize(sz * sz)
+	var col := PackedFloat32Array() # brightness
+	col.resize(sz * sz)
+	# Binder: dark, with gentle blotches (oil, patching, age).
+	var blotch := FastNoiseLite.new()
+	blotch.seed = 7
+	blotch.noise_type = FastNoiseLite.TYPE_SIMPLEX
+	blotch.frequency = 3.0 / sz
+	blotch.fractal_octaves = 3
+	var grit := FastNoiseLite.new()
+	grit.seed = 11
+	grit.noise_type = FastNoiseLite.TYPE_VALUE
+	grit.frequency = 0.9
+	for y in sz:
+		for x in sz:
+			# Seamless: sample the noise on a torus.
+			var u := TAU * x / sz
+			var v := TAU * y / sz
+			var r := sz / TAU
+			var b := blotch.get_noise_3d(cos(u) * r, sin(u) * r, cos(v) * r + sin(v) * 7.0)
+			var g := grit.get_noise_2d(x, y)
+			col[y * sz + x] = 0.62 + b * 0.06 + g * 0.05
+			height[y * sz + x] = g * 0.15
+	# Aggregate: thousands of small stones, a mix of greys, a few pale ones.
+	var stones := sz * sz / 55
+	for i in stones:
+		var cx := rng.randi_range(0, sz - 1)
+		var cy := rng.randi_range(0, sz - 1)
+		var rad := rng.randf_range(0.8, 2.6) * sz / 1024.0 * 1.6
+		var tone := rng.randf_range(0.72, 1.0)
+		if rng.randf() < 0.03:
+			tone = rng.randf_range(0.98, 1.12) # pale quartz / limestone
+		var ri := int(ceil(rad))
+		for dy in range(-ri, ri + 1):
+			for dx in range(-ri, ri + 1):
+				var dd := sqrt(dx * dx + dy * dy) / rad
+				if dd > 1.0:
+					continue
+				var k := posmod(cy + dy, sz) * sz + posmod(cx + dx, sz)
+				var dome := sqrt(1.0 - dd * dd)
+				if dome * 0.6 + 0.2 > height[k]:
+					height[k] = dome * 0.6 + 0.2
+					col[k] = tone * (0.85 + 0.15 * dome)
+	# Sealed cracks: thin, dark, wandering lines.
+	for c in 5:
+		var px := rng.randf() * sz
+		var py := rng.randf() * sz
+		var ang := rng.randf() * TAU
+		for st in int(sz * rng.randf_range(0.3, 0.8)):
+			ang += rng.randf_range(-0.25, 0.25)
+			px += cos(ang)
+			py += sin(ang)
+			for w in 2:
+				var k := posmod(int(py) + w, sz) * sz + posmod(int(px), sz)
+				col[k] = 0.35
+				height[k] = -0.2
+	var img := Image.create(sz, sz, false, Image.FORMAT_RGB8)
+	var nimg := Image.create(sz, sz, false, Image.FORMAT_RGB8)
+	for y in sz:
+		for x in sz:
+			var c: float = clamp(col[y * sz + x], 0.0, 1.0)
+			img.set_pixel(x, y, Color(c, c, c * 0.985))
+			var hx: float = height[y * sz + posmod(x + 1, sz)] - height[y * sz + posmod(x - 1, sz)]
+			var hy: float = height[posmod(y + 1, sz) * sz + x] - height[posmod(y - 1, sz) * sz + x]
+			var nrm := Vector3(-hx * 2.5, -hy * 2.5, 1.0).normalized()
+			nimg.set_pixel(x, y, Color(nrm.x * 0.5 + 0.5, nrm.y * 0.5 + 0.5, nrm.z * 0.5 + 0.5))
+	img.generate_mipmaps()
+	nimg.generate_mipmaps()
+	_tex["asphalt"] = ImageTexture.create_from_image(img)
+	_tex["asphalt_n"] = ImageTexture.create_from_image(nimg)
 
 
 func _setup_input() -> void:

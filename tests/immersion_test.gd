@@ -33,7 +33,7 @@ func _frames(n: int) -> void:
 func _run() -> void:
 	var game := root.get_node("Game")
 	await _frames(20)
-	game.tracks[1].full_laps = 60
+	game.tracks[1].full_laps = 100
 	game.settings.length = 1
 	game.settings.field = 0
 	game.settings.weather = 0

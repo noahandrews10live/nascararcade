@@ -302,6 +302,7 @@ func _apply_graphics() -> void:
 		sm.set_shader_parameter("energy", 1.0)
 		sm.set_shader_parameter("cloud_cover", float(cfg.get("clouds", 0.42)))
 		sm.set_shader_parameter("cloud_seed", float(hash(cfg.name) % 100))
+		_set_sky_photo(sm, "night" if night else ("dusk" if float(cfg.sun_elev) < 16.0 else "day"))
 		sky.sky_material = sm
 	else:
 		var psm := ProceduralSkyMaterial.new()
@@ -381,6 +382,35 @@ func _apply_graphics() -> void:
 		sun.shadow_enabled = false
 
 
+## Real skies (CC0 Poly Haven HDRIs) for what the cars reflect and the ambient
+## light: [file, where its sun is across the panorama, brightness to match ours].
+const SKY_PHOTOS := {
+	"day": ["res://assets/hdri/quarry_01.exr", 0.600, 1.66],
+	"overcast": ["res://assets/hdri/blouberg_sunrise_2.exr", 0.055, 0.66],
+	"dusk": ["res://assets/hdri/venice_sunset.exr", 0.600, 0.73],
+	"night": ["res://assets/hdri/moonless_golf.exr", 0.321, 0.2],
+}
+var _sky_photo := ""
+var _sky_tex := {}
+
+
+func _set_sky_photo(sm: ShaderMaterial, kind: String) -> void:
+	if kind == _sky_photo and sm.get_shader_parameter("env_mix") != null and float(sm.get_shader_parameter("env_mix")) > 0.0:
+		return
+	var info: Array = SKY_PHOTOS[kind]
+	if not _sky_tex.has(kind):
+		_sky_tex[kind] = load(info[0]) if ResourceLoader.exists(info[0]) else null
+	var tex = _sky_tex[kind]
+	if tex == null:
+		sm.set_shader_parameter("env_mix", 0.0)
+		return
+	_sky_photo = kind
+	sm.set_shader_parameter("env_map", tex)
+	sm.set_shader_parameter("env_sun_u", info[1])
+	sm.set_shader_parameter("env_scale", info[2])
+	sm.set_shader_parameter("env_mix", 0.85)
+
+
 ## Sun, sky and light from the race clock, plus rain and a wet track (weather.gd).
 var _rain_fx: Node3D
 var _base_fog := 0.0
@@ -413,6 +443,7 @@ func apply_time_and_weather(w: Node) -> void:
 		sm.set_shader_parameter("sun_color", sun_col)
 		sm.set_shader_parameter("cloud_cover", lerp(float(cfg.get("clouds", 0.42)), 0.97, w.rain))
 		sm.set_shader_parameter("energy", lerp(1.0, 0.5, w.rain) * (1.0 if not dark else 0.8))
+		_set_sky_photo(sm, "night" if night_sky else ("overcast" if w.rain > 0.35 else ("dusk" if elev < 16.0 else "day")))
 	env.ambient_light_energy = (0.6 if dark else 1.0) * (1.0 - 0.3 * w.rain) * (0.5 if Game.modern and not Game.forward_plus else 1.0)
 	if _base_fog == 0.0:
 		_base_fog = env.fog_density
