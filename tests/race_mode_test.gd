@@ -58,7 +58,8 @@ func _run() -> void:
 		if ctl.flag == ctl.Flag.YELLOW:
 			saw_yellow = true
 		for c in main.race.cars:
-			if c.pit_state == 3:
+			# (in the pit box, or a stop made during a quick caution)
+			if c.pit_state == 3 or c.pitted_this_caution:
 				saw_pit = true
 	_check(saw_yellow, "a caution came out")
 	_check(saw_pit, "cars made pit stops")

@@ -252,7 +252,7 @@ func tick(delta: float) -> void:
 		if c.has_flat() and c.ai and not c.is_player and c.pit_state == 0 and control and control.enabled and not c.out:
 			c.want_pit = true
 			c.pit_plan = "4"
-		elif c.ai and not c.is_player and c.pit_state == 0 and control and control.enabled and not c.out and maxf(maxf(c.tyre_wear4[0], c.tyre_wear4[1]), maxf(c.tyre_wear4[2], c.tyre_wear4[3])) > 0.85 and laps - control.leader().lap() > 2:
+		elif c.ai and not c.is_player and c.pit_state == 0 and control and control.enabled and not c.out and maxf(maxf(c.tyre_wear4[0], c.tyre_wear4[1]), maxf(c.tyre_wear4[2], c.tyre_wear4[3])) > 0.72 and laps - control.leader().lap() > 2:
 			c.want_pit = true # green-flag stop before the tyres go to the cords
 			c.pit_plan = "4"
 		elif c.grille_block > 0.2 and c.engine_temp > 132.0 and c.ai and not c.is_player and c.pit_state == 0 and control and control.enabled and not c.out:
@@ -725,6 +725,10 @@ func _drive_ai(c: Node3D, delta: float) -> void:
 				c.ai_lane = clamp(c.d, lanes[0], lanes[2]) # hold our line
 	# Following distance: time based, tighter where the draft rewards it.
 	var want_gap: float = max(7.0, c.v * (0.14 if drafting_track else 0.32))
+	# More room into a corner behind a slower car: it may be on old tyres and
+	# checking up (the classic way to get a wreck started).
+	if ahead and abs(k) > 0.002 and ahead.v < c.v - 1.0:
+		want_gap += c.v * 0.15
 	if controlled:
 		want_gap = 9.0
 	if ahead and (abs(c.ai_lane - ahead.d) < 2.2 or controlled) and ahead_gap < max(want_gap * 2.0, search):
@@ -774,7 +778,9 @@ func _drive_ai(c: Node3D, delta: float) -> void:
 					break
 			if laps_left <= 5:
 				pressure *= 1.5
-			if abs(k) > 0.002 and rng.randf() < (1.0 - c.ai_consistency) * 0.01 * pressure * delta * 60.0:
+			# (A rate per second of cornering: a fairly inconsistent driver under
+			# pressure slips up about once every few minutes.)
+			if abs(k) > 0.002 and rng.randf() < (1.0 - c.ai_consistency) * 0.02 * pressure * delta:
 				c._mistake = rng.randf_range(0.6, 1.4)
 	# Pedals, eased in and out like a driver's feet.
 	var want_thr := 0.0
@@ -946,11 +952,14 @@ func _contact(a: Node3D, b: Node3D, rel: Vector2) -> void:
 	var vt: float = vrel.dot(t)
 	var jt: float = clamp(vt / (a.inv_mass_along(t, ra_p) + b.inv_mass_along(t, rb_p)), -0.15 * j, 0.15 * j)
 	var imp: Vector2 = n * j + t * jt
+	# How much a touch twists the car: a lean or a rub barely does (the drivers hold
+	# them, the sheet metal gives); a real hit at the corner turns it around.
+	var lever: float = clamp((vn - 0.5) / 6.0, 0.2, 1.0)
 	if not a.remote:
-		a.apply_impulse(-imp, ra_p)
+		a.apply_impulse(-imp, ra_p * lever)
 		a.add_damage(j, ra_p)
 	if not b.remote:
-		b.apply_impulse(imp, rb_p)
+		b.apply_impulse(imp, rb_p * lever)
 		b.add_damage(j, rb_p)
 	# Grudges: the car that got hit (in the rear or turned) remembers who did it.
 	if vn > 3.0 and not arcade:
@@ -1056,7 +1065,7 @@ func _debris_tick(delta: float) -> void:
 		for dd in debris:
 			if dd.age > 12.0:
 				on_track += 1
-		if on_track >= 3:
+		if on_track >= 5:
 			control.throw_caution("DEBRIS", null)
 
 

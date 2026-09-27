@@ -24,7 +24,7 @@ var flag := Flag.GREEN
 var enabled := true
 var pits_enabled := true
 var cautions_enabled := true
-var debris_rate := 0.012 # chance per green lap of a debris caution
+var debris_rate := 0.003 # chance per green lap of a "phantom" debris caution
 var weather_hold := false # ovals: keep the field under caution while it's wet
 
 # caution state
@@ -148,23 +148,61 @@ func checkered() -> void:
 	flag_changed.emit("CHECKERED")
 
 
+## Watches for incidents under green, the way race control does: a wreck (a car
+## out, a heavily damaged car, three or more cars spinning) brings out the yellow;
+## so does a car stopped on the racing surface. Cars that spin, gather it up and
+## drive on don't (road courses only go yellow for a car that's out or stuck on
+## the track).
 func _green_tick(delta: float) -> void:
 	_green_since += delta
 	if not cautions_enabled:
 		return
+	var road: bool = track.cfg.get("road", false)
+	var spinning_now := 0
+	for c in race.cars:
+		if c.spinning and not c.towed and c.pit_state == Pit.NONE:
+			spinning_now += 1
 	for c in race.cars:
 		if c.towed or c.finished or c.pit_state != Pit.NONE:
 			continue
-		var bad: bool = c.spinning or c.out or (c.v < 6.0 and _green_since > 6.0 and not c.pace_mode)
-		if bad:
-			_incident_timers[c] = _incident_timers.get(c, 0.0) + delta
-			if _incident_timers[c] > (0.6 if c.spinning or c.out else 2.5):
-				if OS.is_debug_build() and OS.get_environment("RC_DEBUG") != "":
-					print("caution car #%s spin=%s out=%s v=%.1f pit=%d d=%.1f s=%.0f" % [c.team.num, c.spinning, c.out, c.v, c.pit_state, c.d, c.s()])
-				throw_caution("ACCIDENT" if c.total_damage() > 0.1 or c.out else "SPIN", c)
-				return
+		# On the racing surface (not down on the apron, the grass or in the infield).
+		var on_surface: bool = c.d > track.inner_edge() - 0.5 and not c.on_grass
+		var st: Dictionary = _incident_timers.get(c, {})
+		var reason := ""
+		if c.out:
+			st.t = st.get("t", 0.0) + delta
+			if st.t > 1.0:
+				reason = "ACCIDENT"
+		elif c.spinning or st.has("spun"):
+			st.spun = true
+			st.t = st.get("t", 0.0) + delta
+			if c.speed() < 10.0 and on_surface:
+				st.stop = st.get("stop", 0.0) + delta
+			if not road and st.t > 0.8 and (c.total_damage() > 0.3 or spinning_now >= 3):
+				reason = "ACCIDENT"
+			elif st.get("stop", 0.0) > (4.0 if road else 1.5):
+				reason = "SPIN"
+			elif not c.spinning and c.speed() > 15.0 and st.t > 1.0:
+				_incident_timers.erase(c) # gathered it up and kept going
+				if c.is_player or randf() < 0.3:
+					message.emit("#%s SPUN AND KEPT IT GOING" % c.team.num, "spotter")
+				continue
+			elif st.t > 10.0:
+				_incident_timers.erase(c)
+				continue
+		elif c.v < 6.0 and _green_since > 6.0 and not c.pace_mode and on_surface:
+			st.stop = st.get("stop", 0.0) + delta
+			if st.stop > (6.0 if road else 3.0):
+				reason = "STALLED CAR"
 		else:
 			_incident_timers.erase(c)
+			continue
+		_incident_timers[c] = st
+		if reason != "":
+			if OS.is_debug_build() and OS.get_environment("RC_DEBUG") != "":
+				print("caution car #%s spin=%s out=%s v=%.1f dmg=%.2f d=%.1f s=%.0f" % [c.team.num, c.spinning, c.out, c.v, c.total_damage(), c.d, c.s()])
+			throw_caution(reason, c)
+			return
 
 
 ## Called by race.gd when the leader completes a lap under green.
@@ -172,6 +210,9 @@ func on_leader_lap(lap_done: int) -> void:
 	if not enabled:
 		return
 	if flag == Flag.YELLOW:
+		# A stage that ends under caution still ends (points, no extra yellow).
+		if stage <= stage_ends.size() and lap_done >= stage_ends[stage - 1]:
+			_end_stage(false)
 		return
 	# Stage end
 	if stage <= stage_ends.size() and lap_done >= stage_ends[stage - 1]:

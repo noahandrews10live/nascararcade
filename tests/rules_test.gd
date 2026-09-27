@@ -16,7 +16,7 @@ func _run() -> void:
 	var laps := int(OS.get_environment("LAPS")) if OS.get_environment("LAPS") != "" else int(game.tracks[idx].race_laps)
 	var race: Node3D = load("res://scripts/race.gd").new()
 	root.add_child(race)
-	race.setup(t, -1, laps, 40)
+	race.setup(t, -1, laps, int(OS.get_environment("FIELD")) if OS.get_environment("FIELD") != "" else 40)
 	race.enable_rules()
 	var ctl: Node = race.control
 	var log := []
@@ -24,7 +24,16 @@ func _run() -> void:
 		if kind != "spotter":
 			var lead = ctl.leader()
 			print("  [%6.1fs lap %2d] %s" % [race.time, lead.lap() + 1, text]))
+	var spins := [0]
 	race.incident.connect(func(c, kind):
+		if kind == "spin":
+			spins[0] += 1
+			if OS.get_environment("SPINDBG") != "":
+				var near := 99.0
+				for o in race.cars:
+					if o != c and not o.towed:
+						near = min(near, o.global_position.distance_to(c.global_position))
+				print("  SPIN #%s t=%.0f s=%.0f k=%.4f v=%.0f d=%.1f near=%.1f bump=%.1f dmg=%.2f wear=%.2f slide=%.2f" % [c.team.num, race.time, c.s(), race.track.curvature_at(c.s()), c.v, c.d, near, c.bump, c.total_damage(), c.tyre_wear, c.slide])
 		if kind == "out" and OS.get_environment("OUTS") != "":
 			print("  OUT t=%.1f #%s flag=%d pit=%d v=%.1f d=%.1f s=%.0f dmg=%s bump=%.1f wall=%.1f yaw=%.2f" % [race.time, c.team.num, ctl.flag, c.pit_state, c.v, c.d, c.s(), str(c.damage), c.bump, c.wall_hit, c.yaw]))
 	race.grid_up(-150.0, 30.0)
@@ -55,7 +64,7 @@ func _run() -> void:
 			ctl.throw_caution("DEBRIS (TEST)", null)
 		if race.finish_count >= race.cars.size() - 1 or (race.finish_count > 0 and race.time - race.order[0].finish_time > 60.0):
 			break
-	print("Finished in %.0fs sim, %d cautions, %d pit stops, %d laps" % [sim, ctl.caution_count, pit_stops, race.laps])
+	print("Finished in %.0fs sim, %d cautions, %d spins, %d pit stops, %d laps" % [sim, ctl.caution_count, spins[0], pit_stops, race.laps])
 	for i in min(12, race.order.size()):
 		var c: Node3D = race.order[i]
 		print("  %2d #%-3s %-18s laps=%d led=%d stage=%d pts=%d dmg=%.2f %s" % [i + 1, c.team.num, c.team.driver, c.lap(), c.laps_led, c.stage_points, ctl.finishing_points(i + 1, c), c.total_damage(), "OUT" if c.out else ""])

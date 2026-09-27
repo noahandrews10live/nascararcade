@@ -88,6 +88,12 @@ Motion smoothing), and Options → VSync off gives the lowest input delay.
   - Pack wrecks collect several cars.
   - Damage reduces aero, power and alignment, and heavy damage retires the car.
 - **Race rules.**
+  - **When the yellow flies:**
+    - A wreck: a car out, a heavily damaged car, or three or more cars spinning.
+    - A car stopped on the racing surface, or a pile of debris.
+    - A spin the driver gathers up and drives away from gets a spotter call, not a caution. Road courses only go yellow for a car that's out or stuck on the track.
+    - Light rubs lean on cars rather than turning them around; real hits and hooks still spin them.
+    - A typical 20-car race has two stage breaks and none to a few incident cautions.
   - **Quick cautions** (the default: race setting CAUTIONS → QUICK) take about 15 seconds from yellow to green:
     - Scoring freezes and the field slows for a few seconds.
     - **Your pit call:** the race pauses and asks you. Choose 4 tyres, 2 tyres, fuel only, wet tyres (road courses in changeable weather) or stay out, plus an optional chassis change (a round of wedge in or out). The screen shows your tyres, fuel laps, damage, the crew chief's call (*) and roughly where each choice restarts you.
