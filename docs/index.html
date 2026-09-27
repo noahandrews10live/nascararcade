@@ -251,7 +251,7 @@
 <script src="index.js"></script>
 <script>
   (function () {
-    const config = {"args":[],"canvasResizePolicy":2,"emscriptenPoolSize":8,"ensureCrossOriginIsolationHeaders":false,"executable":"index","experimentalVK":false,"fileSizes":{"index.pck":426032,"index.wasm":39513091},"focusCanvas":true,"gdextensionLibs":[],"godotPoolSize":4,"serviceWorker":"index.service.worker.js"};
+    const config = {"args":[],"canvasResizePolicy":2,"emscriptenPoolSize":8,"ensureCrossOriginIsolationHeaders":false,"executable":"index","experimentalVK":false,"fileSizes":{"index.pck":427904,"index.wasm":39513091},"focusCanvas":true,"gdextensionLibs":[],"godotPoolSize":4,"serviceWorker":"index.service.worker.js"};
     config.canvasResizePolicy = 2; // the canvas follows the window: full screen at any size
     const $ = function (id) { return document.getElementById(id); };
     const overlay = $("overlay"), startBtn = $("start"), meter = $("meter"), bar = $("bar");
@@ -302,6 +302,29 @@
       if (t && Math.abs(t.clientX - window.innerWidth / 2) < 120 && t.clientY > window.innerHeight - 90) peekFs();
     }, { passive: true });
     if (installed) lockLandscape();
+
+    // --- The display's refresh rate (60, 90, 120 or 144 Hz), from how often the
+    // browser draws. The game holds this rate (see AUTO resolution).
+    window.stHz = 60;
+    (function () {
+      let last = 0, avg = 0;
+      function tick(t) {
+        if (last > 0) {
+          const dt = t - last;
+          if (dt > 4 && dt < 40) avg = avg ? avg * 0.95 + dt * 0.05 : dt;
+          if (avg) {
+            const hz = 1000 / avg;
+            const rates = [60, 90, 120, 144];
+            let best = 60;
+            for (const r of rates) if (Math.abs(r - hz) < Math.abs(best - hz)) best = r;
+            window.stHz = best;
+          }
+        }
+        last = t;
+        requestAnimationFrame(tick);
+      }
+      requestAnimationFrame(tick);
+    })();
 
     // --- Portrait: phones race sideways only. The game reads window.stPortrait
     // and pauses the race.

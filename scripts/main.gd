@@ -505,23 +505,87 @@ func _apply_quality(night: bool) -> void:
 	get_tree().call_group("haze", "set_visible", fp and q >= 3)
 
 
-## Browsers: phones report 2-3 device pixels per CSS pixel, so a full-screen
-## canvas can be 2400+ pixels wide. Cap the 3D picture's width (the UI stays
-## sharp) and re-check whenever the window changes shape (full screen, rotation).
-var _web_scale := 1.0
+## Browsers (phones above all): the canvas is the screen's full native size (on an
+## iPhone 16 Pro Max in landscape, 2868 x 1320) and frames come as fast as the
+## display refreshes (up to 120 Hz). The UI is always drawn at native resolution;
+## the 3D picture starts native too, and in AUTO the resolution scale steps down
+## when frames can't keep up with the refresh rate and climbs back when they can.
+## RESOLUTION option: AUTO / NATIVE (always full) / BALANCED (75%) / PERFORMANCE (50%).
+const RES_MODES := ["AUTO", "NATIVE", "BALANCED", "PERFORMANCE"]
+var _web_scale := 1.0 # from the quality preset (desktop browsers)
 var _web_px := Vector2i.ZERO
+var _dyn_scale := 1.0 # AUTO's current 3D resolution scale
+var _dyn_time := 0.0
+var _dyn_frames := 0
+var _dyn_cool := 0.0
+var _js_win = null
+
+
+## The display's refresh rate in Hz, as the page measured it (the browser draws a
+## frame per refresh); the engine's own figure elsewhere.
+func display_hz() -> float:
+	if OS.has_feature("web"):
+		if _js_win == null:
+			_js_win = JavaScriptBridge.get_interface("window")
+		var hz = _js_win.stHz if _js_win else null
+		if hz != null and float(hz) > 20.0:
+			return float(hz)
+	var r: float = DisplayServer.screen_get_refresh_rate()
+	return r if r > 20.0 else 60.0
 
 
 func _fit_web_resolution(force := false) -> void:
 	if Game.forward_plus:
 		return
 	var px: Vector2i = get_window().size
-	if px == _web_px and not force:
-		return
-	_web_px = px
+	if px != _web_px or force:
+		_web_px = px
+	var mode: int = int(Game.settings.get("res_mode", 0))
+	var scale := 1.0
+	match mode:
+		0:
+			scale = _dyn_scale
+		1:
+			scale = 1.0
+		2:
+			scale = 0.75
+		3:
+			scale = 0.5
 	var mobile: bool = OS.has_feature("web_android") or OS.has_feature("web_ios")
-	var cap: float = (1100.0 if mobile else 1920.0) / max(float(px.x), 1.0)
-	get_viewport().scaling_3d_scale = clamp(min(_web_scale, cap), 0.25, 1.0)
+	if not mobile and mode == 0:
+		scale = min(scale, _web_scale) # desktop browsers follow the quality preset
+	get_viewport().scaling_3d_scale = clamp(scale, 0.35, 1.0)
+
+
+## AUTO resolution: hold the display's refresh rate. Measured over a second at a
+## time; drops 3D resolution by 10% when frames run long, adds 5% back when there's
+## plenty of room (never above native).
+func _dynamic_resolution(delta: float) -> void:
+	if not OS.has_feature("web") or Game.forward_plus or int(Game.settings.get("res_mode", 0)) != 0:
+		return
+	if paused or state != State.RACE:
+		_dyn_time = 0.0
+		_dyn_frames = 0
+		return
+	_dyn_cool = max(_dyn_cool - delta, 0.0)
+	_dyn_time += delta
+	_dyn_frames += 1
+	if _dyn_time < 1.0:
+		return
+	var avg: float = _dyn_time / max(_dyn_frames, 1)
+	_dyn_time = 0.0
+	_dyn_frames = 0
+	if _dyn_cool > 0.0:
+		return
+	var budget: float = 1.0 / display_hz()
+	var before := _dyn_scale
+	if avg > budget * 1.12:
+		_dyn_scale = max(_dyn_scale - 0.1, 0.5)
+	elif avg < budget * 1.03:
+		_dyn_scale = min(_dyn_scale + 0.05, 1.0)
+	if not is_equal_approx(before, _dyn_scale):
+		_dyn_cool = 2.0
+		_fit_web_resolution(true)
 
 
 ## Camera motion blur (desktop Modern): a full-screen card on the camera, see
@@ -589,8 +653,8 @@ func _auto_quality(delta: float) -> void:
 		_aq_late = 0
 		return
 	_aq_cool = max(_aq_cool - delta, 0.0)
-	var hz: float = max(DisplayServer.screen_get_refresh_rate(), 30.0)
-	var budget: float = 1.0 / min(hz, 60.0 if Game.vsync else 144.0)
+	var hz: float = max(display_hz(), 30.0)
+	var budget: float = 1.0 / min(hz, 144.0)
 	_aq_time += delta
 	_aq_frames += 1
 	if delta > budget * 1.5:
@@ -1630,7 +1694,9 @@ func _process(delta: float) -> void:
 		atmosphere.update(delta, fc.speed() if fc and is_instance_valid(fc) else 0.0, cockpit != null and is_instance_valid(cockpit) and cockpit.visible, racing)
 	_auto_quality(delta)
 	if OS.has_feature("web") and Game.modern:
-		_fit_web_resolution()
+		_dynamic_resolution(delta)
+		if get_window().size != _web_px:
+			_fit_web_resolution(true)
 	_update_audio()
 	if screen:
 		var blink := int(state_time * 3.0) % 2 == 0
@@ -1977,10 +2043,17 @@ func _enter_season_hub() -> void:
 	_open_menu("hub", "SEASON  -  #%s %s" % [me, Game.teams[int(sn.team)].driver], rows, 0)
 
 
+## "2868 X 1320 @ 120 HZ - 3D AT 100%": what the screen is and what's drawn.
+func _display_hint() -> String:
+	var px: Vector2i = get_window().size
+	return "SCREEN %d X %d @ %d HZ  -  3D AT %d%%.  AUTO: NATIVE, LOWERED ONLY TO HOLD THE REFRESH RATE" % [px.x, px.y, int(round(display_hz())), int(round(get_viewport().scaling_3d_scale * 100.0))]
+
+
 func _enter_options() -> void:
 	var rows := [
 		{"id": "gfx", "label": "GRAPHICS", "values": ["1999", "MODERN"] if Game.modern_supported else ["1999"], "index": 1 if Game.modern else 0, "hint": "MODERN: REALISTIC LIGHTING AND DETAIL.  1999: THE ORIGINAL ARCADE LOOK"},
 		{"id": "quality", "label": "QUALITY (MODERN)", "values": Game.QUALITY_NAMES, "index": Game.quality, "hint": "AUTO LOWERS DETAIL WHEN FRAMES RUN LATE"},
+		{"id": "res_mode", "label": "RESOLUTION", "values": RES_MODES, "index": int(Game.settings.get("res_mode", 0)), "hint": _display_hint()},
 		{"id": "smooth", "label": "MOTION SMOOTHING", "values": ["OFF", "ON"], "index": 1 if Game.smoothing else 0, "hint": "SMOOTH MOTION ON 120/144 HZ SCREENS (ADDS UNDER 1 FRAME OF DELAY)"},
 		{"id": "blur", "label": "MOTION BLUR", "values": ["OFF", "LOW", "HIGH"], "index": Game.motion_blur, "hint": "DESKTOP MODERN LOOK ONLY"},
 		{"id": "wheel_setup", "label": "WHEEL SETUP", "hint": "STEERING WHEEL, PEDALS AND FORCE FEEDBACK"},
@@ -2051,6 +2124,12 @@ func _on_menu_changed(id: String, idx: int) -> void:
 			elif id == "radio":
 				Game.radio_voice = idx == 1
 				Game.save_settings()
+			elif id == "res_mode":
+				Game.settings["res_mode"] = idx
+				_fit_web_resolution(true)
+				Game.save_settings()
+				menu.rows[menu.cursor].hint = _display_hint()
+				menu._refresh()
 			elif id == "tilt_sens":
 				Game.settings["tilt_sens"] = idx
 				Game.save_settings()

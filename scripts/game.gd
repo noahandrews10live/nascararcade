@@ -445,7 +445,7 @@ var forward_plus := false
 const QUALITY_NAMES := ["AUTO", "LOW", "MEDIUM", "HIGH", "ULTRA"]
 var quality := 0
 ## The level AUTO is currently running at (adjusted from measured frame times).
-var auto_quality := (1 if OS.has_feature("web_android") or OS.has_feature("web_ios") else 2) if OS.has_feature("web") else 3
+var auto_quality := 2 if OS.has_feature("web") else 3
 ## Blend car positions between physics steps so motion is smooth at any refresh rate.
 var smoothing := true
 var vsync := true
@@ -468,7 +468,7 @@ const WEEKENDS := ["RACE ONLY", "QUALIFY + RACE", "PRACTICE + QUALIFY + RACE"]
 var settings := {
 	# Browsers get a 20-car field by default (GDScript runs slower there).
 	"length": 1, "difficulty": 1, "field": 0 if OS.has_feature("web") else 2, "cautions": 1, "damage": 1, "wear": 1, "weather": 0,
-	"assists": 2, "manual": 0, "weekend": 1, "touch_tilt": true, "tilt_sens": 1,
+	"assists": 2, "manual": 0, "weekend": 1, "touch_tilt": true, "tilt_sens": 1, "res_mode": 0,
 }
 ## Garage setup (applied to the player's car): -3..3 balance (tight..loose),
 ## tyre pressure 0 low / 1 std / 2 high, gearing 0 short / 1 std / 2 long.

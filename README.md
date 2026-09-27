@@ -213,7 +213,9 @@ godot --headless --path . --export-release Web build/web/index.html
   - GAS and BRAKE pedals are on the right. Small buttons: II pause, CAM, PIT.
   - Menus, results and replays show a D-pad with A (select) and B (back). The pause screen adds RESUME and QUIT.
   - Tilt needs the motion sensor: iPhone asks permission when you tap Start. The page reads the accelerometer, or the orientation sensor where that's all there is. It works out each phone's sign convention from which edge of the screen is higher. Where the browser or an embedding page blocks the sensor, the game says so and uses drag steering. The installed app isn't embedded, so tilt works there.
-- Phones start on the LOW preset, and the browser caps the 3D resolution so it stays smooth on high-density screens.
+- **Native resolution and 120 Hz.** The game renders at the screen's full pixel count, e.g. 2868 × 1320 on a 460 ppi iPhone 16 Pro Max in landscape, so text and the HUD are always pin-sharp. The page measures the display's refresh rate (60, 90, 120 or 144 Hz) and AUTO quality aims for that frame rate.
+  - Options → RESOLUTION: **AUTO** keeps native resolution and trims only the 3D scene (down to 50%) if the frame rate can't hold, then restores it when there's headroom. **NATIVE** always renders at 100%, **BALANCED** at 75%, **PERFORMANCE** at 50%. The row shows the screen size, refresh rate and current 3D scale.
+  - iPhone and iPad web apps are held to 60 Hz by iOS unless you turn off **Settings → Apps → Safari → Advanced → Feature Flags → Prefer Page Rendering Updates near 60fps**. Android Chrome runs at the full 120 Hz.
 
 ## Install it on your phone
 

@@ -300,6 +300,29 @@ $GODOT_HEAD_INCLUDE
     }, { passive: true });
     if (installed) lockLandscape();
 
+    // --- The display's refresh rate (60, 90, 120 or 144 Hz), from how often the
+    // browser draws. The game holds this rate (see AUTO resolution).
+    window.stHz = 60;
+    (function () {
+      let last = 0, avg = 0;
+      function tick(t) {
+        if (last > 0) {
+          const dt = t - last;
+          if (dt > 4 && dt < 40) avg = avg ? avg * 0.95 + dt * 0.05 : dt;
+          if (avg) {
+            const hz = 1000 / avg;
+            const rates = [60, 90, 120, 144];
+            let best = 60;
+            for (const r of rates) if (Math.abs(r - hz) < Math.abs(best - hz)) best = r;
+            window.stHz = best;
+          }
+        }
+        last = t;
+        requestAnimationFrame(tick);
+      }
+      requestAnimationFrame(tick);
+    })();
+
     // --- Portrait: phones race sideways only. The game reads window.stPortrait
     // and pauses the race.
     window.stPortrait = false;
