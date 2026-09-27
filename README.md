@@ -148,6 +148,7 @@ Motion smoothing), and Options → VSync off gives the lowest input delay.
 
 ## Being there
 
+- **A Gen 3 engine note.** Every car sounds like a 358 cubic inch pushrod V8 with a cross-plane crank: the real firing order (1-8-4-3-6-5-7-2), each bank's exhaust pulses coming unevenly, so it burbles at low revs and howls at 9,000, four pulses per crank turn (600 Hz at 9,000 rpm), following each car's rpm through every shift and the limiter. Lift at high revs and it crackles and pops. The two banks come out either side of your car. (`tests/engine_sound_test.gd` checks it and can write a rev-up WAV.)
 - **Sound in 3D.** Every nearby car's engine comes from where the car is, rising and falling in pitch as it passes. Walls and grandstands echo; the crowd is out in the stands and roars at wrecks, lead changes and the finish; wind noise builds with speed. In the cockpit the world outside is muffled.
 - **A camera with weight.** Views lean out in the corners, dip under braking and sink back on the throttle, like a head on a neck. Road texture, seams and the engine at high revs come through as vibration, and hits jolt the view.
 - **Cockpit view** (C to cycle to it). You get the roll cage and centre bar, the window net, a digital dash with shift lights, and a steering wheel your hands turn. The rear-view mirror shows the cars behind. The whole interior rolls and pitches with the chassis.

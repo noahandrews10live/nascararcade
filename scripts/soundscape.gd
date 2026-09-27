@@ -7,8 +7,9 @@ extends Node3D
 ## own engine stays on the live synth (audio.gd) so it answers the throttle
 ## instantly; it goes through the same "World" bus, so it echoes too.
 
+const Synth := preload("res://scripts/audio.gd")
 const RATE := 22000
-const ENGINE_BASE_RPM := 6000.0 # the loop is recorded at this rpm (200 Hz firing)
+const ENGINE_BASE_RPM := 7500.0 # the loop is recorded at this rpm (500 Hz firing), about race pace
 const POOL := 8
 const SOUND_SPEED := 343.0
 
@@ -88,30 +89,27 @@ func _wav(samples: PackedFloat32Array) -> AudioStreamWAV:
 	return w
 
 
-## A V8 at 6,000 rpm: the same voice as the live synth. Every partial is a
-## multiple of 100 Hz and the loop is exactly half a second, so it repeats
-## seamlessly; the filters run over two loops and keep the second.
+## The race engine at 7,500 rpm and nearly full throttle, from the same V8 as
+## your own car (audio.gd): 25 engine cycles, the end cross-faded into the start
+## so it loops without a click. Each car's player pitches it to that car's rpm.
 func _make_engine_loop() -> AudioStreamWAV:
-	var n := RATE / 2
+	var v8 = Synth.V8.new(RATE, 7)
+	var n := RATE * 2 / 5 # 0.4 s = 25 cycles at 7,500 rpm
+	var fade := RATE / 20
+	for i in RATE: # let the exhaust ring up first
+		v8.step(ENGINE_BASE_RPM, 0.9)
+	var raw := PackedFloat32Array()
+	raw.resize(n + fade)
+	for i in n + fade:
+		var o: Vector2 = v8.step(ENGINE_BASE_RPM, 0.9)
+		raw[i] = (o.x + o.y) * 0.5
 	var out := PackedFloat32Array()
 	out.resize(n)
-	var f := ENGINE_BASE_RPM / 60.0 * 2.0
-	var lp := 0.0
-	var lp2 := 0.0
-	var rng := RandomNumberGenerator.new()
-	rng.seed = 99
-	for pass_i in 2:
-		for i in n:
-			var t := float(i) / RATE
-			var ph1 := fmod(t * f, 1.0)
-			var ph2 := fmod(t * f * 0.5, 1.0)
-			var ph3 := fmod(t * f * 1.5, 1.0)
-			var pulse := (1.0 if ph1 < 0.32 else -0.6) + (0.7 if ph2 < 0.5 else -0.7) * 0.6 + (ph3 * 2.0 - 1.0) * 0.25
-			pulse += rng.randf_range(-0.25, 0.25) # exhaust roughness
-			lp += (pulse - lp) * 0.3
-			lp2 += (lp - lp2) * 0.55
-			if pass_i == 1:
-				out[i] = lp2 * 0.55
+	for i in n:
+		out[i] = raw[i]
+		if i < fade:
+			var t := float(i) / fade
+			out[i] = raw[i] * t + raw[n + i] * (1.0 - t)
 	return _wav(out)
 
 
