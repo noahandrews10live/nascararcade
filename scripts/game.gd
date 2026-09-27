@@ -592,11 +592,18 @@ const SETTINGS_PATH := "user://settings.cfg"
 const SEASON_PATH := "user://season.cfg"
 const LENGTHS := [["SPRINT", 0.05], ["SHORT", 0.1], ["MEDIUM", 0.25], ["LONG", 0.5], ["FULL", 1.0]]
 const DIFFICULTIES := [["ROOKIE", 0.955], ["VETERAN", 0.985], ["LEGEND", 1.0]]
-const FIELDS := [20, 30, 40]
+const FIELDS := [20, 25, 30, 40]
+## Field size "AUTO" (settings.field = -1): as many cars as this device runs
+## smoothly. Worked out from how the last race ran: the script time per frame
+## against a model of it (a fixed part plus a part per car, in ms on the
+## reference machine), aiming to leave room in a 60 fps frame for drawing.
+const PERF_FIXED_MS := 2.5
+const PERF_CAR_MS := 0.13
+const PERF_BUDGET_MS := 9.0
 const WEEKENDS := ["RACE ONLY", "QUALIFY + RACE", "PRACTICE + QUALIFY + RACE"]
 var settings := {
-	# Browsers get a 20-car field by default (GDScript runs slower there).
-	"length": 1, "difficulty": 1, "field": 0 if OS.has_feature("web") else 2, "cautions": 1, "damage": 1, "wear": 1, "weather": 0,
+	# field: -1 = AUTO (see field_size), else an index into FIELDS.
+	"length": 1, "difficulty": 1, "field": -1, "auto_field": 0, "cautions": 1, "damage": 1, "wear": 1, "weather": 0,
 	"assists": 2, "manual": 0, "weekend": 1, "touch_tilt": true, "tilt_sens": 1, "res_mode": 0, "commentary": 1, "catchup": 0,
 	"auto_gas": 0, "tutorial_done": 0, "share_stats": 1, "haptics": 1,
 }
@@ -726,6 +733,9 @@ func load_settings() -> void:
 		radio_voice = cf.get_value("audio", "radio_voice", radio_voice)
 		for k in wheel:
 			wheel[k] = cf.get_value("wheel", k, wheel[k])
+		# Field sizes used to be 20 / 30 / 40 with no AUTO: start everyone on AUTO.
+		if not cf.get_value("settings", "field_v2", false):
+			settings.field = -1
 		# Assists used to be OFF / ON; ON is now FULL (OFF / MILD / FULL).
 		if not cf.get_value("settings", "assists_v2", false) and int(settings.assists) == 1:
 			settings.assists = 2
@@ -738,6 +748,55 @@ func _apply_assists() -> void:
 	assists = assist_level > 0.0
 
 
+## Cars in a race: the chosen size, or on AUTO what this device handles.
+func field_size() -> int:
+	var f := int(settings.get("field", -1))
+	if f >= 0:
+		return FIELDS[clampi(f, 0, FIELDS.size() - 1)]
+	var a := int(settings.get("auto_field", 0))
+	return a if a > 0 else first_field_guess()
+
+
+## Before any race has been timed: careful in a browser on a phone.
+func first_field_guess() -> int:
+	if OS.has_feature("web"):
+		return 20 if touch_device() else 25
+	if OS.has_feature("mobile"):
+		return 25
+	return 40
+
+
+## What the field size on AUTO should be after a race with `cars` cars that took
+## `script_ms` of script time and `frame_ms` in all per frame (averages).
+static func auto_field_for(cars: int, script_ms: float, frame_ms: float, current: int) -> int:
+	var slow: float = script_ms / (PERF_FIXED_MS + PERF_CAR_MS * cars) # 1 = the reference machine
+	var fit: float = (PERF_BUDGET_MS / max(slow, 0.05) - PERF_FIXED_MS) / PERF_CAR_MS
+	if frame_ms > 20.0: # under 50 fps whatever the model says: fewer cars
+		fit = min(fit, cars - 5)
+	var pick: int = FIELDS[0]
+	for f in FIELDS:
+		if f <= fit:
+			pick = f
+	# Down at once; up one size at a time.
+	var i := FIELDS.find(current)
+	if i >= 0 and pick > current:
+		pick = FIELDS[min(i + 1, FIELDS.size() - 1)]
+	return pick
+
+
+## Learn from how a race ran, for AUTO next time.
+func note_race_perf(cars: int, script_ms: float, frame_ms: float) -> void:
+	if cars < 10:
+		return
+	var cur := int(settings.get("auto_field", 0))
+	if cur <= 0:
+		cur = first_field_guess()
+	var pick := auto_field_for(cars, script_ms, frame_ms, cur)
+	if pick != int(settings.get("auto_field", 0)):
+		settings.auto_field = pick
+		save_settings()
+
+
 func save_settings() -> void:
 	_apply_assists()
 	manual_shift = settings.manual == 1
@@ -745,6 +804,7 @@ func save_settings() -> void:
 	for k in settings:
 		cf.set_value("settings", k, settings[k])
 	cf.set_value("settings", "assists_v2", true)
+	cf.set_value("settings", "field_v2", true)
 	for k in setup:
 		cf.set_value("setup", k, setup[k])
 	cf.set_value("video", "modern_look", modern)

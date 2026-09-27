@@ -13,7 +13,7 @@ func _run() -> void:
 	var game := root.get_node("Game")
 	for i in 20:
 		await process_frame
-	game.settings.field = int(OS.get_environment("FIELD")) if OS.get_environment("FIELD") != "" else 2
+	game.settings.field = int(OS.get_environment("FIELD")) if OS.get_environment("FIELD") != "" else 3
 	main.mode = "race"
 	main.session = "race"
 	main._use_track(1)

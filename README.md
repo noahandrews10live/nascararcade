@@ -63,7 +63,7 @@ Motion smoothing), and Options → VSync off gives the lowest input delay.
 |---|---|
 | **Quick Race** | Straight into a short green-flag race at a random track, no setup. |
 | **Arcade** | The 1999 cabinet game: 16 cars, a short race and a countdown clock with EXTENDED TIME each lap. |
-| **Single Race** | A full race weekend (practice, qualifying, race) with 20–40 cars and the full rules below. |
+| **Single Race** | A full race weekend (practice, qualifying, race) with 20–40 cars and the full rules below. FIELD SIZE is **AUTO** by default: see below. |
 | **Season** | A 6-, 12- or 36-race championship with points, wins and top 5s. Standings are saved between sessions. |
 | **Career** | Rookie to champion. Start underfunded, then earn prize money and reputation, sign sponsors and buy engine, aero, chassis and pit-crew R&D. It runs season after season with a career record. |
 | **2 Player** | Split-screen racing. Player 2 uses I/J/K/L (U to pit) or a second gamepad. |
@@ -307,6 +307,8 @@ godot --headless --path . --export-release Web build/web/index.html
 - **Light on the CPU.** Browsers run a 20-car field by default (40 on desktop), distant cars run their physics at a lower rate, and the fine detail (wheels, lights, flames, loose bodywork) is only animated for cars near the camera. `tests/cpu_bench.gd` times a 40-car race frame by frame without rendering.
 - **Native resolution and 120 Hz.** The game renders at the screen's full pixel count, e.g. 2868 × 1320 on a 460 ppi iPhone 16 Pro Max in landscape, so text and the HUD are always pin-sharp. The page measures the display's refresh rate (60, 90, 120 or 144 Hz) and AUTO quality aims for that frame rate.
   - Options → RESOLUTION: **AUTO** keeps native resolution and trims only the 3D scene (down to 50%) if the frame rate can't hold, then restores it when there's headroom. **NATIVE** always renders at 100%, **BALANCED** at 75%, **PERFORMANCE** at 50%. The row shows the screen size, refresh rate and current 3D scale.
+  - **Field size on AUTO.** Each car costs a little CPU time every frame (about 0.13 ms on a fast desktop, several times that in a phone's browser). On AUTO the game times its own work 20 seconds into every race and picks the next race's field from 20, 25, 30 or 40 cars, leaving room in each 60 Hz frame for drawing. It drops a size straight away when a race runs short of time and moves up one size per race when there's room. The first race uses 20 cars in a phone's browser, 25 in a desktop browser or the phone apps, and 40 on a computer. RACE SETTINGS → FIELD SIZE shows the current AUTO size, and you can pick a fixed size there instead.
+  - **Sound for next to nothing.** The V8 engine model is rendered once, in the menus, into short seamless loops at eight rpm points, on and off the throttle, which the mixer pitch-shifts and cross-fades. Each music cue is recorded the first time it plays and then replays from the recording. Engine sound drops from about 0.55 ms to 0.04 ms a frame, and the music from about 0.8 ms to nothing. Only the intro anthem and the last-lap build, which change as they play, are still synthesised live (`tests/audio_cost_bench.gd`).
   - iPhone and iPad web apps are held to 60 Hz by iOS unless you turn off **Settings → Apps → Safari → Advanced → Feature Flags → Prefer Page Rendering Updates near 60fps**. Android Chrome runs at the full 120 Hz.
 
 ## Native apps
@@ -442,6 +444,7 @@ All tests run headless (`godot --headless --fixed-fps 60 --path . -s <script>`):
 | `tests/tracks_test.gd` | Every track builds and laps cleanly |
 | `tests/makes_test.gd` | The four bodies and the even split across the field |
 | `tests/engine_sound_test.gd` | The V8 note follows rpm, and pops on lift |
+| `tests/field_auto_test.gd` | FIELD SIZE on AUTO: old saves move to it, how a race ran picks the next size, and the race uses it |
 | `tests/fit_test.gd` | Menus and HUD fit phone, tablet and ultrawide screens |
 | `tests/line_field_test.gd` | 40-car races on the flat tracks: the line is used, cars still pass, few crashes, the pack's pace |
 | `tests/cpu_bench.gd` | CPU time per frame of a 40-car race (no rendering) |

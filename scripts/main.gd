@@ -49,6 +49,8 @@ var cloud: Node # leaderboards, friends, events, progress online
 var rival: Node3D # someone else's best lap to chase (a ghost)
 var last_award := {} # the XP the last race earned
 var _frame_ms: PackedFloat32Array = [] # this race's frame times (for the stats)
+var frame_timer: Node # times our own work each frame (for AUTO field sizes)
+var _script_ms := 0.0 # this race's script time, summed over _frame_ms's frames
 var ui_layer: CanvasLayer
 var ui_root: Control # the 640x480 menu frame, centred however wide the screen is
 var screen: Control
@@ -254,6 +256,8 @@ func _ready() -> void:
 	rival = Ghost.new()
 	rival.name = "Rival"
 	add_child(rival)
+	frame_timer = preload("res://scripts/frame_timer.gd").new()
+	add_child(frame_timer)
 	cloud = Cloud.new()
 	cloud.name = "Cloud"
 	add_child(cloud)
@@ -826,13 +830,13 @@ func _new_race(player_team: int) -> void:
 		race.control.message.connect(_on_control_message)
 		race.control.flag_changed.connect(_on_flag)
 	elif mode == "2p":
-		var size2: int = Game.FIELDS[Game.settings.field]
+		var size2: int = Game.field_size()
 		race.setup(track, player_team, Game.race_laps(Game.selected_track), size2, [], team2)
 		race.enable_rules()
 		race.control.message.connect(_on_control_message)
 		race.control.flag_changed.connect(_on_flag)
 	elif sim and session == "race":
-		var size: int = Game.FIELDS[Game.settings.field]
+		var size: int = Game.field_size()
 		race.setup(track, player_team, Game.race_laps(Game.selected_track), size, _grid_for(size, player_team))
 		race.enable_rules()
 		race.control.message.connect(_on_control_message)
@@ -1187,6 +1191,7 @@ func _enter_countdown() -> void:
 	# Online: chase your fastest friend's best lap here (or the world record's).
 	rival.end()
 	_frame_ms = PackedFloat32Array()
+	_script_ms = 0.0
 	last_award = {}
 	if chase_self and split_cams.is_empty() and cloud.enabled and race.player:
 		var tidx: int = Game.selected_track
@@ -1818,6 +1823,13 @@ func _player_input() -> void:
 		p.shift_request = -1
 
 
+func _note_perf() -> void:
+	var total := 0.0
+	for f in _frame_ms:
+		total += f
+	Game.note_race_perf(race.cars.size(), _script_ms / _frame_ms.size(), total / _frame_ms.size())
+
+
 ## How the game ran this race (frame rate on this device), anonymously.
 func _send_stats() -> void:
 	if _frame_ms.size() < 60:
@@ -2054,6 +2066,9 @@ func _process(delta: float) -> void:
 		rival.update(track, race.player, race.time)
 	if state == State.RACE and not paused:
 		_frame_ms.append(delta * 1000.0)
+		_script_ms += frame_timer.busy_ms
+		if _frame_ms.size() == 1200 and race: # 20 s of racing: enough to size AUTO fields
+			_note_perf()
 	if race == null:
 		return
 	race.interpolate(Engine.get_physics_interpolation_fraction() if Game.smoothing else 1.0)
@@ -2328,7 +2343,7 @@ func _enter_race_setup(return_to := "") -> void:
 	var rows := [
 		{"id": "length", "label": "RACE LENGTH", "values": lengths, "index": Game.settings.length, "hint": "PERCENT OF A REAL CUP RACE DISTANCE"},
 		{"id": "difficulty", "label": "DIFFICULTY", "values": diffs, "index": Game.settings.difficulty, "hint": "HOW FAST AND SHARP THE OTHER DRIVERS ARE"},
-		{"id": "field", "label": "FIELD SIZE", "values": Game.FIELDS.map(func(f): return "%d CARS" % f), "index": Game.settings.field},
+		{"id": "field", "label": "FIELD SIZE", "values": ["AUTO  %d CARS" % Game.field_size() if int(Game.settings.field) < 0 else "AUTO"] + Game.FIELDS.map(func(f): return "%d CARS" % f), "index": int(Game.settings.field) + 1, "hint": "AUTO: AS MANY AS THIS DEVICE RUNS SMOOTHLY"},
 		{"id": "weekend", "label": "WEEKEND", "values": Game.WEEKENDS, "index": Game.settings.weekend, "hint": "QUALIFY TO SET YOUR STARTING SPOT"},
 		{"id": "catchup", "label": "CATCH-UP", "values": ["OFF", "ON"], "index": int(Game.settings.get("catchup", 0)), "hint": "ON: THE FIELD STAYS CLOSE TO YOU, AHEAD OR BEHIND"},
 		{"id": "cautions", "label": "CAUTIONS", "values": ["OFF", "QUICK", "FULL"], "index": Game.settings.cautions, "hint": "QUICK: ABOUT 15 S FROM YELLOW TO GREEN. FULL: REAL CAUTION LAPS BEHIND THE PACE CAR"},
@@ -2476,7 +2491,10 @@ func _on_menu_changed(id: String, idx: int) -> void:
 	synth.beep(880.0, 0.04)
 	match menu_kind:
 		"race_setup":
-			if Game.settings.has(id):
+			if id == "field":
+				Game.settings.field = idx - 1
+				Game.save_settings()
+			elif Game.settings.has(id):
 				Game.settings[id] = idx
 				Game.save_settings()
 		"wheel":

@@ -37,6 +37,17 @@ var _snare_env := 0.0
 var _hat_env := 0.0
 var _step := -1
 var _rng := RandomNumberGenerator.new()
+# Each looping cue is recorded the first time it plays (one pass of its bars),
+# then replays from that recording: the synth only runs for the intro and the
+# last lap, which change as they go.
+const RECORD := ["menu", "victory", "caution", "qualify", "results"]
+const SEAM := 0.06 # seconds of the second pass cross-faded over the loop's start
+var _cache: Dictionary = {} # cue -> AudioStreamWAV
+var _rec := PackedFloat32Array()
+var _rec_cue := ""
+var _loop_player: AudioStreamPlayer
+var _switch := false # a recording just finished: hand over to it
+var _switch_wait := 0.0
 
 # Chords as semitones from A (220 Hz). Each cue: [chords per bar, bars].
 const CUES := {
@@ -68,6 +79,9 @@ func _ready() -> void:
 	player.play()
 	playback = player.get_stream_playback()
 	_ph.resize(16)
+	_loop_player = AudioStreamPlayer.new()
+	_loop_player.bus = player.bus
+	add_child(_loop_player)
 
 
 func play(name: String) -> void:
@@ -78,6 +92,25 @@ func play(name: String) -> void:
 		_step = -1
 	cue = name
 	_target_gain = CUE_GAIN.get(name, 1.0)
+	_switch = false
+	_switch_wait = 0.0
+	_rec_cue = name if _t == 0.0 and name in RECORD and not _cache.has(name) else ""
+	_rec.resize(0)
+	if _cache.has(name):
+		if _loop_player.stream != _cache[name] or not _loop_player.playing:
+			_loop_player.stream = _cache[name]
+			_loop_player.play()
+	else:
+		_loop_player.stop()
+
+
+func cached(name: String) -> bool:
+	return _cache.has(name)
+
+
+func _loop_len(name: String) -> int:
+	var beat := 60.0 / (BPM * float(CUE_TEMPO.get(name, 1.0)))
+	return int(round(beat * 4.0 * CUES[name].size() * RATE))
 
 
 func stop() -> void:
@@ -88,18 +121,67 @@ func _note(semi: float) -> float:
 	return 220.0 * pow(2.0, semi / 12.0)
 
 
-func _process(_delta: float) -> void:
+func _process(delta: float) -> void:
 	if playback == null:
 		return
+	if _loop_player.playing:
+		# The recording plays; only its volume moves.
+		_gain = move_toward(_gain, _target_gain, delta / (0.4 if _target_gain > _gain else 1.6))
+		_loop_player.volume_db = player.volume_db + linear_to_db(max(volume * _gain, 0.00001))
+		if _gain <= 0.0005 and _target_gain == 0.0:
+			_loop_player.stop()
+	if _switch:
+		# Carry on from the recording exactly where the synth stopped: once
+		# what it already queued has played out.
+		_switch = false
+		_switch_wait = max((int(RATE * 0.15) - playback.get_frames_available()) / RATE, 0.001)
+	elif _switch_wait > 0.0:
+		_switch_wait -= delta
+		if _switch_wait <= 0.0:
+			var w: AudioStreamWAV = _cache[cue]
+			_loop_player.stream = w
+			_loop_player.volume_db = player.volume_db + linear_to_db(max(volume * _gain, 0.00001))
+			_loop_player.play(fmod(_t, w.loop_end / RATE))
 	var frames := playback.get_frames_available()
 	if frames <= 0:
 		return
+	playback.push_buffer(_render(frames))
+
+
+## The recorded pass -> a looping mono WAV, the start of the second pass
+## cross-faded over its start so the seam doesn't click.
+func _finish_recording() -> void:
+	var n := _loop_len(_rec_cue)
+	var fade := int(SEAM * RATE)
+	var data := PackedByteArray()
+	data.resize(n * 2)
+	for i in n:
+		var v: float = _rec[i]
+		if i < fade:
+			var k := float(i) / fade
+			v = v * k + _rec[n + i] * (1.0 - k)
+		data.encode_s16(i * 2, int(clamp(v, -1.0, 1.0) * 32000.0))
+	var w := AudioStreamWAV.new()
+	w.format = AudioStreamWAV.FORMAT_16_BITS
+	w.mix_rate = int(RATE)
+	w.data = data
+	w.loop_mode = AudioStreamWAV.LOOP_FORWARD
+	w.loop_end = n
+	_cache[_rec_cue] = w
+	_rec.resize(0)
+	_rec_cue = ""
+	_switch = true
+
+
+## The next `frames` samples of the score (silence when nothing's playing).
+func _render(frames: int) -> PackedVector2Array:
 	var buf := PackedVector2Array()
 	buf.resize(frames)
-	if cue == "" or (_gain <= 0.0005 and _target_gain == 0.0):
-		_gain = 0.0
-		playback.push_buffer(buf) # silence
-		return
+	if cue == "" or (_gain <= 0.0005 and _target_gain == 0.0) or _loop_player.playing or _switch or _switch_wait > 0.0:
+		if not _loop_player.playing:
+			_gain = 0.0
+		return buf
+	var recording := _rec_cue == cue
 	var chords: Array = CUES[cue]
 	var beat := 60.0 / (BPM * float(CUE_TEMPO.get(cue, 1.0)))
 	var bar := beat * 4.0
@@ -183,10 +265,15 @@ func _process(_delta: float) -> void:
 		# The last-lap riser: noise sweeping up as the finish nears.
 		if cue == "lastlap" and intensity > 0.0:
 			s += _rng.randf_range(-1.0, 1.0) * 0.05 * intensity * intensity * (0.5 + 0.5 * sin(_t * TAU * (2.0 + intensity * 6.0)))
-		s = tanh(s * 1.4) * volume * _gain
+		s = tanh(s * 1.4)
+		if recording:
+			_rec.append(s)
+		s *= volume * _gain
 		buf[i] = Vector2(s, s)
 		_t += 1.0 / RATE
-	playback.push_buffer(buf)
+	if recording and _rec.size() >= _loop_len(cue) + int(SEAM * RATE):
+		_finish_recording()
+	return buf
 
 
 func _trigger(st: int) -> void:

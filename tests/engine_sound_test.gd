@@ -131,6 +131,40 @@ func _run() -> void:
 	var ms := (Time.get_ticks_usec() - t0) / 1000.0
 	print("   one second of engine: %.1f ms of script time" % ms)
 	_check(ms < 250.0, "cheap enough to run live")
+	# Your own engine from the loops baked in the menus.
+	var syn = Synth.new()
+	root.add_child(syn)
+	await process_frame
+	var steps := 0
+	while not syn.loops_ready() and steps < 2000:
+		syn._bake_step()
+		steps += 1
+	_check(syn.loops_ready(), "the engine loops bake in the menus (%d frames)" % steps)
+	var bw: AudioStreamWAV = syn._loops[0][3]
+	var wd := bw.data
+	var wn: int = bw.loop_end
+	var wmax := 0.0
+	for i in range(1, wn):
+		wmax = max(wmax, abs(wd.decode_s16(i * 4) - wd.decode_s16((i - 1) * 4)))
+	var wseam: float = abs(wd.decode_s16(0) - wd.decode_s16((wn - 1) * 4))
+	_check(wseam <= wmax, "a baked loop repeats without a click (seam step %d, largest step in the loop %d)" % [wseam, wmax])
+	syn.engine_on = true
+	syn.engine_rpm = 6500.0
+	syn.engine_load = 1.0
+	for i in 60:
+		syn._update_loops(1.0 / 60.0)
+	var loud := []
+	for b in syn.BANDS.size():
+		var pl: AudioStreamPlayer = syn._players[0][b]
+		if not pl.stream_paused and pl.volume_db > -30.0:
+			loud.append("%d rpm x%.2f" % [syn.BANDS[b], pl.pitch_scale])
+	print("   6,500 rpm on the gas plays: ", loud)
+	_check(loud.size() == 2 and absf(syn._players[0][4].pitch_scale * syn.BANDS[4] - 6500.0) < 60.0, "6,500 rpm blends the 5,900 and 7,000 loops, each pitched to 6,500")
+	syn.engine_load = 0.0
+	for i in 60:
+		syn._update_loops(1.0 / 60.0)
+	_check(syn._players[0][4].stream_paused and not syn._players[1][4].stream_paused, "lifting swaps to the off-throttle loops")
+	syn.queue_free()
 	var out := OS.get_environment("OUT")
 	if out != "":
 		_save(out)
