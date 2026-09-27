@@ -25,7 +25,13 @@ audio. The project has no imported assets.
     exhausts and ten-spoke wheels with brake discs, in each team's two-tone
     livery; the body crumples where it's hit (`tests/shots_showroom.gd` renders
     it on its own);
-  - procedurally generated asphalt, grass and concrete textures with normal maps;
+  - race-track asphalt generated stone by stone (grey aggregate in dark binder, sealed
+    cracks, a bump map so the stones catch the light) at a real asphalt brightness,
+    plus grass and concrete textures with normal maps;
+  - real skies for lighting: the cars' paint, glass and chrome reflect photographed
+    CC0 skies from Poly Haven (clear day, sunset, overcast, night; see
+    `assets/hdri/CREDITS.md`), turned so the photo's sun sits where the game's sun is
+    and swapped as the race clock and the weather change; AgX filmic tone mapping;
   - grandstands full of fans, pine and broadleaf trees and a chain-link catch fence;
   - a procedural sky with clouds (stars at night), sun shadows and bloom;
   - on desktop (Forward+): ambient occlusion, screen-space reflections, volumetric fog
@@ -53,6 +59,28 @@ Motion smoothing), and Options → VSync off gives the lowest input delay.
 | **Track Editor** | Build a track from straights and turns (radius, angle, banking), see it drawn live, test-drive it and save it as a mod. |
 
 ## Racing: how it models 2026 Next Gen racing
+
+- **Built to published Gen 3 figures.** Each track runs its 2026 engine package:
+  510 hp on the superspeedways, 670 hp on the intermediates, 750 hp on short tracks
+  and road courses, with drag and downforce to match. Tyres grip like racing slicks
+  (peak mu 1.35, falling off with load as real tyres do). Solo qualifying laps land
+  close to the real pole speeds at the track each one is modelled on:
+
+  | Track | Modelled on | Game | Real pole |
+  |---|---|---|---|
+  | Thunder Beach | Daytona | 183 mph | ~181 |
+  | Lone Star | Texas | 183 | ~185 |
+  | Thunder Valley | Bristol | 125 | ~127 |
+  | Big Sky | Talladega | 184 | ~181 |
+  | Motor City | Michigan | 189 | ~186 |
+  | Gulf Coast | Kansas | 179 | ~182 |
+  | Palmetto | Darlington | 169 | ~168 |
+  | Magnolia | Martinsville | 91 | ~97 |
+  | Desert Sun | Phoenix | 133 | ~137 |
+  | Keystone | Pocono | 164 | ~171 |
+  | Canyon Ridge | Watkins Glen / COTA | 116 | ~110 |
+
+  `tests/lap_bench.gd` runs these in seconds.
 
 - **Car physics.** Each car is simulated like a real stock car:
   - **four tyres**, each with its own load, slip angle, grip peak and fall-off, a
