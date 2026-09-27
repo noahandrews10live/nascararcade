@@ -419,7 +419,51 @@ func complete_challenge(idx: int) -> bool:
 	var first := not challenges_done.has(str(idx))
 	challenges_done[str(idx)] = true
 	var cf := ConfigFile.new()
+	cf.load(CHALLENGES_PATH) # keep the daily results in the same file
 	cf.set_value("done", "list", challenges_done)
+	cf.save(CHALLENGES_PATH)
+	return first
+
+
+## Today's challenge: the same for everyone on a given day, a new one tomorrow.
+func daily_key() -> String:
+	var d := Time.get_date_dict_from_system()
+	return "%04d%02d%02d" % [d.year, d.month, d.day]
+
+
+func daily_challenge() -> Dictionary:
+	var rng := RandomNumberGenerator.new()
+	rng.seed = hash("daily" + daily_key())
+	var t := rng.randi_range(0, tracks.size() - 1)
+	var name: String = tracks[t].short
+	var kind := rng.randi_range(0, 3)
+	var ch := {"track": t, "field": 24}
+	match kind:
+		0:
+			var g := rng.randi_range(14, 22)
+			ch.merge({"name": "CHARGE AT %s" % name, "laps": rng.randi_range(5, 8), "grid": g, "goal": "top5", "desc": "START %s AT %s. GET INTO THE TOP 5." % [ordinal(g), name]})
+		1:
+			ch.merge({"name": "HOLD ON AT %s" % name, "laps": 3, "grid": 1, "goal": "win", "desc": "LEADING AT %s, 3 TO GO, THE PACK ON YOUR BUMPER. WIN." % name})
+		2:
+			var g2 := rng.randi_range(5, 10)
+			ch.merge({"name": "WORN OUT AT %s" % name, "laps": 5, "grid": g2, "goal": "top3", "tyres": 0.85, "wear": true, "desc": "%s ON WORN TIRES. 5 LAPS FROM %s. TOP 3." % [name, ordinal(g2)]})
+		_:
+			var g3 := rng.randi_range(8, 16)
+			ch.merge({"name": "BENT FENDER AT %s" % name, "laps": 6, "grid": g3, "goal": "top5", "damage": 0.2, "desc": "DAMAGED CAR AT %s. 6 LAPS FROM %s. TOP 5." % [name, ordinal(g3)]})
+	return ch
+
+
+func daily_done() -> bool:
+	var cf := ConfigFile.new()
+	cf.load(CHALLENGES_PATH)
+	return cf.get_value("daily", daily_key(), false)
+
+
+func complete_daily() -> bool:
+	var first := not daily_done()
+	var cf := ConfigFile.new()
+	cf.load(CHALLENGES_PATH)
+	cf.set_value("daily", daily_key(), true)
 	cf.save(CHALLENGES_PATH)
 	return first
 

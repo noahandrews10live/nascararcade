@@ -40,6 +40,7 @@ func setup(config: Dictionary) -> void:
 	infield = cfg.infield
 	_build_centerline()
 	_build_profile()
+	_build_line()
 	_build_bumps()
 	_build_minimap()
 	_build_mesh()
@@ -469,8 +470,8 @@ func car_transform(s: float, d: float, yaw: float) -> Transform3D:
 ## Fastest steady speed through sample i for a nominal car: the tyres (with load
 ## sensitivity and downforce) must supply the in-plane lateral force the banking
 ## doesn't. Mirrors the model in car.gd.
-func corner_speed(i: int, mu0: float, cla_v: float) -> float:
-	var k: float = curv[i]
+func corner_speed(i: int, mu0: float, cla_v: float, k_over := INF) -> float:
+	var k: float = curv[i] if k_over == INF else k_over
 	if abs(k) < 0.00002:
 		return 200.0
 	var b: float = bank[i]
@@ -501,6 +502,87 @@ func _build_profile() -> void:
 		for idx in range(n - 1, -1, -1):
 			var nxt := speed_profile[(idx + 1) % n]
 			speed_profile[idx] = min(speed_profile[idx], sqrt(nxt * nxt + 2.0 * decel * seg))
+
+
+## --- The racing line (flat tracks and road courses) ------------------------------
+## Where the banking is low the fast way round is wide into the turn, clipping the
+## apex and wide on the way out. line_d is that line's lateral offset (empty where
+## the cars race in lanes), line_curv how tightly it bends, line_profile its speeds.
+var line_d := PackedFloat32Array()
+var line_curv := PackedFloat32Array()
+var line_profile := PackedFloat32Array()
+
+
+func has_line() -> bool:
+	return not line_d.is_empty()
+
+
+func line_at(s: float) -> float:
+	var l := _locate(s)
+	var i := int(l.x)
+	return lerp(line_d[i], line_d[(i + 1) % n], l.y)
+
+
+func line_curv_at(s: float) -> float:
+	var l := _locate(s)
+	var i := int(l.x)
+	return lerp(line_curv[i], line_curv[(i + 1) % n], l.y)
+
+
+func line_profile_at(s: float) -> float:
+	return line_profile[int(_locate(s).x)]
+
+
+func _build_line() -> void:
+	line_d = PackedFloat32Array()
+	if float(cfg.get("bank_turn", 20.0)) > 14.0 or n < 30:
+		return
+	# The minimum-curvature path: relax every point toward the middle of its
+	# neighbours, sideways only, inside the track (on a coarse grid, then
+	# filled in).
+	var m := 3
+	var nn: int = n / m
+	var dd := PackedFloat32Array()
+	dd.resize(nn)
+	var lo: float = inner_edge() + 1.4
+	var hi: float = outer_edge() - 1.4
+	for it in 500:
+		for j in nn:
+			var i := j * m
+			var ja := (j - 1 + nn) % nn
+			var jb := (j + 1) % nn
+			var pa: Vector3 = pos[ja * m] + right[ja * m] * dd[ja]
+			var pb: Vector3 = pos[jb * m] + right[jb * m] * dd[jb]
+			var p: Vector3 = pos[i] + right[i] * dd[j]
+			dd[j] = clamp(dd[j] + ((pa + pb) * 0.5 - p).dot(right[i]) * 0.6, lo, hi)
+	line_d.resize(n)
+	for i in n:
+		var j: int = i / m
+		var f := float(i % m) / m
+		line_d[i] = lerp(dd[j % nn], dd[(j + 1) % nn], f)
+	# How the line bends (sign as curv: + = turning left).
+	line_curv.resize(n)
+	var w := 3
+	for i in n:
+		var a := (i - w + n) % n
+		var b := (i + w) % n
+		var pa: Vector3 = pos[a] + right[a] * line_d[a]
+		var p: Vector3 = pos[i] + right[i] * line_d[i]
+		var pb: Vector3 = pos[b] + right[b] * line_d[b]
+		var d1 := (p - pa).normalized()
+		var d2 := (pb - p).normalized()
+		var seg: float = max((pb - pa).length() * 0.5, 0.1)
+		line_curv[i] = d1.cross(d2).y / seg
+	# Its speeds: corner speeds along the line, then the braking zones.
+	line_profile.resize(n)
+	var cla_v: float = cfg.get("cla", 2.2)
+	for i in n:
+		line_profile[i] = corner_speed(i, TYRE_MU, cla_v, line_curv[i])
+	var seg_len := length / n
+	for _pass in 2:
+		for idx in range(n - 1, -1, -1):
+			var nxt := line_profile[(idx + 1) % n]
+			line_profile[idx] = min(line_profile[idx], sqrt(nxt * nxt + 2.0 * 10.5 * seg_len))
 
 
 func profile_at(s: float) -> float:

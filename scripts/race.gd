@@ -685,7 +685,11 @@ func _drive_ai(c: Node3D, delta: float) -> void:
 	var k: float = track.curvature_at(ss)
 	var look: float = max(c.v, 0.0) * 0.7
 	var grip_scale: float = sqrt(c.mu / track.TYRE_MU * c.tyre_grip() * c._track_grip) * lerp(0.92, 1.0, c.df_front_mult)
-	var target: float = track.profile_at(ss + look) * grip_scale * c.ai_skill * 0.95
+	# On a flat track with clear road ahead, drive the racing line (wide, apex,
+	# wide); in traffic, race in the lanes.
+	var on_line: bool = track.has_line() and not controlled and c.pit_state == 0 and not c.want_pit and _free_run(c)
+	c.set_meta("on_line", on_line)
+	var target: float = (track.line_profile_at(ss + look) if on_line else track.profile_at(ss + look)) * grip_scale * c.ai_skill * 0.95
 	# In the wet drivers leave a margin: less feel, spray, and puddles off line.
 	target *= 1.0 - 0.05 * c._wet
 	# Catch-up (optional): the field stays near the player, ahead or behind.
@@ -839,6 +843,9 @@ func _drive_ai(c: Node3D, delta: float) -> void:
 	# Steering: ask the assist for the yaw rate that follows the lane, with the
 	# track curvature fed forward.
 	var r_track: float = -k * cos(track.bank_at(ss)) * c.v / (1.0 + k * c.d)
+	if on_line:
+		c.ai_lane = track.line_at(ss + c.v * 0.25)
+		r_track = -track.line_curv_at(ss + c.v * 0.1) * cos(track.bank_at(ss)) * c.v
 	# Ease across lanes: about 2.5 m/s of sideways speed at racing speed.
 	var max_psi: float = clamp((4.0 if controlled else 2.5) / max(c.v, 10.0), 0.03, 0.14)
 	var psi_des: float = clamp((c.ai_lane - c.d) * 0.015 * (80.0 / max(c.v, 30.0)), -max_psi, max_psi)
@@ -846,6 +853,16 @@ func _drive_ai(c: Node3D, delta: float) -> void:
 	var course: float = c.yaw + atan2(c.vy, max(c.v, 5.0))
 	c.ai_r_des = r_track + (psi_des - course) * 2.5
 	c.steer_in = clamp(c.ai_r_des, -1.0, 1.0)
+
+
+## Nobody close ahead or alongside: free to take the racing line.
+func _free_run(c: Node3D) -> bool:
+	var nbl: Array = c.nb
+	for q in range(0, nbl.size(), 2):
+		var g: float = nbl[q + 1]
+		if g > -8.0 and g < 70.0:
+			return false
+	return true
 
 
 func _nearest_lane(x: float) -> int:

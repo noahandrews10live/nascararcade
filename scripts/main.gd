@@ -17,6 +17,7 @@ const CamFeel := preload("res://scripts/cam_feel.gd")
 const Cockpit := preload("res://scripts/cockpit.gd")
 const CarBody := preload("res://scripts/car_body.gd")
 const Showtime := preload("res://scripts/showtime.gd")
+const Ghost := preload("res://scripts/ghost.gd")
 const Atmosphere := preload("res://scripts/atmosphere.gd")
 const RainFx := preload("res://scripts/rain_fx.gd")
 const RaceDay := preload("res://scripts/race_day.gd")
@@ -105,6 +106,8 @@ const MODES := [
 var mode_idx := 0
 ## Intro, showroom, TV package, replays, last-lap drama and victory lane.
 var showtime: Node
+## Your best lap at this track, driven by a see-through car.
+var ghost: Node3D
 var _quick_saved := {}
 
 # menus and race weekends
@@ -220,6 +223,9 @@ func _ready() -> void:
 	showtime.name = "Showtime"
 	add_child(showtime)
 	showtime.setup(self)
+	ghost = Ghost.new()
+	ghost.name = "Ghost"
+	add_child(ghost)
 
 	var scan_layer := CanvasLayer.new()
 	scan_layer.layer = 10
@@ -880,6 +886,7 @@ func _start_attract() -> void:
 
 func _enter_title() -> void:
 	showtime.reset()
+	ghost.end()
 	if not _quick_saved.is_empty():
 		for k in _quick_saved:
 			Game.settings[k] = _quick_saved[k]
@@ -1027,6 +1034,9 @@ func _enter_countdown() -> void:
 	elif session == "practice":
 		lead = -60.0
 	race.grid_up(lead, PACE_SPEED)
+	var chase_self: bool = session in ["practice", "qualify"] or (mode == "challenge" and String(challenge.get("goal", "")) == "time")
+	if race.player:
+		ghost.begin(Game.selected_track, chase_self and split_cams.is_empty(), race.player.team)
 	# Arcade clock: generous first lap, then an extension each lap.
 	var ref := 0.0
 	var seg: float = track.length / track.n
@@ -1131,6 +1141,7 @@ func _on_lap(car: Node3D, laps_done: int, lap_time: float) -> void:
 	if car != race.player or state != State.RACE:
 		return
 	if Game.submit_record(Game.selected_track, "lap", lap_time):
+		ghost.save_best()
 		if not new_records.has("NEW LAP RECORD!"):
 			new_records.append("NEW LAP RECORD!")
 	if mode != "arcade" and session == "race" and race.control and laps_done % 5 == 0 and laps_done < race.laps:
@@ -1179,7 +1190,7 @@ func _on_finished(car: Node3D, place: int) -> void:
 			"top10": ok = place <= 10
 			"time": ok = car.best_lap > 0.0 and car.best_lap <= float(challenge.time)
 		if ok:
-			var first := Game.complete_challenge(challenge_idx)
+			var first := Game.complete_daily() if challenge_idx < 0 else Game.complete_challenge(challenge_idx)
 			challenge_result = "CHALLENGE COMPLETE!" + ("   LEGEND UNLOCKED: #00 THUNDERBOLT" if first and Game.challenges_done.size() == 5 else "")
 		else:
 			challenge_result = "CHALLENGE FAILED"
@@ -1420,6 +1431,8 @@ func _physics_process(delta: float) -> void:
 		State.RACE:
 			_player_input()
 			race.tick(delta)
+			if race.player:
+				ghost.record(race.player, race.time, delta)
 			if mode != "arcade":
 				_check_player_out(delta)
 				return
@@ -1761,6 +1774,8 @@ func _process(delta: float) -> void:
 		_enter_wheel_setup()
 	if showtime:
 		showtime.process(delta)
+	if ghost and ghost.active and race and race.player and state in [State.COUNTDOWN, State.RACE]:
+		ghost.update(track, race.player, race.time)
 	if race == null:
 		return
 	race.interpolate(Engine.get_physics_interpolation_fraction() if Game.smoothing else 1.0)
@@ -2257,6 +2272,9 @@ func _on_menu_activated(id: String) -> void:
 	if id.begins_with("ch_"):
 		_start_challenge(int(id.substr(3)))
 		return
+	if id == "daily":
+		_start_challenge(-1)
+		return
 	if id.begins_with("sheet"):
 		_on_sheet(id)
 		return
@@ -2567,20 +2585,21 @@ func _paint_preview() -> void:
 
 func _enter_challenges() -> void:
 	mode = "challenge"
-	var rows: Array = []
+	var daily: Dictionary = Game.daily_challenge()
+	var rows: Array = [{"id": "daily", "label": ("[X] " if Game.daily_done() else "[ ] ") + "TODAY: " + String(daily.name), "hint": daily.desc}]
 	for i in Game.CHALLENGES.size():
 		var ch: Dictionary = Game.CHALLENGES[i]
 		var done: bool = Game.challenges_done.has(str(i))
 		rows.append({"id": "ch_%d" % i, "label": ("[X] " if done else "[ ] ") + ch.name, "hint": ch.desc})
 	var title := "LIGHTNING CHALLENGES  %d/%d" % [Game.challenges_done.size(), Game.CHALLENGES.size()]
-	_open_menu("challenges", title, rows, max(challenge_idx, 0))
+	_open_menu("challenges", title, rows, challenge_idx + 1)
 	menu.row_h = 28
-	menu.build(title, rows, max(challenge_idx, 0))
+	menu.build(title, rows, challenge_idx + 1)
 
 
 func _start_challenge(idx: int) -> void:
 	challenge_idx = idx
-	challenge = Game.CHALLENGES[idx]
+	challenge = Game.daily_challenge() if idx < 0 else Game.CHALLENGES[idx]
 	challenge_result = ""
 	session = "race"
 	_use_track(int(challenge.track))
