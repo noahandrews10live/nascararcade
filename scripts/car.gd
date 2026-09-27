@@ -1266,23 +1266,35 @@ func _update_visual(delta: float) -> void:
 	var pivot := Vector3(0.0, CG_H, 0.0)
 	var bb := Basis.from_euler(Vector3(chassis_pitch, 0.0, chassis_roll))
 	model.transform = Transform3D(bb, pivot + Vector3(0.0, chassis_z, 0.0) - bb * pivot)
-	for j in wheels.size():
-		var holder: Node3D = wheels[j].get_parent()
-		var wi: int = WHEEL_OF_HOLDER[j]
-		holder.position.y = CarBody.WHEEL_Y + clamp(_defl[wi], -0.12, 0.14) - (1.0 - tyre_air[wi]) * 0.09
 	_tr_prev = _tr_cur if _has_tr and _tr_cur.origin.distance_squared_to(tr.origin) < 400.0 else tr
 	_tr_cur = tr
 	_has_tr = true
 	_tr_frame = Engine.get_physics_frames()
 	global_transform = tr
 	wheel_spin += v * delta / 0.36
+	# Sparks and smoke show from anywhere.
+	if sparks:
+		sparks.emitting = (scraping or (has_flat() and speed() > 8.0)) and speed() > 8.0
+		sparks.position.x = HALF_W * sign(d)
+	if tyre_smoke:
+		# Tyre smoke when sliding, spray off the tyres on a wet track.
+		_set_emitting(tyre_smoke, ((slide > 0.4 or scrub > 0.6 or (spinning and speed() > 6.0)) and speed() > 6.0) or (_wet > 0.25 and speed() > 25.0))
+	if smoke:
+		_set_emitting(smoke, total_damage() > 0.3 or out)
+	# The fine detail (wheels turning and on their springs, lights, flames,
+	# loose bodywork) only for cars near the camera: nobody sees it further off,
+	# and on a phone it's CPU the frame rate needs.
+	var cam := get_viewport().get_camera_3d() if is_inside_tree() else null
+	if cam and not is_player and cam.global_position.distance_squared_to(tr.origin) > 150.0 * 150.0:
+		return
+	for j in wheels.size():
+		var holder: Node3D = wheels[j].get_parent()
+		var wi: int = WHEEL_OF_HOLDER[j]
+		holder.position.y = CarBody.WHEEL_Y + clamp(_defl[wi], -0.12, 0.14) - (1.0 - tyre_air[wi]) * 0.09
 	for i in wheels.size():
 		wheels[i].rotation.x = -wheel_spin
 		if i % 2 == 0: # front wheels
 			wheels[i].get_parent().rotation.y = -_delta_f * 2.0
-	if sparks:
-		sparks.emitting = (scraping or (has_flat() and speed() > 8.0)) and speed() > 8.0
-		sparks.position.x = HALF_W * sign(d)
 	if _haze:
 		# Heat shimmer from the exhaust: strongest on the gas, fades at speed as the
 		# air carries it away.
@@ -1292,11 +1304,6 @@ func _update_visual(delta: float) -> void:
 			_haze.set_instance_shader_parameter("strength", hs)
 	if delta > 0.0 and _body.has("glow"):
 		_update_fx(delta)
-	if tyre_smoke:
-		# Tyre smoke when sliding, spray off the tyres on a wet track.
-		_set_emitting(tyre_smoke, ((slide > 0.4 or scrub > 0.6 or (spinning and speed() > 6.0)) and speed() > 6.0) or (_wet > 0.25 and speed() > 25.0))
-	if smoke:
-		_set_emitting(smoke, total_damage() > 0.3 or out)
 
 
 ## Brake discs glow when they've been worked hard; the tail lights brighten

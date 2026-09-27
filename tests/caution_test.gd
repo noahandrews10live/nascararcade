@@ -160,12 +160,13 @@ func _run() -> void:
 		elif calls.get(c, "") != "" and ctl._laps_down(c, lead) == 0:
 			first_pitter = min(first_pitter, i)
 	_check(stay_ok and (first_pitter == 999 or last_stay < first_pitter), "cars that stayed out restart ahead, in their order at the caution")
-	var pitters: Array = order.filter(func(c): return calls.get(c, "") != "" and ctl._laps_down(c, lead) == 0)
+	# (The free pass car is on the lead lap now too, but restarts behind them.)
+	var pitters: Array = order.filter(func(c): return calls.get(c, "") != "" and ctl._laps_down(c, lead) == 0 and c != lapped)
 	# When each got off pit road: where it went in (the order at the caution) plus the stop.
 	var entry_rank := {}
 	var n := 0
 	for c in freeze:
-		if calls.get(c, "") != "" and ctl._laps_down(c, freeze[0]) == 0:
+		if calls.get(c, "") != "" and ctl._laps_down(c, freeze[0]) == 0 and c != lapped:
 			entry_rank[c] = n
 			n += 1
 	var exit_ok := true
@@ -176,6 +177,7 @@ func _run() -> void:
 		var tb: float = entry_rank.get(b, 0) * 0.45 + float(stop_t.get([b, calls[b]], 0.0))
 		if tb + 0.01 < ta:
 			exit_ok = false
+			print("   out of order: #%s (%s, entry %d, %.2f s) ahead of #%s (%s, entry %d, %.2f s)" % [a.team.num, calls[a], entry_rank.get(a, -1), ta, b.team.num, calls[b], entry_rank.get(b, -1), tb])
 	_check(exit_ok, "cars that pitted come out in the order they get off pit road")
 	_check(ctl._laps_down(lapped, lead) == 0, "the free pass car gets its lap back")
 	var two_wide := true
