@@ -7,10 +7,15 @@ extends SceneTree
 ## the race finishes. Midway the host throws a caution: the client must see the
 ## yellow and the pace car, make its pit call (the host must get it), and both
 ## must go back to green.
+## RELAY=1 goes through the room-code relay instead (run
+## tests/tools/fake_realtime.py and set ST_RELAY=ws://127.0.0.1:24780): the
+## host's room code is passed to the client in user://relay_code.txt.
 
 var main: Node
 var failures := 0
 var role := OS.get_environment("ROLE")
+var relay := OS.get_environment("RELAY") == "1"
+const CODE_FILE := "/tmp/st_relay_code.txt"
 
 
 func _initialize() -> void:
@@ -32,7 +37,13 @@ func _run() -> void:
 	var net: Node = main.net
 	if role == "host":
 		game.selected_team = 0
-		_check(net.host(24777) == "", "hosting")
+		if relay:
+			_check(net.host_room() == "", "hosting a room (code %s)" % net.room_code)
+			var f := FileAccess.open(CODE_FILE, FileAccess.WRITE)
+			f.store_string(net.room_code)
+			f.close()
+		else:
+			_check(net.host(24777) == "", "hosting")
 		var waited := 0.0
 		while net.players.size() < 2 and waited < 30.0:
 			await physics_frame
@@ -45,7 +56,17 @@ func _run() -> void:
 		game.selected_team = 1
 		for i in 60:
 			await physics_frame
-		_check(net.join("ws://127.0.0.1:24777") == "", "connecting")
+		if relay:
+			var code := ""
+			for k in 100:
+				if FileAccess.file_exists(CODE_FILE):
+					code = FileAccess.get_file_as_string(CODE_FILE).strip_edges()
+				if code.length() == 4:
+					break
+				await physics_frame
+			_check(net.join_room(code) == "", "joining room " + code)
+		else:
+			_check(net.join("ws://127.0.0.1:24777") == "", "connecting")
 		var waited := 0.0
 		while main.mode != "online" and waited < 40.0:
 			await physics_frame

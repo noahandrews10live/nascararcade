@@ -168,7 +168,10 @@ func _ready() -> void:
 	wheel.start_helper()
 	net.lobby_changed.connect(func():
 		if state == State.MENU and menu_kind == "lobby":
-			_enter_lobby())
+			if not net.connected and not net.hosting and net.room_code == "":
+				_enter_online() # the room wasn't found, or the host left
+			else:
+				_enter_lobby())
 	net.status.connect(func(t): _sub(t, 3.0))
 	net.race_started.connect(_net_start_race)
 	soundscape = Soundscape.new() # first: it sets up the "World" bus the synth uses
@@ -2766,9 +2769,11 @@ var _addr_edit: LineEdit
 
 func _enter_online() -> void:
 	var rows := [
-		{"id": "net_host", "label": "HOST A RACE", "hint": "DESKTOP: OPENS PORT %d FOR YOUR FRIENDS" % Net.PORT},
+		{"id": "net_room_host", "label": "HOST A RACE", "hint": "YOU GET A ROOM CODE TO SEND YOUR FRIENDS"},
+		{"id": "net_room_join", "label": "JOIN WITH A CODE", "hint": "TYPE THE 4-DIGIT CODE FROM THE HOST"},
+		{"id": "net_host", "label": "HOST ON THIS COMPUTER", "hint": "DESKTOP: OPENS PORT %d ON YOUR NETWORK" % Net.PORT},
 		{"id": "net_addr", "label": "ADDRESS", "values": [net_address], "index": 0, "hint": "START TO TYPE AN ADDRESS (BROWSERS NEED A WSS:// HOST)"},
-		{"id": "net_join", "label": "JOIN A RACE", "hint": "CONNECTS TO THE ADDRESS ABOVE"},
+		{"id": "net_join", "label": "JOIN BY ADDRESS", "hint": "CONNECTS TO THE ADDRESS ABOVE"},
 		{"id": "net_back", "label": "BACK"},
 	]
 	_open_menu("online", "ONLINE", rows, 0)
@@ -2789,7 +2794,12 @@ func _enter_lobby() -> void:
 	else:
 		rows.append({"id": "net_wait", "label": "WAITING FOR THE HOST", "disabled": true})
 	rows.append({"id": "net_leave", "label": "LEAVE"})
-	_open_menu("lobby", "LOBBY  (%d DRIVERS)" % net.players.size(), rows, rows.size() - (2 if net.hosting else 1))
+	var title := "LOBBY  (%d DRIVERS)" % net.players.size()
+	if net.room_code != "":
+		title = "ROOM %s  -  %d DRIVER%s" % [net.room_code, net.players.size(), "" if net.players.size() == 1 else "S"]
+		if not net.connected:
+			rows = [{"id": "net_wait", "label": "FINDING ROOM %s..." % net.room_code, "disabled": true}, {"id": "net_leave", "label": "CANCEL"}]
+	_open_menu("lobby", title, rows, rows.size() - (2 if net.hosting else 1))
 
 
 func _on_online_menu(id: String) -> void:
@@ -2806,6 +2816,15 @@ func _on_online_menu(id: String) -> void:
 				_sub(err2, 3.0)
 			else:
 				_enter_lobby()
+		"net_room_host":
+			var err3: String = net.host_room()
+			if err3 != "":
+				_sub(err3, 3.0)
+			else:
+				_enter_lobby()
+				_sub("ROOM CODE %s - SEND IT TO YOUR FRIENDS" % net.room_code, 6.0)
+		"net_room_join":
+			_edit_address(true)
 		"net_addr":
 			_edit_address()
 		"net_back":
@@ -2819,17 +2838,39 @@ func _on_online_menu(id: String) -> void:
 			net.start_race(_lobby_track, laps, ai + net.players.size())
 
 
-func _edit_address() -> void:
+var _editing_code := false
+
+
+## Typing an address, or (`code`) a room code: a number pad on a phone.
+func _edit_address(code := false) -> void:
+	_editing_code = code
 	if _addr_edit == null:
 		_addr_edit = LineEdit.new()
 		_addr_edit.position = Vector2(120, 360)
-		_addr_edit.size = Vector2(400, 32)
+		_addr_edit.size = Vector2(400, 40)
+		_addr_edit.add_theme_font_size_override("font_size", 22)
 		_addr_edit.text_submitted.connect(func(t: String):
-			net_address = t.strip_edges()
 			_addr_edit.visible = false
-			_enter_online())
+			if _editing_code:
+				var err: String = net.join_room(t)
+				if err != "":
+					_sub(err, 3.0)
+					_enter_online()
+				else:
+					_enter_lobby()
+			else:
+				net_address = t.strip_edges()
+				_enter_online())
+		# Four digits is the whole code: go as soon as they're typed.
+		_addr_edit.text_changed.connect(func(t: String):
+			if _editing_code and t.length() == 4 and t.is_valid_int():
+				_addr_edit.text_submitted.emit(t))
 		ui_root.add_child(_addr_edit)
-	_addr_edit.text = net_address
+	_addr_edit.virtual_keyboard_type = LineEdit.KEYBOARD_TYPE_NUMBER if code else LineEdit.KEYBOARD_TYPE_URL
+	_addr_edit.max_length = 4 if code else 0
+	_addr_edit.placeholder_text = "ROOM CODE" if code else ""
+	_addr_edit.alignment = HORIZONTAL_ALIGNMENT_CENTER if code else HORIZONTAL_ALIGNMENT_LEFT
+	_addr_edit.text = "" if code else net_address
 	_addr_edit.visible = true
 	_addr_edit.grab_focus()
 

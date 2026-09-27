@@ -69,7 +69,7 @@ Motion smoothing), and Options → VSync off gives the lowest input delay.
 | **2 Player** | Split-screen racing. Player 2 uses I/J/K/L (U to pit) or a second gamepad. |
 | **Lightning Challenges** | Eight race-defining scenarios, such as a last-lap draft, a charge from the back or saving fuel. Completing five unlocks the #00 Thunderbolt legend car. A **Daily Challenge** picks a new scenario and track each day, the same for everyone. |
 | **Paint Shop** | Create your own car: number, driver name, sponsor, body, paint scheme (classic, two-tone, swoosh, twin stripes, flames, arrow, split) and colours. You can race it in every mode. |
-| **Online** | Race friends over the internet or a local network. One player hosts (desktop, port 24565), others join by address. Full rules with an AI field: the host's race control throws the cautions and runs the pace car for everyone, each player makes their own pit call on their own screen (20 seconds, then the crew chief decides), and the whole field lines up for the restart. |
+| **Online** | Race friends from any phone or tablet: **HOST A RACE** gives you a 4-digit room code, friends pick **JOIN WITH A CODE** and type it. Everyone connects out to a relay (a Supabase Realtime channel for the room), so nobody needs to open a port. Full rules with an AI field: the host's race control throws the cautions and runs the pace car for everyone, each player makes their own pit call on their own screen (20 seconds, then the crew chief decides), and the whole field lines up for the restart. (A desktop can still host on its own network by address.) |
 | **Track Editor** | Build a track from straights and turns (radius, angle, banking), see it drawn live, test-drive it and save it as a mod. |
 
 ## Showtime
@@ -373,7 +373,7 @@ All tests run headless (`godot --headless --fixed-fps 60 --path . -s <script>`):
 | `tests/smoke_test.gd` | Arcade game flow on every track |
 | `tests/weather_test.gd` | Rain on an oval (held under caution until dry) and a road course (wet tyres), and the moving clock |
 | `tests/director_test.gd` | Replay director, photo mode and the highlight reel |
-| `tests/net_test.gd` | Online: run with ROLE=host and ROLE=client together; includes a caution, the client's pit call and the restart |
+| `tests/net_test.gd` | Online: run with ROLE=host and ROLE=client together; includes a caution, the client's pit call and the restart. RELAY=1 goes through the room-code relay (`tests/tools/fake_realtime.py` stands in for Supabase offline) |
 | `tests/wheel_test.gd` | Starts the force-feedback helper and checks it answers |
 | `tests/telemetry_test.gd` | Chassis telemetry (roll, tyre loads, temperatures, bump stops) and wreck physics checks |
 | `tests/physics_test.gd` | Solo lap speeds, draft gain and a 40-car race per track |

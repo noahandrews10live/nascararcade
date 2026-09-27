@@ -14,8 +14,11 @@ extends Node
 ## their own pit call on their own screen, and the host waits for it (20 seconds,
 ## then the crew chief decides).
 ##
-## Browsers can join a host that's reachable over wss:// (a page served over https
-## can't open plain ws:// connections).
+## Two ways to connect. By room code (phones and tablets): everyone connects out
+## to a relay (a Supabase Realtime channel named after the code, see
+## relay_peer.gd), so any phone can host. By address (desktop): the host opens a
+## port. Browsers can join a host that's reachable over wss:// (a page served
+## over https can't open plain ws:// connections).
 
 signal lobby_changed
 signal race_started(config: Dictionary)
@@ -23,11 +26,18 @@ signal results_in(order: Array)
 signal status(text: String)
 
 const PORT := 24565
+const RelayPeer := preload("res://scripts/relay_peer.gd")
+## The relay: the game's Supabase project's Realtime socket (a public key: it
+## only lets the game join broadcast channels). ST_RELAY overrides it for tests.
+const RELAY_URL := "wss://nlkfuldftcaikdbvwoxx.supabase.co/realtime/v1/websocket?apikey=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5sa2Z1bGRmdGNhaWtkYnZ3b3h4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTA0OTMwMjAsImV4cCI6MjEwNjA2OTAyMH0.fKZ8-80brPK9Jm7ZUE_ccFMFMQ7KPK2o9v5qYV6DYTE&vsn=1.0.0"
 const SEND_HZ := 20.0
 const STATE_SIZE := 15 # idx, dist, d, yaw, v, vy, r, roll, pitch, heave, visible, finished, lap, status, damage
 const PACE_IDX := -2 # the pace car's slot in the host's updates
 
-var peer: WebSocketMultiplayerPeer
+var peer: MultiplayerPeer
+var room_code := "" # set when racing through the relay
+var send_hz := SEND_HZ
+var _join_wait := 0.0
 var players := {} # peer id -> {"name": String, "team": int}
 var hosting := false
 var connected := false
@@ -43,8 +53,11 @@ func my_id() -> int:
 
 func host(port := PORT) -> String:
 	leave()
-	peer = WebSocketMultiplayerPeer.new()
-	var err := peer.create_server(port)
+	var wsp := WebSocketMultiplayerPeer.new()
+	peer = wsp
+	room_code = ""
+	send_hz = SEND_HZ
+	var err := wsp.create_server(port)
 	if err != OK:
 		return "COULDN'T OPEN PORT %d" % port
 	multiplayer.multiplayer_peer = peer
@@ -58,10 +71,72 @@ func host(port := PORT) -> String:
 	return ""
 
 
+func _process(delta: float) -> void:
+	# Joining by code: if no host answers, there's no race with that code.
+	if room_code != "" and not hosting and not connected and multiplayer.multiplayer_peer:
+		_join_wait += delta
+		if _join_wait > 12.0:
+			var code := room_code
+			leave()
+			status.emit("NO RACE FOUND WITH CODE " + code)
+			lobby_changed.emit()
+
+
+func _relay_url() -> String:
+	var env := OS.get_environment("ST_RELAY")
+	return env if env != "" else RELAY_URL
+
+
+## Host a room on the relay: returns "" and sets `room_code`, or an error.
+func host_room() -> String:
+	leave()
+	room_code = str(randi_range(1000, 9999))
+	var rp = RelayPeer.new()
+	if rp.open(_relay_url(), room_code, true) != OK:
+		room_code = ""
+		return "COULDN'T REACH THE RACE SERVER"
+	peer = rp
+	multiplayer.multiplayer_peer = peer
+	hosting = true
+	connected = true
+	send_hz = 10.0 # the relay has a message budget
+	players = {1: {"name": _my_name(), "team": Game.selected_team}}
+	if not multiplayer.peer_connected.is_connected(_on_peer_connected):
+		multiplayer.peer_connected.connect(_on_peer_connected)
+		multiplayer.peer_disconnected.connect(_on_peer_disconnected)
+	lobby_changed.emit()
+	return ""
+
+
+## Join a room on the relay by its code.
+func join_room(code: String) -> String:
+	leave()
+	code = code.strip_edges()
+	if code.length() != 4 or not code.is_valid_int():
+		return "ROOM CODES ARE 4 DIGITS"
+	var rp = RelayPeer.new()
+	if rp.open(_relay_url(), code, false) != OK:
+		return "COULDN'T REACH THE RACE SERVER"
+	room_code = code
+	peer = rp
+	multiplayer.multiplayer_peer = peer
+	hosting = false
+	send_hz = 10.0
+	if not multiplayer.connected_to_server.is_connected(_on_connected):
+		multiplayer.connected_to_server.connect(_on_connected)
+		multiplayer.connection_failed.connect(func(): status.emit("CONNECTION FAILED"))
+		multiplayer.server_disconnected.connect(_on_server_gone)
+	status.emit("JOINING ROOM " + code)
+	return ""
+
+
 func join(url: String) -> String:
 	leave()
-	peer = WebSocketMultiplayerPeer.new()
-	var err := peer.create_client(url)
+	var wsc := WebSocketMultiplayerPeer.new()
+	peer = wsc
+	room_code = ""
+	send_hz = SEND_HZ
+	var err := wsc.create_client(url)
 	if err != OK:
 		return "COULDN'T CONNECT TO " + url
 	multiplayer.multiplayer_peer = peer
@@ -81,6 +156,8 @@ func leave() -> void:
 	hosting = false
 	connected = false
 	in_race = false
+	room_code = ""
+	_join_wait = 0.0
 	players.clear()
 
 
@@ -265,7 +342,7 @@ func tick(delta: float) -> void:
 	_send_t -= delta
 	if _send_t > 0.0:
 		return
-	_send_t = 1.0 / SEND_HZ
+	_send_t = 1.0 / send_hz
 	var data := PackedFloat32Array()
 	# The host relays every car (its AI, its own, and the other players'); a client
 	# sends only its own.
