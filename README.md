@@ -18,8 +18,13 @@ audio. The project has no imported assets.
 ### Two graphics modes (F3 to switch)
 
 - **Modern** (the default) is the realistic look:
-  - a sculpted Next Gen style car with a two-tone livery, glass, splitter, spoiler and
-    single-lug wheels; the body dents where it's hit;
+  - a Cup-class (Next Gen) car built to published dimensions (110 in wheelbase,
+    193.4 in long, 18 in single-lug wheels): flared wheel arches, a long raked
+    windshield with the roll cage visible through the glass, the driver's window
+    net, carbon splitter, skirts, diffuser and spoiler, headlight decals, side
+    exhausts and ten-spoke wheels with brake discs, in each team's two-tone
+    livery; the body crumples where it's hit (`tests/shots_showroom.gd` renders
+    it on its own);
   - procedurally generated asphalt, grass and concrete textures with normal maps;
   - grandstands full of fans, pine and broadleaf trees and a chain-link catch fence;
   - a procedural sky with clouds (stars at night), sun shadows and bloom;
