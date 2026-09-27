@@ -65,22 +65,27 @@ Motion smoothing), and Options → VSync off gives the lowest input delay.
 | **Career** | Rookie to champion. Start underfunded, then earn prize money and reputation, sign sponsors and buy engine, aero, chassis and pit-crew R&D. It runs season after season with a career record. |
 | **2 Player** | Split-screen racing. Player 2 uses I/J/K/L (U to pit) or a second gamepad. |
 | **Lightning Challenges** | Eight race-defining scenarios, such as a last-lap draft, a charge from the back or saving fuel. Completing five unlocks the #00 Thunderbolt legend car. A **Daily Challenge** picks a new scenario and track each day, the same for everyone. |
-| **Paint Shop** | Create your own car: number, driver name, sponsor and colours. You can race it in every mode. |
-| **Online** | Race friends over the internet or a local network. One player hosts (desktop, port 24565), others join by address. Green-flag races with an AI field. |
+| **Paint Shop** | Create your own car: number, driver name, sponsor, body, paint scheme (classic, two-tone, swoosh, twin stripes, flames, arrow, split) and colours. You can race it in every mode. |
+| **Online** | Race friends over the internet or a local network. One player hosts (desktop, port 24565), others join by address. Full rules with an AI field: the host's race control throws the cautions and runs the pace car for everyone, each player makes their own pit call on their own screen (20 seconds, then the crew chief decides), and the whole field lines up for the restart. |
 | **Track Editor** | Build a track from straights and turns (radius, angle, banking), see it drawn live, test-drive it and save it as a mod. |
 
 ## Showtime
 
 - **An opening.** The game starts with a race-day intro: a helicopter sweep over the speedway, the field thundering past the apron, a jet flyover and the title, all over a synthesised anthem. Press anything to skip it.
 - **The showroom.** Car select and the Paint Shop put your car on a turntable in a lit studio. It rolls in in grey primer, the paint sweeps on and the engine blips.
-- **A TV broadcast.** A running-order ticker, position bugs and battle graphics for close fights. Two booth voices (text-to-speech, can be turned off in Options) call the start, the lead changes, the wrecks, the white flag and the finish.
+- **A TV broadcast.** A running-order ticker, position bugs and battle graphics for close fights. Two booth voices (text-to-speech, the most natural voices your device has; can be turned off in Options) welcome you to the track and call the start, the lead changes, battles, wrecks, stage winners, ten and five to go, the gap at the front, your charge through the field, the leader pitting, the white flag and the finish, with the analyst filling the quiet moments. Lines don't repeat back to back.
+- **Music.** A live-synthesised score with a driven guitar, brass stabs and claps: the anthem, a menu groove, a tense pulse under caution, a qualifying groove, the last-lap build, the victory fanfare and a wind-down behind the results. Races themselves run without music, like on TV.
+- **People.** Pit crews, the flagman and the victory lane crowd are jointed figures in team firesuits and helmets or caps. The crew vault the wall, walk to the car, kneel at the wheels and face the work; in victory lane they jump and wave while the winner stands on the roof with their arms up.
+- **Paint schemes and decals.** Seven schemes across the field, the sponsor big on the rear quarter panels and the hood, a row of contingency decals behind the front wheels and a chrome badge on the nose.
+- **Crash damage you can see.** Hit a corner hard and its bodywork crumples, and a piece of the fascia, bumper cover or quarter panel hangs off and flaps in the wind. Sheet metal pushed onto a tyre rubs and smokes. A badly hurt AI car nurses it round to pit road.
 - **Wreck replays.** A big crash cuts to an instant replay from the helicopter, a chase camera and the blimp, then hands back to the live race.
 - **Last-lap drama.** The last-lap music builds, the crowd stands and the camera widens. A close finish goes to slow-motion photo-finish.
 - **Victory lane.** Win and you do a burnout, then drive into victory lane for the trophy, confetti and the crew.
 - **Night racing.** Glowing brake discs, bright brake lights, and flames on lift at high revs.
 - **Ghost laps.** Your best lap at each track is saved and driven by a see-through car in practice, qualifying and time challenges.
 - **Clips.** F9 (or the CLIP button on touch) saves the last 15 seconds as a video on the web build.
-- **Racing AI.** The field drives a proper racing line (wide on entry, apex, out on exit) and races side by side. An optional catch-up setting (Race Setup) keeps the field close.
+- **Racing AI.** The field drives a proper racing line (wide on entry, apex, out on exit) nose to tail when strung out, and leaves it to race side by side or to set up a pass. An optional catch-up setting (Race Setup) keeps the field close. `tests/line_field_test.gd` runs 40-car races on the flat tracks and checks line use, passing, crashes and pace.
+- **The course map** sits right under your position, top right: every car as a dot in its colours, you flashing on top, and the leader and the cars either side of you numbered.
 
 ## Racing: how it models 2026 Next Gen racing
 
@@ -94,17 +99,17 @@ Motion smoothing), and Options → VSync off gives the lowest input delay.
   |---|---|---|---|
   | Thunder Beach | Daytona | 183 mph | ~181 |
   | Lone Star | Texas | 183 | ~185 |
-  | Thunder Valley | Bristol | 125 | ~127 |
+  | Thunder Valley | Bristol | 128 | ~127 |
   | Big Sky | Talladega | 184 | ~181 |
-  | Motor City | Michigan | 189 | ~186 |
-  | Gulf Coast | Kansas | 179 | ~182 |
-  | Palmetto | Darlington | 169 | ~168 |
-  | Magnolia | Martinsville | 91 | ~97 |
+  | Motor City | Michigan | 188 | ~186 |
+  | Gulf Coast | Kansas | 180 | ~182 |
+  | Palmetto | Darlington | 171 | ~168 |
+  | Magnolia | Martinsville (concrete turns) | 94 | ~97 |
   | Desert Sun | Phoenix | 133 | ~137 |
-  | Keystone | Pocono | 164 | ~171 |
-  | Canyon Ridge | Watkins Glen / COTA | 116 | ~110 |
+  | Keystone | Pocono | 166 | ~171 |
+  | Canyon Ridge | Watkins Glen / COTA | 114 | ~110 |
 
-  `tests/lap_bench.gd` runs these in seconds.
+  Within 3 mph of real on average (rms). `tests/lap_bench.gd` runs these in seconds.
 
 - **Car physics.** Each car is simulated like a real stock car:
   - **four tyres**, each with its own load, slip angle, grip peak and fall-off, a
@@ -268,9 +273,10 @@ godot --headless --path . --export-release Web build/web/index.html
 - In the browser, Start goes full screen (untick it to play in the page). On Android it also locks landscape. A full screen button appears when you move the mouse or touch the bottom middle of the screen. iPhone Safari has no full screen for web pages; the game still fills the page.
 - **Fits every screen.** The HUD, menus and touch buttons stay clear of a notch or camera cut-out, rounded corners and the home bar (the page reads the phone's safe area). Menus shrink if they have to, and make room for the on-screen D-pad and A/B buttons. Touch buttons are sized for thumbs: on a tablet or touchscreen laptop they get smaller, so they don't take over the screen. `tests/fit_test.gd` checks every screen on phone, tablet, laptop, ultrawide and tall-window shapes.
 - **Touch controls** appear on phones and tablets, and on a touchscreen laptop as soon as you touch it. Using a keyboard or gamepad hides them again.
+- **Tablets.** iPads (which tell websites they're Macs) and Android tablets are recognised as touch devices from the start. Tablets can race either way up: held upright the view keeps its width, and the pedals move down to where your thumbs are. Pedals stay thumb-sized on the bigger screen.
   - Steer by tilting the device like a wheel. Full lock takes only 12° of tilt (Options → TILT STEERING: 18°, 12°, 9° or 6°). A gentle curve gives fine control near the centre, a small dead zone ignores wobble, and the sensor is smoothed. Wherever you hold it at the start counts as straight ahead; it re-centres after a pause or pit call, or when you tap CTR. You can also drag a thumb anywhere on the left side, where a full lock is about a thumb's width. TILT/DRAG switches between the two.
-  - Two round pedals on the right: green GAS and red BRAKE just to its left. Small buttons: II pause, CAM, PIT.
-  - Menus, results and replays show a D-pad with A (select) and B (back). The pause screen shows RESUME and QUIT buttons.
+  - Two round pedals on the right: green GAS and red BRAKE just to its left. Small buttons beside the course map: II pause, CAM, CLIP, PIT.
+  - Menus, results and replays show a D-pad with A (select) and B (back). The pause screen shows RESUME and QUIT, and the TILT/DRAG steering switch and CENTRE.
   - Tilt needs the motion sensor: iPhone asks permission when you tap Start. The page reads the accelerometer, or the orientation sensor where that's all there is. It works out each phone's sign convention from which edge of the screen is higher. Where the browser or an embedding page blocks the sensor, the game says so and uses drag steering. The installed app isn't embedded, so tilt works there.
 - **Native resolution and 120 Hz.** The game renders at the screen's full pixel count, e.g. 2868 × 1320 on a 460 ppi iPhone 16 Pro Max in landscape, so text and the HUD are always pin-sharp. The page measures the display's refresh rate (60, 90, 120 or 144 Hz) and AUTO quality aims for that frame rate.
   - Options → RESOLUTION: **AUTO** keeps native resolution and trims only the 3D scene (down to 50%) if the frame rate can't hold, then restores it when there's headroom. **NATIVE** always renders at 100%, **BALANCED** at 75%, **PERFORMANCE** at 50%. The row shows the screen size, refresh rate and current 3D scale.

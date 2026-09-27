@@ -697,6 +697,9 @@ func _drive_ai(c: Node3D, delta: float) -> void:
 		target *= clamp(1.0 - (c.dist - player.dist) / 4000.0, 0.97, 1.025)
 	if c.flat_time > 1.2:
 		target *= 0.55 # limp it back to pit road (after the moment it takes to react)
+	elif c.total_damage() > 0.35 and not controlled:
+		# Badly hurt: nurse it round (bodywork flapping, the toe knocked out).
+		target *= 1.0 - 0.22 * clamp((c.total_damage() - 0.35) * 2.5, 0.0, 1.0)
 	if controlled:
 		target = min(target, ctl_target)
 	# Traffic
@@ -856,12 +859,21 @@ func _drive_ai(c: Node3D, delta: float) -> void:
 
 
 ## Nobody close ahead or alongside: free to take the racing line.
+## Whether `c` can drive the racing line: nobody alongside, and whoever's in
+## front is running the line too (follow-the-leader, single file, the way a
+## field strings out). A driver who's been stuck behind long enough leaves the
+## line to make a pass in the lanes.
 func _free_run(c: Node3D) -> bool:
+	if c._stuck_behind > c.ai_patience * 4.0:
+		return false
 	var nbl: Array = c.nb
 	for q in range(0, nbl.size(), 2):
+		var o: Node3D = nbl[q]
 		var g: float = nbl[q + 1]
-		if g > -8.0 and g < 70.0:
-			return false
+		if g > -6.0 and g < 6.0 and abs(o.d - c.d) < 4.0:
+			return false # side by side: race for the space
+		if g >= 6.0 and g < 16.0 and abs(o.d - c.d) < 3.0 and not o.get_meta("on_line", false) and not o.remote and o.pit_state == 0:
+			return false # right behind someone racing in the lanes
 	return true
 
 

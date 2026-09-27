@@ -601,7 +601,7 @@ func _fit_web_resolution(force := false) -> void:
 			scale = 0.75
 		3:
 			scale = 0.5
-	var mobile: bool = OS.has_feature("web_android") or OS.has_feature("web_ios")
+	var mobile: bool = Game.touch_device()
 	if not mobile and mode == 0:
 		scale = min(scale, _web_scale) # desktop browsers follow the quality preset
 	get_viewport().scaling_3d_scale = clamp(scale, 0.35, 1.0)
@@ -785,6 +785,10 @@ func _new_race(player_team: int) -> void:
 	elif mode == "online":
 		var roster: Array = net_config.roster
 		race.setup(track, player_team, int(net_config.laps), roster.size(), roster)
+		# The full rules: the host's race control runs them for everyone.
+		race.enable_rules()
+		race.control.message.connect(_on_control_message)
+		race.control.flag_changed.connect(_on_flag)
 	elif mode == "2p":
 		var size2: int = Game.FIELDS[Game.settings.field]
 		race.setup(track, player_team, Game.race_laps(Game.selected_track), size2, [], team2)
@@ -812,7 +816,8 @@ func _new_race(player_team: int) -> void:
 	if mode == "online":
 		net.attach(race)
 	# Time of day for every race; weather for the full-rules races.
-	var weather_mode: int = int(Game.settings.get("weather", 0)) if (race.control and mode != "challenge") else 0
+	# (Not online: every screen's rain would fall differently.)
+	var weather_mode: int = int(Game.settings.get("weather", 0)) if (race.control and mode != "challenge" and mode != "online") else 0
 	var w: Node = Weather.new()
 	race.add_child(w)
 	w.start(track, race, self, weather_mode)
@@ -1636,7 +1641,9 @@ func _on_pit_call(info: Dictionary) -> void:
 	_pit_info = info
 	if pit_menu and is_instance_valid(pit_menu):
 		pit_menu.queue_free()
-	paused = true
+	# Online the race can't stop for one player: the car circulates on its own
+	# under caution while you choose.
+	paused = mode != "online"
 	pause_layer.visible = false
 	hud.visible = false # the pit call screen has the running order and laps to go
 	synth.beep(660.0, 0.2)
@@ -1780,6 +1787,7 @@ func _process(delta: float) -> void:
 		return
 	race.interpolate(Engine.get_physics_interpolation_fraction() if Game.smoothing else 1.0)
 	_update_camera(delta)
+	_fit_camera_aspect()
 	_update_motion_blur()
 	if race_day and is_instance_valid(race_day):
 		race_day.update(delta)
@@ -1859,6 +1867,16 @@ func _update_audio() -> void:
 	synth.pass_volume = 0.0 # other cars are placed in 3D by the soundscape
 
 
+## A screen taller than it is wide (a tablet held upright): the camera keeps its
+## width of view instead of its height, so the road isn't seen through a slot.
+func _fit_camera_aspect() -> void:
+	var c := get_viewport().get_camera_3d()
+	if c == null:
+		return
+	var vs := get_viewport().get_visible_rect().size
+	c.keep_aspect = Camera3D.KEEP_WIDTH if vs.y > vs.x else Camera3D.KEEP_HEIGHT
+
+
 func _update_camera(delta: float) -> void:
 	if not (state in [State.COUNTDOWN, State.RACE, State.FINISHED] and cam_mode == 3 and not photo_mode):
 		_hide_cockpit()
@@ -1904,11 +1922,15 @@ func _update_camera(delta: float) -> void:
 					_tv_camera(delta, true)
 		State.CAR_SELECT, State.MENU:
 			if preview_car and (state == State.CAR_SELECT or menu_kind == "paint"):
-				orbit += delta * 0.5
+				# The turntable slows as the car comes round to a front three-quarter
+				# view (its best side), and speeds up through the rest.
+				var best := 0.6 + PI - 0.55
+				var off := wrapf(orbit - best, -PI, PI)
+				orbit += delta * (0.12 + 0.55 * (1.0 - cos(off)) * 0.5)
 				preview_car.rotation.y = orbit
 				var p := preview_car.global_position
-				cam.fov = 45.0
-				var eye := p + Vector3(sin(0.6) * 9.0, 2.3, cos(0.6) * 9.0)
+				cam.fov = 42.0
+				var eye := p + Vector3(sin(0.6) * 9.0, 1.35, cos(0.6) * 9.0)
 				cam.global_position = eye
 				var side := (p - eye).cross(Vector3.UP).normalized()
 				# In the paint shop, frame the car on the right, clear of the menu.
@@ -2557,6 +2579,7 @@ func _enter_paint_shop() -> void:
 		{"id": "last", "label": "LAST NAME", "values": Game.LAST_NAMES, "index": Game.custom.last},
 		{"id": "sponsor", "label": "SPONSOR", "values": Game.SPONSORS, "index": Game.custom.sponsor},
 		{"id": "make", "label": "BODY", "values": CarBody.MAKES.map(func(m): return m.name), "index": Game.custom.make, "hint": "FOUR BODIES ON ONE CHASSIS: SAME SPEED, DIFFERENT LOOKS"},
+		{"id": "scheme", "label": "SCHEME", "values": CarBody.SCHEMES, "index": Game.custom.scheme, "hint": "HOW YOUR COLORS GO ON: STRIPES, SWOOSH, FLAMES..."},
 		{"id": "c1", "label": "BODY COLOR", "values": cols, "index": Game.custom.c1},
 		{"id": "c2", "label": "TRIM COLOR", "values": cols, "index": Game.custom.c2},
 		{"id": "cn", "label": "NUMBER COLOR", "values": cols, "index": Game.custom.cn},

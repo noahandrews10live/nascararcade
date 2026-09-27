@@ -48,7 +48,7 @@ func _ready() -> void:
 	if OS.has_feature("web"):
 		_js_window = JavaScriptBridge.get_interface("window")
 	# Phones and tablets start with the controls showing.
-	active = OS.has_feature("web_android") or OS.has_feature("web_ios") or OS.has_feature("mobile")
+	active = Game.touch_device()
 	visible = active
 
 
@@ -95,25 +95,27 @@ func _layout() -> void:
 	var reserve: Array = []
 	if _racing():
 		# Round pedals under the right thumb: green GAS, red BRAKE just to its left.
-		var pr := PEDAL_R * k
-		var gas_c := Vector2(R - 20.0 * k - pr, T + sr.size.y * 0.54)
+		# Pedals stay big enough for a thumb on tablets, and sit lower when the
+		# screen is upright (hands hold a tablet near the bottom).
+		var pr: float = PEDAL_R * max(k, 0.8)
+		var upright := sr.size.y > sr.size.x
+		var gas_c := Vector2(R - 20.0 * k - pr, T + sr.size.y * (0.7 if upright else 0.58))
 		var brake_c := gas_c + Vector2(-pr * 2.0 - 22.0 * k, pr * 0.5)
 		_buttons.append([Rect2(gas_c - Vector2.ONE * pr, Vector2.ONE * pr * 2.0), "GAS", "accelerate", "gas"])
 		_buttons.append([Rect2(brake_c - Vector2.ONE * pr, Vector2.ONE * pr * 2.0), "BRAKE", "brake", "brake"])
-		# Small buttons under the position readout (top right).
+		# Small buttons beside the course map (which sits under the position
+		# readout, top right).
 		var bw := 48.0 * k
 		var bh := 34.0 * k
 		var gap := 6.0 * k
-		var x := R - 10.0 - bw
-		var y := T + 96.0
+		var mr: Rect2 = main.hud.map_rect() if main.hud else Rect2(sr.size.x - 134.0, 92.0, 120.0, 120.0)
+		var x: float = L + mr.position.x - 12.0 - bw
+		var y: float = T + mr.position.y - 5.0
 		_buttons.append([Rect2(x, y, bw, bh), "II", "pause", "tap"])
 		_buttons.append([Rect2(x, y + bh + gap, bw, bh), "CAM", "camera", "tap"])
+		_buttons.append([Rect2(x, y + (bh + gap) * 2.0, bw, bh), "CLIP", "clip", "tap"])
 		if main.race.control:
-			_buttons.append([Rect2(x, y + (bh + gap) * 2.0, bw, bh), "PIT", "pit", "tap"])
-		_buttons.append([Rect2(x, y + (bh + gap) * 3.0, bw, bh), "CLIP", "clip", "tap"])
-		_buttons.append([Rect2(x - bw - gap - 2.0 * k, y, bw + 2.0 * k, bh), "TILT" if tilt else "DRAG", "_toggle_tilt", "tap"])
-		if tilt and _tilt_ok:
-			_buttons.append([Rect2(x - bw - gap - 2.0 * k, y + bh + gap, bw + 2.0 * k, bh), "CTR", "_recenter", "tap"])
+			_buttons.append([Rect2(x, y + (bh + gap) * 3.0, bw, bh), "PIT", "pit", "tap"])
 	elif main and main.paused and main.pit_menu == null:
 		# The pause screen: just RESUME and QUIT, under "PAUSED".
 		var c := sr.get_center()
@@ -121,6 +123,11 @@ func _layout() -> void:
 		var h := 46.0 * k
 		_buttons.append([Rect2(c.x - w - 10.0 * k, c.y + 16.0, w, h), "RESUME", "pause", "tap"])
 		_buttons.append([Rect2(c.x + 10.0 * k, c.y + 16.0, w, h), "QUIT", "quit_race", "tap"])
+		# Steering: tilt or drag, and re-centre the tilt.
+		var y2 := c.y + 16.0 + h + 12.0 * k
+		_buttons.append([Rect2(c.x - w - 10.0 * k, y2, w, h * 0.8), "TILT STEER" if tilt else "DRAG STEER", "_toggle_tilt", "tap"])
+		if tilt and _tilt_ok:
+			_buttons.append([Rect2(c.x + 10.0 * k, y2, w, h * 0.8), "CENTRE", "_recenter", "tap"])
 	else:
 		# D-pad bottom left, A/B bottom right.
 		var d := 48.0 * k

@@ -6,7 +6,13 @@ extends Node
 ## simulates their own car locally (so it responds instantly) and sends its state
 ## 20 times a second. Everyone else's cars are smoothed and extrapolated between
 ## updates. Contact is resolved by each player for the car they own, so both sides
-## of a hit feel it. Online races are green-flag races (no cautions or pit stops).
+## of a hit feel it.
+##
+## Online races run the full rules. The host's race control throws the
+## cautions, runs the pace car and lines the field up for the restart; everyone
+## else's race control follows it. When the yellow comes out each player makes
+## their own pit call on their own screen, and the host waits for it (20 seconds,
+## then the crew chief decides).
 ##
 ## Browsers can join a host that's reachable over wss:// (a page served over https
 ## can't open plain ws:// connections).
@@ -18,7 +24,8 @@ signal status(text: String)
 
 const PORT := 24565
 const SEND_HZ := 20.0
-const STATE_SIZE := 13 # idx, dist, d, yaw, v, vy, r, roll, pitch, heave, visible, finished, lap
+const STATE_SIZE := 15 # idx, dist, d, yaw, v, vy, r, roll, pitch, heave, visible, finished, lap, status, damage
+const PACE_IDX := -2 # the pace car's slot in the host's updates
 
 var peer: WebSocketMultiplayerPeer
 var players := {} # peer id -> {"name": String, "team": int}
@@ -184,6 +191,72 @@ func attach(r: Node3D) -> void:
 		if owners[idx] != my_id():
 			c.remote = true
 			c.ai = false
+	var ctl: Node = race.control
+	if ctl == null:
+		return
+	if hosting:
+		for idx in owners:
+			if owners[idx] != 1:
+				ctl.remote_humans[race.cars[idx]] = true
+		ctl.flag_changed.connect(func(_f): _send_flags([]))
+		ctl.message.connect(func(text, kind): _send_flags([text, kind]))
+		ctl.remote_pit_call.connect(_ask_pit_call)
+		ctl.lined_up.connect(func(rows): _lineup.rpc(rows))
+	else:
+		ctl.follower = true
+		ctl.remote_answer.connect(func(call, wedge): _pit_answer.rpc_id(1, _my_idx(), call, wedge))
+
+
+func _my_idx() -> int:
+	for idx in owners:
+		if owners[idx] == my_id():
+			return idx
+	return -1
+
+
+func _send_flags(msg: Array) -> void:
+	if hosting and in_race and race and race.control:
+		_flags.rpc(race.control.remote_state(), msg)
+
+
+@rpc("authority", "reliable")
+func _flags(st: Dictionary, msg: Array) -> void:
+	if race == null or race.control == null:
+		return
+	race.control.apply_remote_state(st)
+	if msg.size() == 2:
+		race.control.message.emit(String(msg[0]), String(msg[1]))
+
+
+## Host: ask the player driving car `c` for their pit call.
+func _ask_pit_call(c: Node3D, info: Dictionary) -> void:
+	var idx: int = race.cars.find(c)
+	var peer_id: int = owners.get(idx, 1)
+	if peer_id != 1:
+		_pit_req.rpc_id(peer_id, info)
+
+
+@rpc("authority", "reliable")
+func _pit_req(info: Dictionary) -> void:
+	if race and race.control:
+		race.control.player_pending = true
+		race.control.pit_call.emit(info)
+
+
+@rpc("any_peer", "reliable")
+func _pit_answer(idx: int, call: String, wedge: float) -> void:
+	if not hosting or race == null or race.control == null:
+		return
+	if owners.get(idx, 1) != multiplayer.get_remote_sender_id():
+		return # only the car's own driver calls its stop
+	race.control.resolve_remote(race.cars[idx], call, wedge)
+
+
+@rpc("authority", "reliable")
+func _lineup(rows: Array) -> void:
+	if race and race.control:
+		var mine: int = _my_idx()
+		race.control.apply_lineup(rows, race.cars[mine] if mine >= 0 else null)
 
 
 func tick(delta: float) -> void:
@@ -199,6 +272,8 @@ func tick(delta: float) -> void:
 	for idx in race.cars.size():
 		if hosting or owners.get(idx, 1) == my_id():
 			_pack(data, idx, race.cars[idx])
+	if hosting and race.control and race.control.pace_car.visible:
+		_pack(data, PACE_IDX, race.control.pace_car)
 	if hosting:
 		_states.rpc(data)
 	else:
@@ -219,6 +294,8 @@ func _pack(data: PackedFloat32Array, idx: int, c: Node3D) -> void:
 	data.append(1.0 if c.visible else 0.0)
 	data.append(1.0 if c.finished else 0.0)
 	data.append(c.lap_idx)
+	data.append(float(int(c.out) | (int(c.spinning) << 1) | (int(c.towed) << 2)))
+	data.append(c.total_damage())
 
 
 func _apply(data: PackedFloat32Array) -> void:
@@ -226,6 +303,14 @@ func _apply(data: PackedFloat32Array) -> void:
 		return
 	for o in range(0, data.size() - STATE_SIZE + 1, STATE_SIZE):
 		var idx := int(data[o])
+		if idx == PACE_IDX and not hosting and race.control:
+			var pc: Node3D = race.control.pace_car
+			pc.dist = data[o + 1]
+			pc.d = data[o + 2]
+			pc.yaw = data[o + 3]
+			pc.v = data[o + 4]
+			pc.sync_visual(false)
+			continue
 		if idx < 0 or idx >= race.cars.size() or owners.get(idx, 1) == my_id():
 			continue
 		var c: Node3D = race.cars[idx]

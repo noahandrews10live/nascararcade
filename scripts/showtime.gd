@@ -132,6 +132,16 @@ func process(delta: float) -> void:
 		_leader = null
 		_fastest = 0.0
 		_last_lap = false
+		_welcomed = false
+		_to_go_said.clear()
+		_player_best = 99
+		_player_mark = 99
+		_player_mark_t = 0.0
+		_story_t = 0.0
+		_gap_t = 0.0
+		_last_pit_leader = null
+		if main.race and main.race.control and not main.race.control.message.is_connected(_on_control_message):
+			main.race.control.message.connect(_on_control_message)
 		if main.race and main.race.has_signal("lap_completed") and not main.race.lap_completed.is_connected(_on_lap):
 			main.race.lap_completed.connect(_on_lap)
 			main.race.incident.connect(_on_incident)
@@ -153,10 +163,16 @@ func process(delta: float) -> void:
 	if tv and main.state == main.State.RACE:
 		_watch_leader()
 		_watch_battles(delta)
+		_watch_story(delta)
+	if racing and main.state == main.State.COUNTDOWN and not _welcomed and not intro_active:
+		_welcomed = true
+		say("pbp", _line("welcome") % _track_name().capitalize())
+		say("color", _line("welcome_color"), 1.0)
 	_booth_t -= delta
 	_booth.visible = _booth_t > 0.0
 	_update_commentary(delta)
 	_update_last_lap(delta, racing)
+	_update_music(racing)
 	if _rp_pending >= 0.0 and not replay_active:
 		_rp_pending -= delta
 		if _rp_pending < 0.0:
@@ -168,10 +184,17 @@ func _layout(sr: Rect2) -> void:
 	_ticker.position = Vector2(sr.position.x, sr.end.y - 24)
 	_ticker.size = Vector2(sr.size.x, 20)
 	_ticker.clip_text = true
-	_bug.position = Vector2(sr.position.x, sr.position.y + sr.size.y * 0.2)
-	_bug.size = Vector2(sr.size.x, 30)
-	_battle.position = Vector2(sr.position.x, sr.position.y + sr.size.y * 0.27)
-	_battle.size = Vector2(sr.size.x, 24)
+	# Captions stay in the middle, clear of the course map and the buttons
+	# beside it (top right), wrapping onto two lines on a narrow screen.
+	var inset := 0.0
+	if main.hud and sr.size.y < sr.size.x:
+		inset = max(0.0, sr.size.x - main.hud.map_rect().position.x + 70.0)
+	for l: Label in [_bug, _battle]:
+		l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_bug.position = Vector2(sr.position.x + inset, sr.position.y + sr.size.y * 0.2)
+	_bug.size = Vector2(sr.size.x - inset * 2.0, 30)
+	_battle.position = Vector2(sr.position.x + inset, sr.position.y + sr.size.y * 0.27)
+	_battle.size = Vector2(sr.size.x - inset * 2.0, 24)
 	_replay_bug.position = sr.position + Vector2(14, 12)
 	_booth.position = Vector2(sr.position.x + sr.size.x * 0.2, sr.end.y - 70)
 	_booth.size = Vector2(sr.size.x * 0.6, 40)
@@ -218,9 +241,9 @@ func _watch_leader() -> void:
 	if l != _leader and race.time > 20.0:
 		_leader = l
 		show_bug("NEW LEADER  %s" % _name(l), 3.0)
-		say("pbp", ["%s takes the lead!", "And %s powers to the front!", "New leader: %s!"].pick_random() % _spoken(l))
+		say("pbp", _line("lead") % _spoken(l))
 		if randf() < 0.6:
-			say("color", ["That was a great run off the corner.", "He's been setting that up for laps.", "Look at the momentum he carried there."].pick_random(), 2.8)
+			say("color", _line("lead_color"), 2.8)
 
 
 func _watch_battles(delta: float) -> void:
@@ -247,7 +270,12 @@ func _watch_battles(delta: float) -> void:
 		_battle_t = 5.0
 		_battle.text = "BATTLE FOR %s:  %s  vs  %s" % ["THE LEAD" if best == "1" else Game.ordinal(int(best)), _name(best_pair[0]), _name(best_pair[1])]
 		main.soundscape.cheer(0.55)
-		say("pbp", "What a battle for %s! %s and %s, side by side!" % ["the lead" if best == "1" else Game.ordinal(int(best)).to_lower(), _spoken(best_pair[0]), _spoken(best_pair[1])])
+		var spot: String = "the lead" if best == "1" else Game.ordinal(int(best)).to_lower()
+		var bl := _line("battle")
+		if bl.begins_with("What"):
+			say("pbp", bl % [spot, _spoken(best_pair[0]), _spoken(best_pair[1])])
+		else:
+			say("pbp", bl % [_spoken(best_pair[0]), _spoken(best_pair[1]), spot])
 
 
 func _on_lap(car: Node3D, _laps_done: int, lap_time: float) -> void:
@@ -259,7 +287,7 @@ func _on_lap(car: Node3D, _laps_done: int, lap_time: float) -> void:
 		if not first and main.state == main.State.RACE:
 			show_bug("FASTEST LAP  %s  %s" % [_name(car), Game.format_time(lap_time)], 3.0, Color(0.75, 0.45, 1.0))
 			if randf() < 0.4:
-				say("color", "%s just set the fastest lap of the race." % _spoken(car))
+				say("color", _line("fastest") % _spoken(car))
 
 
 func _spoken(c: Node3D) -> String:
@@ -268,6 +296,62 @@ func _spoken(c: Node3D) -> String:
 
 
 # --- commentary -----------------------------------------------------------------
+
+## What the booth says, a handful of ways each so it doesn't repeat itself.
+## %s is filled in by the caller.
+const LINES := {
+	"welcome": ["Welcome to %s! Forty of the best are strapped in and ready.", "Good afternoon from %s, and what a day for a race!", "We're live at %s. Engines are warm, the crowd is loud."],
+	"welcome_color": ["Track position is going to be everything today.", "Keep an eye on tire wear. This place chews them up.", "It's all about the restarts at a place like this.", "Nobody wins it on the first lap, but plenty lose it there."],
+	"green": ["And we're green! Here they come!", "Green flag! The field roars into turn one!", "They're off, and it's three wide already!", "Green, green, green! Let's go racing!"],
+	"restart": ["Back to green, and they're racing again!", "The restart is clean, and they're off!", "Green flag on the restart, and here comes the push!"],
+	"caution": ["Caution's out!", "Yellow flag, the field slows down.", "And there's the caution."],
+	"caution_color": ["Crew chiefs are doing the math on pit strategy right now.", "That bunches them back up. Anybody can win this.", "Fresh tires or track position? That's the big call."],
+	"lead": ["%s takes the lead!", "And %s powers to the front!", "New leader: %s!", "%s gets by for the lead!", "There goes %s, into the lead!"],
+	"lead_color": ["That was a great run off the corner.", "That pass has been coming for a few laps.", "Look at the momentum carried through there.", "Perfect use of the draft to make that happen.", "A textbook move for the lead."],
+	"battle": ["What a battle for %s! %s and %s, side by side!", "%s and %s are going at it for %s!"],
+	"fastest": ["%s just set the fastest lap of the race.", "That's the quickest lap of the day for %s.", "%s is flying. Fastest lap so far."],
+	"incident": ["Trouble! %s is around!", "Oh no, %s gets loose!", "Big moment for %s!", "%s is in trouble!", "Smoke! %s is spinning!"],
+	"incident_color": ["That's going to hurt the points.", "Took away the air off the nose, and around it went.", "Nowhere to go there.", "They got into the marbles and that was it."],
+	"white": ["White flag! One lap to go!", "There's the white flag! One more time around!"],
+	"white_color": ["This is where it's won or lost.", "Everybody's going for it now.", "Hold on to your seats, folks."],
+	"to_go_10": ["Ten laps to go, and %s still leads.", "Ten to go! %s out front."],
+	"to_go_5": ["Five laps to go! %s leads by %s.", "Five to go, %s with a gap of %s."],
+	"gap": ["%s leads by %s over %s.", "Out front it's %s, %s clear of %s.", "%s with a %s cushion over %s."],
+	"up": ["%s is on the move, up to %s!", "Look at %s charging through the field, now %s!", "%s picks off another one, running %s now."],
+	"top10": ["%s has cracked the top ten!", "%s is now inside the top ten."],
+	"top5": ["%s is into the top five!", "Here comes %s, into the top five!"],
+	"pit_lead": ["The leader %s heads down pit road.", "%s brings it in from the lead."],
+	"stage": ["%s wins stage %s!", "Stage %s goes to %s!"],
+	"win": ["%s wins it!", "And %s takes the checkered flag!", "%s is your winner!", "Checkered flag! %s wins at %s!"],
+	"win_color": ["What a drive. The class of the field today.", "Nobody had anything for them today.", "They made every right move when it mattered.", "That's a win they'll remember for a long time."],
+	"filler": ["You can see the cars moving around looking for grip.", "The track's taking rubber now; the groove is widening.", "Fuel mileage could come into play here.", "These guys are running inches apart at speed.", "The crews are watching the tire temps closely.", "Listen to those engines. Nine thousand rpm."],
+	"filler_draft": ["The draft is everything here. Nobody can get away alone.", "Watch for the big run from the back of this pack.", "You need friends at a place like this."],
+	"victory_lane": ["And here comes the winner into victory lane!", "Victory lane, and the celebration is on!"],
+}
+
+var _recent_lines: Array = []
+var _story_t := 0.0 # seconds since the booth last had something to say
+var _gap_t := 0.0
+var _welcomed := false
+var _to_go_said := {}
+var _player_best := 99
+var _player_mark := 99
+var _player_mark_t := 0.0
+var _last_pit_leader: Node3D
+var _voice_pbp := ""
+var _voice_color := ""
+
+
+## A line from the bank, not one said in the last few calls.
+func _line(key: String) -> String:
+	var opts: Array = LINES[key]
+	var fresh: Array = opts.filter(func(o): return not _recent_lines.has(o))
+	var pick: String = (fresh if not fresh.is_empty() else opts).pick_random()
+	_recent_lines.append(pick)
+	if _recent_lines.size() > 14:
+		_recent_lines.pop_front()
+	return pick
+
 
 ## Queue a line for the booth: "pbp" (play-by-play) or "color" (the analyst).
 func say(who: String, text: String, delay := 0.0) -> void:
@@ -291,11 +375,117 @@ func _update_commentary(delta: float) -> void:
 	_booth.text = ("BOOTH:  " if who == "pbp" else "ANALYST:  ") + text.to_upper()
 	_booth_t = 4.0
 	_say_cool = 3.0
+	_story_t = 0.0
 	if Game.radio_voice and main.state != main.State.REPLAY:
-		var voices := DisplayServer.tts_get_voices_for_language("en")
-		if not voices.is_empty():
-			var v: String = voices[min(2 if who == "pbp" else 3, voices.size() - 1)] if voices.size() > 3 else voices[0 if who == "pbp" else min(1, voices.size() - 1)]
-			DisplayServer.tts_speak(text.to_lower(), v, 65, 1.0 if who == "pbp" else 0.85, 1.15 if who == "pbp" else 1.0, 0, false)
+		if _voice_pbp == "":
+			_pick_voices()
+		if _voice_pbp != "":
+			var v: String = _voice_pbp if who == "pbp" else _voice_color
+			DisplayServer.tts_speak(text.to_lower(), v, 65, 1.0 if who == "pbp" else 0.9, 1.12 if who == "pbp" else 1.02, 0, false)
+
+
+## The two booth voices: the most natural-sounding English voices the device
+## has (the "natural", "neural", "enhanced" and premium ones first), and two
+## different ones if there are two.
+func _pick_voices() -> void:
+	var all: Array = DisplayServer.tts_get_voices()
+	var scored: Array = []
+	for v in all:
+		var lang: String = String(v.get("language", ""))
+		if not lang.begins_with("en"):
+			continue
+		var nm: String = String(v.get("name", "")).to_lower()
+		var sc := 0
+		for good in ["natural", "neural", "online", "enhanced", "premium", "google us english", "google uk english"]:
+			if nm.contains(good):
+				sc += 10
+		for named in ["samantha", "alex", "daniel", "aaron", "evan", "nathan", "guy", "davis", "tony", "jenny", "aria", "christopher", "eric"]:
+			if nm.contains(named):
+				sc += 4
+		if lang.begins_with("en-US") or lang.begins_with("en_US"):
+			sc += 2
+		if nm.contains("compact") or nm.contains("espeak"):
+			sc -= 5
+		scored.append([sc, String(v.get("id", ""))])
+	scored.sort_custom(func(a, b): return a[0] > b[0])
+	if scored.is_empty():
+		var ids := DisplayServer.tts_get_voices_for_language("en")
+		if ids.is_empty():
+			return
+		_voice_pbp = ids[0]
+		_voice_color = ids[min(1, ids.size() - 1)]
+		return
+	_voice_pbp = scored[0][1]
+	_voice_color = scored[min(1, scored.size() - 1)][1]
+
+
+func _track_name() -> String:
+	if main.race and main.race.track and main.race.track.cfg.has("name"):
+		return String(main.race.track.cfg.name)
+	return "the speedway"
+
+
+## Stage wins and such from race control.
+func _on_control_message(text: String, kind: String) -> void:
+	if kind == "stage" and text.contains("#"):
+		var who := text.get_slice("  ", 1).strip_edges() # "#7 BUCK RYDER"
+		var stage := text.get_slice(" ", 1)
+		var nm := who.get_slice(" ", who.get_slice_count(" ") - 1).capitalize()
+		var l := _line("stage")
+		say("pbp", l % [nm, stage] if l.begins_with("%s") else l % [stage, nm])
+
+
+## The story of the race between the big moments: laps to go, the gap at the
+## front, your charge through the field, the leader pitting, and the analyst
+## filling a quiet moment.
+func _watch_story(delta: float) -> void:
+	var race: Node3D = main.race
+	if race.order.size() < 2:
+		return
+	_story_t += delta
+	_gap_t += delta
+	var lead: Node3D = race.order[0]
+	var second: Node3D = race.order[1]
+	var gap: float = (lead.dist - second.dist) / max(lead.speed(), 20.0)
+	var gap_s := "%.1f seconds" % gap if gap >= 1.0 else "half a second" if gap >= 0.4 else "a whisker"
+	var to_go: int = race.laps - lead.lap() - 1
+	if race.laps >= 12 and to_go == 10 and not _to_go_said.has(10):
+		_to_go_said[10] = true
+		say("pbp", _line("to_go_10") % _spoken(lead))
+	elif race.laps >= 8 and to_go == 5 and not _to_go_said.has(5):
+		_to_go_said[5] = true
+		say("pbp", _line("to_go_5") % [_spoken(lead), gap_s])
+	# The leader stops.
+	if lead.pit_state != 0 and _last_pit_leader != lead:
+		_last_pit_leader = lead
+		say("pbp", _line("pit_lead") % _spoken(lead))
+	# You, working through the field.
+	var me: Node3D = race.player
+	if me and not me.finished:
+		var pos: int = race.position_of(me)
+		_player_mark_t += delta
+		if _player_mark == 99 or _player_mark_t > 40.0:
+			_player_mark = pos
+			_player_mark_t = 0.0
+		if race.time > 20.0:
+			if pos <= 5 and _player_best > 5:
+				say("pbp", _line("top5") % _spoken(me))
+				_player_mark = pos
+			elif pos <= 10 and _player_best > 10 and race.cars.size() > 14:
+				say("pbp", _line("top10") % _spoken(me))
+				_player_mark = pos
+			elif _player_mark - pos >= 3:
+				say("pbp", _line("up") % [_spoken(me), Game.ordinal(pos).to_lower()])
+				_player_mark = pos
+				_player_mark_t = 0.0
+		_player_best = min(_player_best, pos) if race.time > 20.0 else pos
+	# Quiet for a while: the gap at the front, or the analyst.
+	if _story_t > 22.0 and _gap_t > 45.0 and race.time > 40.0:
+		_gap_t = 0.0
+		say("pbp", _line("gap") % [_spoken(lead), gap_s, _spoken(second)])
+	elif _story_t > 34.0:
+		var ss: bool = race.track and int(race.track.cfg.get("hp", 0)) == 510
+		say("color", _line("filler_draft" if ss and randf() < 0.6 else "filler"))
 
 
 ## Race events from main (flags, finishes).
@@ -303,21 +493,25 @@ func on_flag(flag: String) -> void:
 	match flag:
 		"GREEN":
 			if main.race and main.race.time < 30.0:
-				say("pbp", ["And we're green! Here they come!", "Green flag! The field roars into turn one!"].pick_random())
+				say("pbp", _line("green"))
 			else:
-				say("pbp", "Back to green, and they're racing again!")
+				say("pbp", _line("restart"))
 		"YELLOW":
-			say("pbp", "Caution's out!")
+			say("pbp", _line("caution"))
+			if randf() < 0.5:
+				say("color", _line("caution_color"), 3.0)
 		"WHITE":
-			say("pbp", "White flag! One lap to go!")
-			say("color", "This is where it's won or lost.", 2.5)
+			say("pbp", _line("white"))
+			say("color", _line("white_color"), 2.5)
 
 
 func _on_incident(car: Node3D, kind: String) -> void:
 	if main.state != main.State.RACE or main.race == null:
 		return
 	var big: bool = kind == "out" or car.tumbling or car.total_damage() > 0.25
-	say("pbp", ["Trouble! %s is around!", "Oh no, %s gets loose!", "Big moment for %s!"].pick_random() % _spoken(car))
+	say("pbp", _line("incident") % _spoken(car))
+	if big and randf() < 0.5:
+		say("color", _line("incident_color"), 3.0)
 	if big and _rp_cool <= 0.0 and _rp_pending < 0.0 and main.race.rec_times.size() > 40 and not main.paused and main.mode != "2p":
 		_rp_car = car
 		_rp_center = main.race.rec_clock
@@ -611,7 +805,7 @@ func _build_showroom() -> void:
 	cyl.flip_faces = true
 	room.mesh = cyl
 	var wall := StandardMaterial3D.new()
-	wall.albedo_color = Color(0.08, 0.085, 0.1)
+	wall.albedo_color = Color(0.13, 0.14, 0.17)
 	wall.roughness = 0.9
 	room.material_override = wall
 	room.position = Vector3(0, 5.9, 0)
@@ -654,6 +848,40 @@ func _build_showroom() -> void:
 	ring.material_override = rmat
 	ring.position = Vector3(0, 0.12, 0)
 	showroom.add_child(ring)
+	# Light panels overhead, and light strips round the walls: a studio, not
+	# a void.
+	var panel_m := StandardMaterial3D.new()
+	panel_m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	panel_m.albedo_color = Color(1.0, 0.98, 0.94)
+	var pq := BoxMesh.new()
+	pq.size = Vector3(1.2, 0.05, 7.0)
+	for k in 5:
+		var pn := MeshInstance3D.new()
+		pn.mesh = pq
+		pn.material_override = panel_m
+		pn.position = Vector3(-4.8 + k * 2.4, 10.5, 0)
+		showroom.add_child(pn)
+	var strip_m := StandardMaterial3D.new()
+	strip_m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	strip_m.albedo_color = Color(0.35, 0.7, 1.0)
+	var sq := BoxMesh.new()
+	sq.size = Vector3(0.08, 9.0, 0.08)
+	for k in 16:
+		var a := TAU * k / 16.0
+		var st := MeshInstance3D.new()
+		st.mesh = sq
+		st.material_override = strip_m
+		st.position = Vector3(sin(a) * 15.8, 4.6, cos(a) * 15.8)
+		showroom.add_child(st)
+	var band := MeshInstance3D.new()
+	var bt := TorusMesh.new()
+	bt.inner_radius = 15.7
+	bt.outer_radius = 15.85
+	bt.rings = 96
+	band.mesh = bt
+	band.material_override = strip_m
+	band.position = Vector3(0, 0.3, 0)
+	showroom.add_child(band)
 	# Key, fill and two rim lights.
 	for L in [[Vector3(5, 7, 5), Color(1.0, 0.96, 0.9), 5.0], [Vector3(-6, 5, 3), Color(0.8, 0.88, 1.0), 2.2], [Vector3(-3, 4, -7), Color(0.6, 0.8, 1.0), 4.0], [Vector3(5, 3, -6), Color(1.0, 0.7, 0.5), 3.0]]:
 		var sl := SpotLight3D.new()
@@ -670,6 +898,7 @@ func _build_showroom() -> void:
 func present_car(car: Node3D) -> void:
 	_paint_t = 0.0
 	_rev_t = 0.0
+	main.orbit = 0.6 + PI - 1.3 # turns into its best angle as the paint goes on
 	if car and car._body.has("paint"):
 		(car._body.paint as StandardMaterial3D).albedo_color = Color(0.3, 0.31, 0.33)
 
@@ -698,6 +927,30 @@ func engine_blip() -> bool:
 	synth.wind = 0.0
 	synth.squeal = 0.0
 	return true
+
+
+## Music outside the big moments: a tense pulse under caution, a groove for
+## qualifying runs, and the wind-down behind the results.
+func _update_music(racing: bool) -> void:
+	if intro_active or victory_active or _last_lap or music.cue == "anthem":
+		return
+	var st: int = main.state
+	if st == main.State.RESULTS:
+		if music.cue != "victory":
+			music.play("results")
+		return
+	if not racing or main.race == null:
+		if music.cue in ["caution", "qualify", "results"]:
+			music.stop()
+		return
+	var ctl: Node = main.race.control
+	var yellow: bool = ctl != null and ctl.flag == ctl.Flag.YELLOW
+	if yellow and st == main.State.RACE:
+		music.play("caution")
+	elif main.session == "qualify" and st == main.State.RACE:
+		music.play("qualify")
+	elif music.cue in ["caution", "qualify", "results"]:
+		music.stop()
 
 
 # --- last lap and photo finish ------------------------------------------------------
@@ -750,9 +1003,10 @@ func on_finished(car: Node3D, place: int) -> void:
 	if place == 1:
 		music.play("victory")
 		if not photo_finish:
-			say("pbp", ["%s wins it!", "And %s takes the checkered flag!", "%s is your winner!"].pick_random() % _spoken(car))
+			var wl := _line("win")
+			say("pbp", wl % [_spoken(car), _track_name()] if wl.count("%s") == 2 else wl % _spoken(car))
 			if randf() < 0.7:
-				say("color", "What a drive. He was the class of the field today.", 3.0)
+				say("color", _line("win_color"), 3.0)
 
 
 # --- victory ------------------------------------------------------------------------
@@ -837,19 +1091,23 @@ func _build_victory_lane() -> void:
 	stage.position = Vector3(0, 0.15, 0)
 	_v_stage.add_child(stage)
 	# The driver up on the roof with the trophy.
-	var driver: Node3D = main.race_day._person(c.team.c1) if main.race_day else Node3D.new()
+	var driver: Node3D = main.race_day._person(c.team.c1, c.team.c2) if main.race_day else Node3D.new()
 	_v_clone.model.add_child(driver)
 	driver.position = Vector3(0, 1.3, 0.3)
+	if main.race_day:
+		driver.pose = "arms_up"
 	var cup := _trophy()
 	_v_clone.model.add_child(cup)
 	cup.position = Vector3(0.25, 3.05, 0.3)
 	# Crew around the car.
 	if main.race_day:
 		for k in 6:
-			var p: Node3D = main.race_day._person(c.team.c2)
+			var p = main.race_day._person(c.team.c1, c.team.c2, "cap")
 			_v_stage.add_child(p)
 			var a := TAU * k / 6.0
 			p.position = Vector3(sin(a) * 4.2, 0.3, cos(a) * 4.2)
+			p.rotation.y = a # facing the car
+			p.pose = "cheer" if k % 2 == 0 else "wave"
 	# Confetti.
 	var conf := CPUParticles3D.new()
 	conf.amount = 400
@@ -884,7 +1142,7 @@ func _build_victory_lane() -> void:
 	_v_stage.add_child(conf)
 	main.soundscape.cheer(1.0)
 	show_bug("VICTORY LANE", 3.0)
-	say("pbp", "And here he comes into victory lane!")
+	say("pbp", _line("victory_lane"))
 
 
 func _trophy() -> Node3D:

@@ -10,6 +10,11 @@ signal message(text: String, kind: String) # kind: flag, spotter, pit, stage, in
 signal pit_call(info: Dictionary)
 ## Quick cautions: the stops are done and the field is lined up (for the board).
 signal pit_report(lines: Array)
+## Online: the host asks another player's screen for their pit call; a
+## player's screen sends its answer back; the host lines everyone up.
+signal remote_pit_call(car: Node3D, info: Dictionary)
+signal remote_answer(call: String, wedge_change: float)
+signal lined_up(rows: Array)
 
 enum Flag { GREEN, YELLOW, WHITE, CHECKERED }
 enum Pit { NONE, APPROACH, LANE, SERVICE, EXIT }
@@ -78,6 +83,13 @@ var box_spacing := 10.0
 var _spot_state := ""
 var _spot_timer := 0.0
 var _dt := 1.0 / 60.0
+## Online. The host runs race control for everyone. The other players' race
+## control follows it (`follower`): flags, the pace car and the restart line-up
+## come from the host, and only their own car's pit call is theirs.
+var follower := false
+var remote_humans := {} # host: cars driven by the other players
+var _waiting := {} # host: players whose pit call hasn't come in yet
+var _decide_t := 0.0
 
 
 func setup(r: Node3D) -> void:
@@ -129,6 +141,17 @@ func leader() -> Node3D:
 func tick(delta: float) -> void:
 	_dt = delta
 	if not enabled or not race.running:
+		return
+	if follower:
+		# The host decides; this screen just tows its own wreck and spots.
+		if flag == Flag.YELLOW:
+			for c in race.cars:
+				if c.out and not c.towed and not c.remote:
+					c.set_meta("out_time", c.get_meta("out_time", race.time))
+					if race.time - float(c.get_meta("out_time")) > 6.0:
+						race.tow(c)
+		if flag != Flag.CHECKERED:
+			_spotter(delta)
 		return
 	_update_pace_car(delta)
 	match flag:
@@ -207,7 +230,7 @@ func _green_tick(delta: float) -> void:
 
 ## Called by race.gd when the leader completes a lap under green.
 func on_leader_lap(lap_done: int) -> void:
-	if not enabled:
+	if not enabled or follower:
 		return
 	if flag == Flag.YELLOW:
 		# A stage that ends under caution still ends (points, no extra yellow).
@@ -643,6 +666,15 @@ func _quick_tick(delta: float) -> void:
 		_quick_t += delta
 		if _quick_t >= QUICK_SLOW_TIME:
 			_quick_decide()
+	elif quick_phase == "decide" and not _waiting.is_empty():
+		# Online: a player who doesn't answer gets their crew chief's call.
+		_decide_t += delta
+		if _decide_t > 20.0:
+			for c in _waiting:
+				_calls[c] = ai_pit_call(c)
+			_waiting.clear()
+			if not player_pending:
+				_quick_apply()
 	# "decide": waiting for the player's call (the game is paused meanwhile).
 	# "roll": lined up; the normal restart logic takes it from here.
 
@@ -660,25 +692,33 @@ func _quick_decide() -> void:
 	if _freeze.is_empty():
 		quick_phase = ""
 		return
+	_waiting.clear()
+	_decide_t = 0.0
 	for c in _freeze:
 		c.set_meta("crew_var", randf_range(-0.6, 0.6)) # this stop's crew speed, good or bad
 		if not pits_enabled:
 			_calls[c] = ""
+		elif remote_humans.has(c):
+			_waiting[c] = true # online: that player makes the call on their screen
 		elif not _is_human(c):
 			_calls[c] = ai_pit_call(c)
+	for c in _waiting:
+		remote_pit_call.emit(c, player_info(c))
 	var p: Node3D = race.player
 	if pits_enabled and _is_human(p) and _freeze.has(p):
 		quick_phase = "decide"
 		player_pending = true
 		pit_call.emit(player_info())
+	elif not _waiting.is_empty():
+		quick_phase = "decide"
 	else:
 		_quick_apply()
 
 
 ## What the player's pit call screen shows: the choices, the crew chief's advice,
 ## the car's state and where each choice would put them for the restart.
-func player_info() -> Dictionary:
-	var p: Node3D = race.player
+func player_info(who: Node3D = null) -> Dictionary:
+	var p: Node3D = who if who else race.player
 	var lead: Node3D = _freeze[0]
 	var laps_left: int = max(race.laps - lead.lap(), 0)
 	var options: Array = ["4", "2", "F", ""]
@@ -708,13 +748,30 @@ func player_info() -> Dictionary:
 
 ## The player's answer: the stop to make ("" stays out) and a wedge change.
 func resolve_player(call: String, wedge_change: float) -> void:
+	if follower:
+		player_pending = false
+		remote_answer.emit(call, wedge_change) # to the host
+		return
 	if quick_phase != "decide":
 		return
 	_calls[race.player] = call
 	if wedge_change != 0.0:
 		_adjust[race.player] = wedge_change
 	player_pending = false
-	_quick_apply()
+	if _waiting.is_empty():
+		_quick_apply()
+
+
+## Online (host): another player's pit call has come in.
+func resolve_remote(c: Node3D, call: String, wedge_change: float) -> void:
+	if quick_phase != "decide" or not _waiting.has(c):
+		return
+	_calls[c] = call
+	if wedge_change != 0.0:
+		_adjust[c] = wedge_change
+	_waiting.erase(c)
+	if not player_pending and _waiting.is_empty():
+		_quick_apply()
 
 
 ## A team's pit call from the car's state, the race situation and the driver's
@@ -931,7 +988,83 @@ func _quick_apply() -> void:
 		if gifted.has(p):
 			lines.append("YOU GET YOUR LAP BACK")
 	pit_report.emit(lines)
+	var rows: Array = []
+	for c in order:
+		rows.append([race.cars.find(c), c.dist, c.d, c.lap_idx, _calls.get(c, ""), float(_adjust.get(c, 0.0))])
+	lined_up.emit(rows)
 	message.emit("RESTART COMING UP - DOUBLE FILE", "pit")
+
+
+## Online: the flag state as the host has it, for the other players' screens.
+func remote_state() -> Dictionary:
+	return {"flag": int(flag), "qp": quick_phase, "otg": one_to_go, "ra": restart_armed, "po": pit_open,
+		"stage": stage, "laps": race.laps, "cc": caution_count, "ch": choosing, "ot": overtime,
+		"flc": final_lap_caution, "pace": pace_car.visible}
+
+
+const FLAG_NAMES := ["GREEN", "YELLOW", "WHITE", "CHECKERED"]
+
+
+## Online (a player's screen): take on the host's flag state.
+func apply_remote_state(st: Dictionary) -> void:
+	var was: int = flag
+	flag = int(st.flag) as Flag
+	quick_phase = String(st.qp)
+	one_to_go = bool(st.otg)
+	restart_armed = bool(st.ra)
+	pit_open = bool(st.po)
+	stage = int(st.stage)
+	race.laps = int(st.laps)
+	caution_count = int(st.cc)
+	choosing = bool(st.ch)
+	overtime = bool(st.ot)
+	if bool(st.flc) and not final_lap_caution:
+		final_lap_caution = true
+		race.freeze_finish()
+	pace_car.visible = bool(st.pace)
+	pace_car.process_mode = Node.PROCESS_MODE_INHERIT if pace_car.visible else Node.PROCESS_MODE_DISABLED
+	if flag == Flag.YELLOW and was != Flag.YELLOW:
+		caution_elapsed = 0.0
+		for c in race.cars:
+			c.pitted_this_caution = false
+	if flag != was:
+		flag_changed.emit(FLAG_NAMES[flag])
+
+
+## Online (a player's screen): the host lined the field up for the restart.
+## `mine` is this player's car: it makes the stop it called.
+func apply_lineup(rows: Array, mine: Node3D) -> void:
+	for r in rows:
+		var idx: int = int(r[0])
+		if idx < 0 or idx >= race.cars.size():
+			continue
+		var c: Node3D = race.cars[idx]
+		c.dist = float(r[1])
+		c.d = float(r[2])
+		c.lap_idx = int(r[3])
+		c.set_meta("lap_void", true)
+		c.v = pace_speed()
+		c.vy = 0.0
+		c.r = 0.0
+		c.yaw = 0.0
+		c.ai_lane = c.d
+		c.pace_lane = c.d
+		c.kin_d = c.d
+		c.kin_v = c.v
+		c.want_pit = false
+		c.pit_state = Pit.NONE
+		var call: String = String(r[4])
+		c.pitted_this_caution = call != ""
+		if c == mine:
+			if call != "":
+				c.pit_plan = call
+				_service(c)
+			if float(r[5]) != 0.0:
+				c.wedge = clamp(c.wedge + float(r[5]), -900.0, 900.0)
+		if not c.remote:
+			c.reset_chassis()
+		c.sync_visual()
+	race._update_order()
 
 
 func _lucky(down: Dictionary) -> Node3D:

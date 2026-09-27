@@ -517,6 +517,18 @@ func net_state(st: PackedFloat32Array) -> void:
 	_net_age = 0.0
 	visible = st[9] > 0.5
 	finished = finished or st[10] > 0.5
+	if st.size() > 13:
+		# Its state as its owner sees it: out, spinning, towed, and how hurt it
+		# is (race control on the host throws cautions for it; bodywork shows it).
+		var bits := int(st[12])
+		out = bits & 1 != 0
+		spinning = bits & 2 != 0
+		if bits & 4 != 0:
+			towed = true
+		if abs(st[13] - total_damage()) > 0.02:
+			for k in damage:
+				damage[k] = st[13]
+			_update_damage_visual()
 	if abs(st[0] - dist) > 60.0:
 		dist = st[0] # too far off: snap
 		d = st[1]
@@ -1291,6 +1303,8 @@ func _update_visual(delta: float) -> void:
 ## under braking; lifting at high revs spits flames from the side pipes.
 var brake_heat := 0.0
 var _flame_t := 0.0
+var _fx_t := 0.0
+var rub_smoke: GeometryInstance3D
 var _thr_prev := 0.0
 var _glow_e := -1.0
 var _tail_e := -1.0
@@ -1315,6 +1329,33 @@ func _update_fx(delta: float) -> void:
 		f.visible = on and randf() < 0.75
 		if f.visible:
 			f.scale = Vector3(1.0, randf_range(0.6, 1.5), 1.0)
+	# Loose bodywork: a hard-hit corner leaves a piece hanging off that flaps in
+	# the wind and drags on the track.
+	_fx_t += delta
+	var flap: float = clamp(abs(v) / 50.0, 0.0, 1.0)
+	for side in _body.get("loose", {}):
+		var piece: Node3D = _body.loose[side]
+		var dmg: float = damage[side]
+		piece.visible = dmg > 0.35
+		if not piece.visible:
+			continue
+		var droop: float = clamp((dmg - 0.35) * 2.0, 0.2, 1.0)
+		var w: float = sin(_fx_t * (9.0 + 11.0 * flap) + dmg * 7.0) * (0.08 + 0.3 * flap)
+		match side:
+			"front":
+				piece.rotation = Vector3(-0.5 * droop + w * 0.4, 0.0, 0.25 * droop)
+			"rear":
+				piece.rotation = Vector3(0.9 * droop + w, 0.0, -0.3 * droop)
+			"left":
+				piece.rotation = Vector3(0.0, -0.8 * droop * flap - w, 0.2 * droop)
+			"right":
+				piece.rotation = Vector3(0.0, 0.8 * droop * flap + w, -0.2 * droop)
+	# Crumpled sheet metal on a tyre: it rubs and smokes.
+	if rub_smoke:
+		var side_dmg: float = max(max(damage.left, damage.right), damage.front * 0.8)
+		_set_emitting(rub_smoke, side_dmg > 0.4 and abs(v) > 12.0 and not out)
+		if side_dmg > 0.4:
+			rub_smoke.position = Vector3(-HALF_W if damage.left >= damage.right else HALF_W, 0.35, -1.43)
 
 
 ## Only touch `emitting` when it changes (re-setting it can restart GPU particles).
@@ -1506,6 +1547,9 @@ func _build_model() -> void:
 	tyre_smoke.position = Vector3(0, 0.3, 1.5)
 	smoke = _smoke_emitter(Color(0.25, 0.25, 0.27, 0.6), 1.6)
 	smoke.position = Vector3(0, 0.8, -2.0)
+	if Game.modern:
+		rub_smoke = _smoke_emitter(Color(0.9, 0.9, 0.92, 0.45), 1.4)
+		rub_smoke.position = Vector3(HALF_W, 0.35, -1.43)
 
 
 static var _puff: GradientTexture2D

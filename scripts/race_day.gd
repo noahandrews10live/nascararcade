@@ -7,6 +7,8 @@ extends Node3D
 ##    under caution;
 ##  - fireworks over the stands and a winner's burnout at the finish.
 
+const Person := preload("res://scripts/person.gd")
+
 const CREWS := 4
 const CREW_SIZE := 6
 # Crew spots round the car (car space: -Z forward, +X right): the four tyre
@@ -90,35 +92,10 @@ func _build_grills() -> void:
 
 
 ## A crew member in a firesuit and helmet.
-func _person(col: Color) -> Node3D:
-	var n := Node3D.new()
-	var body := MeshInstance3D.new()
-	var cap := CapsuleMesh.new()
-	cap.radius = 0.2
-	cap.height = 1.2
-	cap.radial_segments = 8
-	cap.rings = 2
-	body.mesh = cap
-	body.position.y = 0.62
-	var m := StandardMaterial3D.new()
-	m.albedo_color = col
-	m.roughness = 0.8
-	body.material_override = m
-	n.add_child(body)
-	var head := MeshInstance3D.new()
-	var sp := SphereMesh.new()
-	sp.radius = 0.15
-	sp.height = 0.3
-	sp.radial_segments = 8
-	sp.rings = 4
-	head.mesh = sp
-	head.position.y = 1.38
-	var hm := StandardMaterial3D.new()
-	hm.albedo_color = Color(0.92, 0.92, 0.95)
-	hm.roughness = 0.3
-	head.material_override = hm
-	n.add_child(head)
-	return n
+func _person(col: Color, trim := Color(0.95, 0.95, 0.95), hat := "helmet") -> Node3D:
+	var p := Person.new()
+	p.setup(col, trim, hat)
+	return p
 
 
 func _build_flag_stand() -> void:
@@ -150,7 +127,7 @@ func _build_flag_stand() -> void:
 	deck.material_override = steel
 	deck.position = Vector3(-0.6, 6.0, 0)
 	flag_root.add_child(deck)
-	var man := _person(Color(0.95, 0.95, 0.95))
+	var man := _person(Color(0.95, 0.95, 0.95), Color(0.1, 0.2, 0.6), "cap")
 	man.position = Vector3(-1.4, 6.06, 0)
 	man.rotation.y = PI * 0.5 # facing down the track at the oncoming cars
 	flag_root.add_child(man)
@@ -254,8 +231,9 @@ func _update_crews(delta: float) -> void:
 		if cr[2] != car:
 			cr[2] = car
 			var col: Color = car.team.get("c1", Color(0.8, 0.1, 0.1))
+			var col2: Color = car.team.get("c2", Color(0.95, 0.95, 0.95))
 			for p in cr[1]:
-				(p.get_child(0) as MeshInstance3D).material_override.albedo_color = col
+				p.set_colors(col, col2)
 		root.visible = true
 		if not _crew_total.has(car):
 			_crew_total[car] = max(car.pit_timer, 0.1)
@@ -267,7 +245,7 @@ func _update_crews(delta: float) -> void:
 		var tyres: bool = car.pit_plan != "F"
 		var people: Array = cr[1]
 		for j in people.size():
-			var p: Node3D = people[j]
+			var p = people[j] # a Person
 			var spot: Vector3 = SPOTS[j]
 			var active := true
 			if j < 4:
@@ -282,9 +260,15 @@ func _update_crews(delta: float) -> void:
 			var wall_pos := Vector3(4.0, 0, spot.z)
 			var pos: Vector3 = wall_pos.lerp(spot, over) if active else wall_pos
 			var busy: float = 1.0 if over > 0.99 and active else 0.0
-			pos.y = -0.35 * busy + 0.06 * sin(_time * 18.0 + j) * busy
+			var moving: bool = p.position.distance_to(pos) > 0.25
+			p.pose = "work" if busy > 0.0 and j != 5 else ("walk" if moving else "stand")
+			if j == 5 and busy > 0.0:
+				p.pose = "stand" # the gas man holds the can up to the car
 			p.position = p.position.lerp(pos, clamp(delta * 12.0, 0.0, 1.0))
-			p.rotation.y = atan2(-p.position.x, -p.position.z) if busy > 0.0 else 0.0
+			# Face the car while working on it, otherwise the way they're going.
+			var look: Vector3 = -p.position if busy > 0.0 else pos - p.position
+			if look.length() > 0.05:
+				p.rotation.y = lerp_angle(p.rotation.y, atan2(-look.x, -look.z), clamp(delta * 10.0, 0.0, 1.0))
 
 
 func _update_fireworks(delta: float) -> void:

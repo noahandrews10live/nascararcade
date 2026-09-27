@@ -265,7 +265,7 @@ func _draw() -> void:
 	if race.weather and control:
 		draw_string(Game.arcade_font, Vector2(W * 0.5 - 120, 44), race.weather.summary(), HORIZONTAL_ALIGNMENT_CENTER, 240, 10, Color(0.85, 0.9, 1.0))
 	# Car condition: damage by corner, tyres and fuel.
-	var cc := Vector2(160, H - 104)
+	var cc := Vector2(16, H - 104)
 	var dmg: Dictionary = p.damage
 	var dc := func(x: float) -> Color:
 		return Color(0.3, 1.0, 0.4).lerp(Color(1.0, 0.85, 0.2), clamp(x * 2.0, 0.0, 1.0)).lerp(Color(1.0, 0.2, 0.15), clamp(x * 2.0 - 1.0, 0.0, 1.0))
@@ -297,10 +297,21 @@ func _draw() -> void:
 	draw_string(f, cc + Vector2(-2, 82), "H2O %d" % int(wt * 1.8 + 32.0), HORIZONTAL_ALIGNMENT_LEFT, -1, 10, wcol)
 	if p.dvp_clock >= 0.0:
 		draw_string(f, cc + Vector2(-2, 94), "DVP %d:%02d" % [int(p.dvp_clock) / 60, int(p.dvp_clock) % 60], HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color(1, 0.6, 0.2))
-	# Minimap
-	var mm_size: float = min(110.0, H * 0.3)
-	var mm_pos := Vector2(12, H - mm_size - 10)
-	draw_rect(Rect2(mm_pos - Vector2(4, 4), Vector2(mm_size + 8, mm_size + 8)), Color(0, 0, 0, 0.35))
+	_draw_map(p)
+
+
+## The course map, right under your position: every car on it, you flashing on
+## top, with the leader and the cars either side of you numbered.
+func map_rect() -> Rect2:
+	var mm: float = clamp(H * 0.26, 64.0, 120.0)
+	return Rect2(W - 14.0 - mm, 92.0, mm, mm)
+
+
+func _draw_map(p: Node3D) -> void:
+	var r := map_rect()
+	var mm_size := r.size.x
+	var mm_pos := r.position
+	draw_rect(r.grow(5.0), Color(0, 0, 0, 0.4))
 	var pts: PackedVector2Array = track.minimap
 	var poly := PackedVector2Array()
 	for q in pts:
@@ -309,11 +320,20 @@ func _draw() -> void:
 	draw_polyline(poly, Color(0, 0, 0, 0.8), 5.0)
 	draw_polyline(poly, Color(0.85, 0.85, 0.9), 2.5)
 	var sf: Vector2 = mm_pos + track.to_minimap(track.pos[0]) * mm_size
-	draw_circle(sf, 3.0, Color.WHITE)
-	for c in race.cars:
-		if c == p:
+	draw_rect(Rect2(sf - Vector2(1.5, 4.0), Vector2(3.0, 8.0)), Color.WHITE) # start/finish
+	var f := Game.arcade_font
+	var ppos: int = race.position_of(p) - 1
+	for i in race.order.size():
+		var c: Node3D = race.order[i]
+		if c == p or (c.out and control):
 			continue
-		draw_circle(mm_pos + track.to_minimap(c.global_position) * mm_size, 3.0, c.team.c1)
+		var cp: Vector2 = mm_pos + track.to_minimap(c.global_position) * mm_size
+		draw_circle(cp, 3.4, Color(0, 0, 0, 0.8))
+		draw_circle(cp, 2.6, c.team.c1)
+		if i == 0 or abs(i - ppos) == 1:
+			var tag := str(i + 1)
+			draw_string_outline(f, cp + Vector2(4, -3), tag, HORIZONTAL_ALIGNMENT_LEFT, -1, 10, 3, Color.BLACK)
+			draw_string(f, cp + Vector2(4, -3), tag, HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color(1, 0.9, 0.3) if i == 0 else Color.WHITE)
 	var pp: Vector2 = mm_pos + track.to_minimap(p.global_position) * mm_size
 	draw_circle(pp, 5.0, Color(0, 0, 0))
 	draw_circle(pp, 4.0, Color(1, 0.9, 0.1) if int(blink * 5.0) % 2 == 0 else Color(1, 0.3, 0.1))

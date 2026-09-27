@@ -116,7 +116,7 @@ var tracks: Array[Dictionary] = [
 		"level": "EXPERT",
 		"back": 250.0, "radius": 57.0, "dog_phi": 0.0, "front_mid": 250.0, "front_side": 0.0,
 		"width": 13.0, "apron": 6.0, "infield": 8.0,
-		"bank_turn": 12.0, "bank_straight": 0.0,
+		"bank_turn": 12.0, "bank_straight": 0.0, "turn_grip": 1.2, # concrete turns
 		"laps": 10, "draft": 0.1, "grid_player": 24,
 		"hp": 750, "cda": 1.2, "cla": 1.8, "pit_mph": 30, "race_laps": 60, "full_laps": 500,
 		"sky_top": Color(0.25, 0.4, 0.8), "sky_horizon": Color(0.75, 0.85, 0.95),
@@ -208,7 +208,7 @@ const PALETTE := [
 const FIRST_NAMES := ["ACE", "BILLY", "BO", "CHARLIE", "CODY", "DALE", "DUSTY", "HANK", "JESSE", "JOHNNY", "LUKE", "MAX", "RAY", "ROCKY", "SAM", "TEX", "TOMMY", "WYATT", "ZEKE", "YOU"]
 const LAST_NAMES := ["BLAZE", "BOLT", "BURNETT", "CARVER", "DAWSON", "FIELDS", "GRANGER", "HOLT", "JAMESON", "KNOX", "MCCALL", "PARKER", "RHODES", "SHELBY", "STEELE", "THORNE", "WALLACE", "WILDER", "YATES", "RACER"]
 const SPONSORS := ["THUNDER COLA", "BIG RIG TIRES", "SIZZLE BURGERS", "GATOR JUICE", "MOTORHEAD OIL", "CRUNCHY O'S", "HOG WILD BBQ", "ROCKET PARTS", "NITRO GUM", "PEAK AUTO PARTS", "RIVER BANK", "MOONSHINE ENERGY", "TITAN TOOLS", "GOLD STAR PIZZA", "VELOCITY SODA", "YOUR NAME HERE"]
-var custom := {"num": 1, "first": 0, "last": 0, "sponsor": 0, "c1": 7, "c2": 11, "cn": 2, "make": 0}
+var custom := {"num": 1, "first": 0, "last": 0, "sponsor": 0, "c1": 7, "c2": 11, "cn": 2, "make": 0, "scheme": 0}
 var custom_team_idx := -1
 
 
@@ -233,7 +233,7 @@ func custom_team() -> Dictionary:
 	return {
 		"num": str(custom.num), "driver": "%s %s" % [FIRST_NAMES[custom.first], LAST_NAMES[custom.last]],
 		"sponsor": SPONSORS[custom.sponsor], "c1": PALETTE[custom.c1][1], "c2": PALETTE[custom.c2][1],
-		"cn": PALETTE[custom.cn][1], "speed": 1.0, "accel": 1.0, "handling": 1.0, "custom": true, "make": custom.make,
+		"cn": PALETTE[custom.cn][1], "speed": 1.0, "accel": 1.0, "handling": 1.0, "custom": true, "make": custom.make, "scheme": custom.scheme,
 	}
 
 
@@ -814,7 +814,7 @@ func team_by_num(num: String) -> Dictionary:
 func _fill_teams() -> void:
 	var first := ["JIMMY", "CARL", "DENNY", "KYLE", "RYAN", "CHASE", "TYLER", "BRAD", "JOEY", "AUSTIN", "CODY", "DANIEL", "ERIK", "MICHAEL", "ROSS", "TODD", "CHRIS", "JUSTIN", "HARRISON", "CORY", "NOAH", "ZANE", "TY", "JOSH", "RILEY", "COLE", "BUBBA", "SHANE"]
 	var last := ["WALKER", "HAYES", "BOONE", "MERCER", "DUVALL", "PIKE", "RANDALL", "CROWE", "LANGSTON", "TATE", "WHITLOCK", "BRADY", "COLLINS", "FARRIS", "HOLLOWAY", "KEENE", "LOWRY", "MADDOX", "NASH", "ODOM", "PRATT", "QUINLAN", "REEVES", "SUTTON", "TRAMMELL", "VAUGHN", "WEBB", "YANCEY"]
-	var sponsors := ["PEAK AUTO PARTS", "RIVER BANK", "DIXIE DOGS", "IRONHORSE TRUCKS", "COOL BREEZE HVAC", "BLUEGRASS INSURANCE", "SPARK PLUG CO", "GULF COAST SEAFOOD", "HIGHWAY LUBE", "LONGHORN JERKY", "SUMMIT ROOFING", "PIONEER SEED", "RAPID FREIGHT", "COASTAL CREDIT", "ACE HARDWARE", "MOONSHINE ENERGY", "TITAN TOOLS", "GOLD STAR PIZZA", "CLEARVIEW GLASS", "BIG SKY BOOTS", "NORTHSTAR CABLE", "VELOCITY SODA", "FARMHAND FEED", "SUNRISE PANCAKES", "BRAVO BATTERIES", "TRAILBLAZER RV", "HARBOR PAINT", "OLD TOWN CHILI"]
+	var sponsors := ["PEAK AUTO PARTS", "RIVER BANK", "DIXIE DOGS", "IRONHORSE TRUCKS", "COOL BREEZE HVAC", "BLUEGRASS INSURANCE", "SPARK PLUG CO", "GULF COAST SEAFOOD", "HIGHWAY LUBE", "LONGHORN JERKY", "SUMMIT ROOFING", "PIONEER SEED", "RAPID FREIGHT", "COASTAL CREDIT", "ACE-HIGH HARDWARE", "MOONSHINE ENERGY", "TITAN TOOLS", "GOLD STAR PIZZA", "CLEARVIEW GLASS", "BIG SKY BOOTS", "NORTHSTAR CABLE", "VELOCITY SODA", "FARMHAND FEED", "SUNRISE PANCAKES", "BRAVO BATTERIES", "TRAILBLAZER RV", "HARBOR PAINT", "OLD TOWN CHILI"]
 	var used := {}
 	for t in teams:
 		used[t.num] = true
@@ -1377,6 +1377,20 @@ func safe_rect(vp: Viewport) -> Rect2:
 	var r: Rect2 = vp.get_final_transform().affine_inverse() * win_r
 	r = r.intersection(vis)
 	return r if r.has_area() else vis
+
+
+## A phone or tablet (a touch screen is the main way in). iPad Safari reports
+## itself as a Mac, so the web page's own check (touch points) is asked too.
+func touch_device() -> bool:
+	if OS.has_feature("web_android") or OS.has_feature("web_ios") or OS.has_feature("mobile"):
+		return true
+	if OS.get_environment("ST_TOUCH") == "1":
+		return true
+	if OS.has_feature("web"):
+		var w = JavaScriptBridge.get_interface("window")
+		if w and w.stTouch == true:
+			return true
+	return false
 
 
 ## How big to draw the touch controls (1 = sized for a phone): smaller on

@@ -346,6 +346,68 @@ static func _body_mesh(data: Dictionary, cols: PackedColorArray, pos: Array, mat
 	return am
 
 
+## Paint schemes: how the team's two colours (and the number colour, as a
+## pinstripe) are laid out over the body.
+const SCHEMES := ["CLASSIC", "TWO-TONE", "SWOOSH", "TWIN STRIPES", "FLAMES", "ARROW", "SPLIT"]
+
+
+static func scheme_of(team: Dictionary) -> int:
+	if team.has("scheme"):
+		return int(team.scheme) % SCHEMES.size()
+	return absi(hash(String(team.get("num", "0")) + "scheme")) % SCHEMES.size()
+
+
+## Per-vertex colours for one scheme (car space: -Z is the nose, +X the right).
+static func scheme_colors(sf: Dictionary, scheme: int, c1: Color, c2: Color, c3: Color) -> PackedColorArray:
+	var sm: PackedByteArray = sf.stripe
+	var ps: PackedVector3Array = sf.pos
+	var ns: PackedVector3Array = sf.nrm
+	var cols := PackedColorArray()
+	cols.resize(ps.size())
+	for i in ps.size():
+		var p := ps[i]
+		var n := ns[i]
+		var top := n.y > 0.55 # hood, roof and deck
+		var u := (p.z + 2.45) / 4.9 # 0 at the nose, 1 at the tail
+		var c := c1
+		match scheme:
+			0: # a stripe along the lower doors and one down the hood and deck
+				c = c2 if sm[i] == 1 else c1
+			1: # two-tone: the lower body in the second colour, pinstriped
+				var line := 0.5 + 0.04 * sin(u * PI)
+				if p.y < line - 0.03:
+					c = c2
+				elif p.y < line:
+					c = c3
+			2: # a swoosh rising from the front wheel to the tail
+				var edge: float = 0.3 + 0.55 * clamp((u - 0.12) / 0.8, 0.0, 1.0)
+				if not top and p.y < edge:
+					c = c2
+				if not top and abs(p.y - edge) < 0.028:
+					c = c3
+			3: # twin racing stripes nose to tail over the top
+				var ax: float = abs(p.x)
+				if top and ax > 0.07 and ax < 0.24:
+					c = c2
+				elif top and ax > 0.24 and ax < 0.27:
+					c = c3
+			4: # flames licking back from the nose
+				var f: float = 0.42 + 0.16 * abs(fmod(u * 11.0, 2.0) - 1.0) - 0.9 * max(u - 0.25, 0.0)
+				if u < 0.55 and (p.y < f or (top and u < 0.22 + 0.06 * sin(p.x * 18.0))):
+					c = c2
+			5: # an arrow pointing forward along the sides
+				var arrow: float = abs(p.y - 0.62) - (u - 0.15) * 0.5
+				if not top and arrow < 0.0 and u < 0.8:
+					c = c2
+				elif not top and arrow < 0.03 and u < 0.8:
+					c = c3
+			6: # split: the back half in the second colour, cut on the slant
+				if u > 0.5 + (p.y - 0.6) * 0.35:
+					c = c2
+		cols[i] = c
+	return cols
+
+
 ## Builds the car under `root`. Returns {"lods": [...], "wheels": Array[Node3D]
 ## spinners, "holders": Array[Node3D], "interior": Node3D, "paint": Material}.
 static func build(root: Node3D, team: Dictionary, wheels_parent: Node3D) -> Dictionary:
@@ -371,11 +433,7 @@ static func build(root: Node3D, team: Dictionary, wheels_parent: Node3D) -> Dict
 	var lods := []
 	for level in 2:
 		var data := _lod_data(level)
-		var sm: PackedByteArray = data.surfaces[0].stripe
-		var cols := PackedColorArray()
-		cols.resize(sm.size())
-		for i in sm.size():
-			cols[i] = c2 if sm[i] == 1 else c1
+		var cols := scheme_colors(data.surfaces[0], scheme_of(team), c1, c2, cn)
 		var mi := MeshInstance3D.new()
 		mi.name = "Body" if level == 0 else "BodyFar"
 		mi.mesh = _body_mesh(data, cols, [], mats)
@@ -433,10 +491,65 @@ static func build(root: Node3D, team: Dictionary, wheels_parent: Node3D) -> Dict
 	spon.position = Vector3(0, sec(1.55).yt + LIFT + 0.012, -1.55)
 	spon.rotation = Vector3(-PI * 0.5 + 0.17, 0, 0)
 	root.add_child(spon)
+	# The sponsor again, big on the rear quarter panels; the contingency decals
+	# behind the front wheels; the make's badge on the nose.
+	var quarter_col: Color = c3_contrast(c1, c2, cn)
+	for sx in [-1.0, 1.0]:
+		var qz := 1.36
+		var hq: float = sec(-qz).hw_m
+		var q := _label(String(team.sponsor), quarter_col, 52)
+		q.pixel_size = 0.0034
+		q.position = Vector3(sx * (hq + 0.014), 0.87, qz)
+		q.rotation = Vector3(0, sx * PI * 0.5, 0)
+		q.visibility_range_end = 60.0
+		root.add_child(q)
+		var dz := -0.74
+		var hd: float = sec(-dz).hw_m
+		var strip := MeshInstance3D.new()
+		var qm := QuadMesh.new()
+		qm.size = Vector2(0.5, 0.18)
+		strip.mesh = qm
+		strip.material_override = _decal_mat()
+		strip.position = Vector3(sx * (hd + 0.01), 0.42, dz)
+		strip.rotation = Vector3(0, sx * PI * 0.5, 0)
+		strip.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		strip.visibility_range_end = 40.0
+		root.add_child(strip)
+	if not _shared.has("emblem"):
+		var em := SphereMesh.new()
+		em.radius = 0.07
+		em.height = 0.05
+		em.radial_segments = 16
+		em.rings = 4
+		_shared["emblem"] = em
+	var badge := MeshInstance3D.new()
+	badge.mesh = _shared.emblem
+	badge.material_override = Game.make_mat("chrome", Color(0.85, 0.86, 0.88))
+	badge.scale = Vector3(1.3, 0.35, 0.9) # a flat oval on the nose
+	badge.position = Vector3(0, float(sec(2.18).yt) + LIFT + 0.004, -2.18)
+	badge.visibility_range_end = 30.0
+	root.add_child(badge)
 	var bumper := _label(String(team.sponsor), Color(1, 1, 1), 40)
 	bumper.pixel_size = 0.0036
 	bumper.position = Vector3(0, 0.42, 2.452)
 	root.add_child(bumper)
+
+	# Bodywork that comes loose in a crash: a corner of the front fascia, the
+	# rear bumper cover and the quarter panels, hidden until they're hit hard.
+	var loose := {}
+	var loose_mat := Game.make_mat("paint", c1)
+	for part in [["front", Vector3(0.52, 0.3, -2.36), Vector3(0.62, 0.05, 0.34), Vector3(0, 0, -0.17)],
+			["rear", Vector3(-0.45, 0.42, 2.42), Vector3(0.75, 0.28, 0.04), Vector3(0, -0.14, 0)],
+			["left", Vector3(-float(sec(-1.05).hw_m), 0.78, 1.05), Vector3(0.03, 0.34, 0.62), Vector3(0, -0.17, 0.3)],
+			["right", Vector3(float(sec(-1.05).hw_m), 0.78, 1.05), Vector3(0.03, 0.34, 0.62), Vector3(0, -0.17, 0.3)]]:
+		var pivot := Node3D.new()
+		pivot.name = "Loose_" + String(part[0])
+		pivot.position = part[1]
+		pivot.visible = false
+		root.add_child(pivot)
+		var piece := _box(pivot, part[2], part[3], loose_mat)
+		piece.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		loose[part[0]] = pivot
 
 	# Wheels: tyre, ten-spoke wheel with a single centre nut, brake disc.
 	var tyre_mat := Game.make_mat("rubber", Color(0.06, 0.06, 0.065))
@@ -509,7 +622,7 @@ static func build(root: Node3D, team: Dictionary, wheels_parent: Node3D) -> Dict
 			root.add_child(f)
 			flames.append(f)
 	_mk = -1
-	return {"tail": tail_mat, "glow": glow_mat, "flames": flames, "lods": lods, "wheels": wheels, "holders": holders, "interior": interior, "paint": paint, "make": mk}
+	return {"tail": tail_mat, "glow": glow_mat, "flames": flames, "lods": lods, "wheels": wheels, "holders": holders, "interior": interior, "paint": paint, "make": mk, "loose": loose}
 
 
 ## Pushes the body in where it's been hit. `damage` is the car's per-side damage.
@@ -881,6 +994,37 @@ static func _instance(parent: Node3D, mesh: Mesh, mat: Material) -> MeshInstance
 	mi.material_override = mat
 	parent.add_child(mi)
 	return mi
+
+
+## The sponsor colour that stands out on this car's paint.
+static func c3_contrast(c1: Color, c2: Color, cn: Color) -> Color:
+	if abs(c2.v - c1.v) > 0.3 or abs(c2.h - c1.h) > 0.2:
+		return c2
+	return cn
+
+
+## The row of little contingency sponsor decals (tyres, plugs, oil, brakes...):
+## a small shared texture of coloured tags.
+static func _decal_mat() -> StandardMaterial3D:
+	if _shared.has("decal_mat"):
+		return _shared.decal_mat
+	var img := Image.create(128, 48, false, Image.FORMAT_RGBA8)
+	img.fill(Color(0, 0, 0, 0))
+	var tags := [Color(1, 0.85, 0.1), Color(0.9, 0.1, 0.1), Color(0.1, 0.3, 0.8), Color(1, 1, 1), Color(0.1, 0.6, 0.2), Color(0.05, 0.05, 0.05), Color(0.95, 0.45, 0.05), Color(0.6, 0.6, 0.65)]
+	for k in 8:
+		var x := (k % 4) * 32 + 1
+		var y := (k / 4) * 24 + 1
+		img.fill_rect(Rect2i(x, y, 30, 22), tags[k])
+		var ink := Color(0.05, 0.05, 0.05) if tags[k].v > 0.6 else Color(1, 1, 1)
+		img.fill_rect(Rect2i(x + 4, y + 7, 22, 3), ink) # the "name"
+		img.fill_rect(Rect2i(x + 7, y + 13, 16, 2), ink)
+	var m := StandardMaterial3D.new()
+	m.albedo_texture = ImageTexture.create_from_image(img)
+	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA_SCISSOR
+	m.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
+	m.roughness = 0.35
+	_shared["decal_mat"] = m
+	return m
 
 
 static func _box(root: Node3D, size: Vector3, p: Vector3, m: Material) -> MeshInstance3D:

@@ -5,9 +5,14 @@ extends Node
 ##   "menu"    - a laid-back groove behind the menus;
 ##   "lastlap" - driving minor-key pulse, four on the floor, a noise riser that
 ##               climbs with `intensity`;
-##   "victory" - a bright fanfare: arpeggios over big chords and drums.
+##   "victory" - a bright fanfare: arpeggios over big chords and drums;
+##   "caution" - a low, tense pulse while the field circulates under yellow;
+##   "qualify" - a light, steady groove for qualifying runs;
+##   "results" - a warm wind-down behind the results.
+## A driven guitar plays power chords in the rock cues, brass stabs punctuate the
+## anthem and victory, and claps sit on two and four.
 ## play(cue) cross-fades; stop() fades out. Races run without music (like TV)
-## until the last lap.
+## apart from cautions and the last lap.
 
 const RATE := 11025.0
 const BPM := 124.0
@@ -22,7 +27,10 @@ var _gain := 0.0
 var _target_gain := 0.0
 var _t := 0.0 # seconds into the cue
 var _ph := PackedFloat32Array() # oscillator phases
-var _lp := [0.0, 0.0, 0.0]
+var _lp := [0.0, 0.0, 0.0, 0.0, 0.0]
+var _gtr_env := 0.0
+var _brass_env := 0.0
+var _clap_env := 0.0
 var _kick_env := 0.0
 var _kick_ph := 0.0
 var _snare_env := 0.0
@@ -36,7 +44,15 @@ const CUES := {
 	"menu": [[0, 4, 7], [5, 9, 12], [9, 12, 16], [7, 11, 14]], # A  D  F#m  E
 	"lastlap": [[0, 3, 7], [0, 3, 7], [8, 12, 15], [10, 14, 17]], # Am  Am  F  G
 	"victory": [[2, 6, 9], [7, 11, 14], [9, 13, 16], [2, 6, 9]], # D  G  A  D
+	"caution": [[0, 3, 7], [0, 3, 7], [5, 8, 12], [7, 10, 14]], # Am  Am  Dm  Em
+	"qualify": [[0, 4, 7], [7, 11, 14], [9, 12, 16], [5, 9, 12]], # A  E  F#m  D
+	"results": [[5, 9, 12], [0, 4, 7], [9, 12, 16], [7, 11, 14]], # D  A  F#m  E
 }
+## How loud each cue sits (the in-race ones stay under the engines).
+const CUE_GAIN := {"caution": 0.55, "qualify": 0.6, "results": 0.8}
+## Tempo relative to BPM (the caution cue plods along at half speed).
+const CUE_TEMPO := {"caution": 0.5, "results": 0.8}
+const GUITAR := ["lastlap", "victory", "qualify"]
 
 
 func _ready() -> void:
@@ -61,7 +77,7 @@ func play(name: String) -> void:
 		_t = 0.0
 		_step = -1
 	cue = name
-	_target_gain = 1.0
+	_target_gain = CUE_GAIN.get(name, 1.0)
 
 
 func stop() -> void:
@@ -85,7 +101,7 @@ func _process(_delta: float) -> void:
 		playback.push_buffer(buf) # silence
 		return
 	var chords: Array = CUES[cue]
-	var beat := 60.0 / BPM
+	var beat := 60.0 / (BPM * float(CUE_TEMPO.get(cue, 1.0)))
 	var bar := beat * 4.0
 	for i in frames:
 		_gain = move_toward(_gain, _target_gain, 1.0 / (RATE * (0.4 if _target_gain > _gain else 1.6)))
@@ -125,6 +141,32 @@ func _process(_delta: float) -> void:
 			var tri: float = 1.0 - 4.0 * abs(_ph[7] - 0.5)
 			var env: float = 1.0 - fmod(_t / (beat * 0.25), 1.0) * 0.8
 			s += tri * env * (0.08 if cue == "victory" else 0.05 * intensity)
+		# Guitar: a power chord (root, fifth, octave) through a fuzz, chugging
+		# eighths that ring out on the accents.
+		if cue in GUITAR and (cue != "lastlap" or intensity > 0.15):
+			var r := float(chord[0]) - 12.0
+			var g := 0.0
+			for k2 in 3:
+				var fq := _note(r + [0.0, 7.0, 12.0][k2])
+				_ph[8 + k2] = fmod(_ph[8 + k2] + fq * (1.0 + 0.003 * k2) / RATE, 1.0)
+				g += _ph[8 + k2] * 2.0 - 1.0
+			g = tanh(g * 3.5 * (0.4 + _gtr_env))
+			_lp[3] += (g - _lp[3]) * 0.25
+			s += _lp[3] * _gtr_env * (0.09 if cue != "qualify" else 0.05)
+			_gtr_env *= 0.99975 if _gtr_env > 0.7 else 0.9994
+		# Brass: a bright stab of the whole chord.
+		if _brass_env > 0.002:
+			var b := 0.0
+			for k3 in 3:
+				var fb := _note(float(chord[k3]))
+				_ph[11 + k3] = fmod(_ph[11 + k3] + fb / RATE, 1.0)
+				b += _ph[11 + k3] * 2.0 - 1.0
+			_lp[4] += (b - _lp[4]) * (0.05 + 0.25 * _brass_env)
+			s += _lp[4] * _brass_env * 0.07
+			_brass_env *= 0.99965
+		if _clap_env > 0.001:
+			s += _rng.randf_range(-1.0, 1.0) * _clap_env * 0.16
+			_clap_env *= 0.9955
 		# Drums.
 		if _kick_env > 0.001:
 			_kick_ph += (45.0 + 110.0 * _kick_env * _kick_env) / RATE
@@ -148,11 +190,16 @@ func _process(_delta: float) -> void:
 
 
 func _trigger(st: int) -> void:
+	if cue in GUITAR and st % 2 == 0:
+		_gtr_env = 1.0 if st % 8 == 0 else 0.45
 	match cue:
 		"anthem":
 			if st == 0:
 				_kick_env = 1.0
 				_kick_ph = 0.0
+				_brass_env = 1.0
+			if st == 6 and int(_t / (60.0 / BPM * 4.0)) % 2 == 1:
+				_brass_env = 0.8
 		"menu":
 			if st == 0 or st == 10:
 				_kick_env = 0.7
@@ -175,7 +222,33 @@ func _trigger(st: int) -> void:
 			if st == 0 or st == 8:
 				_kick_env = 1.0
 				_kick_ph = 0.0
+			if st == 0:
+				_brass_env = 1.0
 			if st == 4 or st == 12:
 				_snare_env = 0.8
+				_clap_env = 1.0
 			if st % 2 == 0:
 				_hat_env = 0.6
+		"caution":
+			# A heartbeat: two soft kicks, and a tick.
+			if st == 0 or st == 3:
+				_kick_env = 0.6
+				_kick_ph = 0.0
+			if st == 8:
+				_hat_env = 0.3
+		"qualify":
+			if st == 0 or st == 8:
+				_kick_env = 0.8
+				_kick_ph = 0.0
+			if st == 4 or st == 12:
+				_snare_env = 0.55
+			if st % 2 == 0:
+				_hat_env = 0.45
+		"results":
+			if st == 0:
+				_kick_env = 0.6
+				_kick_ph = 0.0
+			if st == 4 or st == 12:
+				_clap_env = 0.7
+			if st % 4 == 2:
+				_hat_env = 0.35

@@ -365,9 +365,19 @@ var rubber_laps := 0.0
 var wear: Node3D # track_wear.gd: where the field has actually laid rubber
 
 
+## Some tracks pave their turns differently: Magnolia's corners are concrete
+## (like Martinsville's), which the tyres bite into harder than asphalt.
+## `turn_grip` in the track config; 1 on the straights, full in the turns.
+func surface_grip(i: int) -> float:
+	var tg: float = float(cfg.get("turn_grip", 1.0))
+	if tg == 1.0:
+		return 1.0
+	return lerp(1.0, tg, clamp(abs(curv[i]) * 90.0, 0.0, 1.0))
+
+
 func grip_at(s: float, d: float) -> float:
 	var x: float = (d + width * 0.5) / width # 0 bottom .. 1 top
-	var g := 1.0
+	var g := surface_grip(int(fposmod(s, length) / length * n) % n)
 	if wear:
 		# The line the cars actually use rubbers in and gets quicker; marbles
 		# outside it are like ball bearings.
@@ -496,7 +506,7 @@ func _build_profile() -> void:
 	var seg := length / n
 	var cla_v: float = cfg.get("cla", 2.2)
 	for i in n:
-		speed_profile[i] = corner_speed(i, TYRE_MU, cla_v)
+		speed_profile[i] = corner_speed(i, TYRE_MU * surface_grip(i), cla_v)
 	var decel := 10.5 # what the cars can really brake at (four-tyre model), with margin
 	for _pass in 2:
 		for idx in range(n - 1, -1, -1):
@@ -577,7 +587,7 @@ func _build_line() -> void:
 	line_profile.resize(n)
 	var cla_v: float = cfg.get("cla", 2.2)
 	for i in n:
-		line_profile[i] = corner_speed(i, TYRE_MU, cla_v, line_curv[i])
+		line_profile[i] = corner_speed(i, TYRE_MU * surface_grip(i), cla_v, line_curv[i])
 	var seg_len := length / n
 	for _pass in 2:
 		for idx in range(n - 1, -1, -1):
@@ -830,13 +840,9 @@ func _build_scenery() -> void:
 	var mid := (p_in + p_out) * 0.5
 	mid.y = top_y
 	_box("scenery", mid, Vector3(p_in.distance_to(p_out) + 1.0, 1.6, 1.2), Basis(up, atan2(right[0].x, right[0].z) - PI * 0.5), Color(0.1, 0.1, 0.12))
-	# Infield buildings / haulers.
-	for k in 14:
-		var t := float(k) / 14.0
-		var idx := int(t * n * 0.35 + n * 0.08) % n
-		var p := pos[idx] + right[idx] * (inner_wall() - 22.0 - rng.randf() * 20.0)
-		var truck_col: Color = crowd[rng.randi() % crowd.size()]
-		_box("scenery", p + up * 2.0, Vector3(3.0, 4.0, 16.0), Basis(up, atan2(fwd[idx].x, fwd[idx].z) + 0.4), truck_col)
+	# The infield: mowed grass, the garage and hauler lot, the media tower; and
+	# the spectators' car park outside the backstretch.
+	_build_infield(rng)
 	# Light towers for night tracks. In modern mode each one gets a real spotlight
 	# so the volumetric fog shows beams.
 	if night:
@@ -977,6 +983,150 @@ static func _blob(st: SurfaceTool, c: Vector3, r: float, col: Color) -> void:
 
 ## Chain-link catch fence on top of the outside wall (Modern look; the 1999 look
 ## keeps just the rail and posts). UVs run along the wall so the mesh pattern is even.
+func _build_infield(rng: RandomNumberGenerator) -> void:
+	var up := Vector3.UP
+	var road: bool = cfg.get("road", false)
+	var iw := inner_wall()
+	var idx_at := func(s: float) -> int:
+		return int(fposmod(s, length) / length * n) % n
+	# Mowed stripes across the infield (ovals: the infield is round the middle).
+	if not road:
+		var ctr := Vector3.ZERO
+		for q in pos:
+			ctr += q
+		ctr /= float(n)
+		var verts := PackedVector3Array()
+		var uvs := PackedVector2Array()
+		var step: int = max(1, n / 240)
+		var ring: Array = []
+		for i in range(0, n, step):
+			ring.append(pos[i] + right[i] * (iw - 6.0))
+		for k in ring.size():
+			var a: Vector3 = ring[k]
+			var b: Vector3 = ring[(k + 1) % ring.size()]
+			for v in [ctr, b, a]:
+				var w := Vector3(v.x, -0.11, v.z)
+				verts.append(w)
+				uvs.append(Vector2(w.x, w.z) / 26.0)
+		var arr := []
+		arr.resize(Mesh.ARRAY_MAX)
+		arr[Mesh.ARRAY_VERTEX] = verts
+		arr[Mesh.ARRAY_TEX_UV] = uvs
+		var normals := PackedVector3Array()
+		normals.resize(verts.size())
+		normals.fill(Vector3.UP)
+		arr[Mesh.ARRAY_NORMAL] = normals
+		var am := ArrayMesh.new()
+		am.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arr)
+		var img := Image.create(2, 1, false, Image.FORMAT_RGB8)
+		var g: Color = cfg.grass
+		img.set_pixel(0, 0, g.lightened(0.1))
+		img.set_pixel(1, 0, g.darkened(0.12))
+		var gm := StandardMaterial3D.new()
+		gm.albedo_texture = ImageTexture.create_from_image(img)
+		gm.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR
+		gm.roughness = 1.0
+		gm.cull_mode = BaseMaterial3D.CULL_DISABLED
+		if Game.modern:
+			gm.detail_enabled = true
+			gm.detail_blend_mode = BaseMaterial3D.BLEND_MODE_MUL
+			gm.detail_albedo = Game.texture("grass", false)
+			gm.detail_uv_layer = BaseMaterial3D.DETAIL_UV_1
+			gm.uv1_scale = Vector3(1, 1, 1)
+		var mi := MeshInstance3D.new()
+		mi.mesh = am
+		mi.material_override = gm
+		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		add_child(mi)
+	# The hauler lot: paved, with a row of team haulers (cab and trailer in the
+	# team's colours) parked in line, and the long garage behind them.
+	var lot0 := length * 0.12
+	var lot_len: float = min(360.0, length * 0.3)
+	var near := iw - 16.0
+	var far := iw - 58.0
+	var pave := Color(0.36, 0.36, 0.37)
+	var i0: int = idx_at.call(lot0)
+	var i1: int = idx_at.call(lot0 + lot_len)
+	var i := i0
+	while i != i1:
+		var j := (i + 1) % n
+		_quad("scenery", pos[i] + right[i] * near + up * -0.08, pos[i] + right[i] * far + up * -0.08, pos[j] + right[j] * near + up * -0.08, pos[j] + right[j] * far + up * -0.08, pave, up, up)
+		i = j
+	var teams: Array = Game.teams
+	var k := 0
+	var s_h := lot0 + 12.0
+	while s_h < lot0 + lot_len - 12.0 and k < 20:
+		var hi: int = idx_at.call(s_h)
+		var t: Dictionary = teams[k % teams.size()]
+		var yaw := atan2(right[hi].x, right[hi].z) # nose towards the track
+		var bs := Basis(up, yaw)
+		var base := pos[hi] + right[hi] * (near - 14.0)
+		# Trailer: body in the first colour, a band of the second along the bottom.
+		_box("scenery", base + up * 2.4, Vector3(2.6, 3.2, 15.0), bs, t.c1)
+		_box("scenery", base + up * 0.9, Vector3(2.62, 0.6, 15.0), bs, t.c2)
+		# Tractor cab in front (towards the track), chrome-grey tanks, black tyres.
+		var fwd_v := bs * Vector3(0, 0, 1)
+		_box("scenery", base + fwd_v * 9.4 + up * 1.9, Vector3(2.5, 2.8, 3.2), bs, t.c2.lerp(t.c1, 0.3))
+		_box("scenery", base + fwd_v * 9.4 + up * 0.5, Vector3(2.6, 1.0, 3.4), bs, Color(0.05, 0.05, 0.06))
+		_box("scenery", base + up * 0.5, Vector3(2.64, 1.0, 13.0), bs, Color(0.05, 0.05, 0.06))
+		s_h += 7.5
+		k += 1
+	# Garage: a long low building with a light roof behind the haulers.
+	var gs := lot0 + lot_len * 0.5
+	var gi: int = idx_at.call(gs)
+	var gb := Basis(up, atan2(fwd[gi].x, fwd[gi].z))
+	_box("scenery", pos[gi] + right[gi] * (far + 6.0) + up * 3.0, Vector3(9.0, 6.0, lot_len * 0.8), gb, Color(0.82, 0.83, 0.86))
+	_box("scenery", pos[gi] + right[gi] * (far + 6.0) + up * 6.2, Vector3(10.0, 0.4, lot_len * 0.82), gb, Color(0.55, 0.12, 0.1))
+	# Media centre: a glass tower by start/finish.
+	var mt := pos[0] + right[0] * (iw - 70.0) + fwd[0] * 40.0
+	_box("scenery", mt + up * 11.0, Vector3(16.0, 22.0, 16.0), Basis(up, atan2(fwd[0].x, fwd[0].z)), Color(0.35, 0.45, 0.55))
+	_box("scenery", mt + up * 22.4, Vector3(17.0, 0.8, 17.0), Basis(up, atan2(fwd[0].x, fwd[0].z)), Color(0.85, 0.85, 0.88))
+	# The car park outside the backstretch: rows and rows of fans' cars.
+	var hw := width * 0.5
+	var pk0 := length * 0.42
+	var pk_len: float = min(420.0, length * 0.2)
+	var mm := MultiMesh.new()
+	mm.transform_format = MultiMesh.TRANSFORM_3D
+	mm.use_colors = true
+	var slots: Array = []
+	var s_p := pk0
+	while s_p < pk0 + pk_len:
+		var pi: int = idx_at.call(s_p)
+		for row in 8:
+			if rng.randf() < 0.18:
+				continue # an empty space
+			slots.append([pi, hw + 60.0 + row * 7.0])
+		s_p += 3.0
+	var box := BoxMesh.new()
+	box.size = Vector3(1.8, 1.45, 4.5)
+	mm.mesh = box
+	mm.instance_count = slots.size()
+	var paints := [Color(0.9, 0.9, 0.92), Color(0.08, 0.08, 0.1), Color(0.55, 0.56, 0.6), Color(0.6, 0.1, 0.1), Color(0.15, 0.25, 0.55), Color(0.75, 0.75, 0.78), Color(0.3, 0.3, 0.32)]
+	for q in slots.size():
+		var pi2: int = slots[q][0]
+		var off: float = slots[q][1]
+		var bb := Basis(up, atan2(right[pi2].x, right[pi2].z))
+		mm.set_instance_transform(q, Transform3D(bb, pos[pi2] + right[pi2] * off + up * 0.6))
+		mm.set_instance_color(q, paints[rng.randi() % paints.size()])
+	var pk_i0: int = idx_at.call(pk0 - 4.0)
+	var pk_i1: int = idx_at.call(pk0 + pk_len + 4.0)
+	var pj := pk_i0
+	while pj != pk_i1:
+		var pj2 := (pj + 1) % n
+		_quad("scenery", pos[pj] + right[pj] * (hw + 56.0) + up * -0.08, pos[pj] + right[pj] * (hw + 112.0) + up * -0.08, pos[pj2] + right[pj2] * (hw + 56.0) + up * -0.08, pos[pj2] + right[pj2] * (hw + 112.0) + up * -0.08, pave.darkened(0.1), up, up)
+		pj = pj2
+	var cm := StandardMaterial3D.new()
+	cm.vertex_color_use_as_albedo = true
+	cm.roughness = 0.35
+	cm.metallic = 0.4
+	var mmi := MultiMeshInstance3D.new()
+	mmi.multimesh = mm
+	mmi.material_override = cm
+	mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	mmi.visibility_range_end = 900.0
+	add_child(mmi)
+
+
 func _build_fence() -> void:
 	var hw := width * 0.5
 	var wall_h := 1.2
