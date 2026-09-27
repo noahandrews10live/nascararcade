@@ -10,6 +10,8 @@ config_version=5
 
 [application]
 
+config/icon="res://assets/icon.png"
+
 config/name="Speedway Thunder '99"
 config/description="A late-90s style stock car arcade racer."
 run/main_scene="res://scenes/main.tscn"
@@ -25,6 +27,8 @@ Game="*res://scripts/game.gd"
 
 [display]
 
+window/handheld/orientation=4
+
 window/size/viewport_width=640
 window/size/viewport_height=480
 window/size/window_width_override=1280
@@ -33,6 +37,8 @@ window/stretch/mode="viewport"
 window/stretch/aspect="keep"
 
 [rendering]
+
+textures/vram_compression/import_etc2_astc=true
 
 renderer/rendering_method="forward_plus"
 renderer/rendering_method.mobile="gl_compatibility"

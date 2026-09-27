@@ -69,8 +69,37 @@ Motion smoothing), and Options → VSync off gives the lowest input delay.
 | **2 Player** | Split-screen racing. Player 2 uses I/J/K/L (U to pit) or a second gamepad. |
 | **Lightning Challenges** | Eight race-defining scenarios, such as a last-lap draft, a charge from the back or saving fuel. Completing five unlocks the #00 Thunderbolt legend car. A **Daily Challenge** picks a new scenario and track each day, the same for everyone. |
 | **Paint Shop** | Create your own car: number, driver name, sponsor, body, paint scheme (classic, two-tone, swoosh, twin stripes, flames, arrow, split) and colours. You can race it in every mode. |
+| **Leaderboards** | Track records for every track, your friends' times, today's daily challenge and this week's time trial. Your 6-character friend code is here too: add friends by code and you chase each other's ghost laps in practice and qualifying. |
 | **Online** | Race friends from any phone or tablet: **HOST A RACE** gives you a 4-digit room code, friends pick **JOIN WITH A CODE** and type it. Everyone connects out to a relay (a Supabase Realtime channel for the room), so nobody needs to open a port. Full rules with an AI field: the host's race control throws the cautions and runs the pace car for everyone, each player makes their own pit call on their own screen (20 seconds, then the crew chief decides), and the whole field lines up for the restart. (A desktop can still host on its own network by address.) |
 | **Track Editor** | Build a track from straights and turns (radius, angle, banking), see it drawn live, test-drive it and save it as a mod. |
+
+## On a phone
+
+- **The garage** is home: your car on the turntable, big tiles for every mode, your level and XP.
+- **Menus are cards** you tap; a card's < > change its value, long lists drag to scroll, BACK is top left. The course and car pickers swipe, or use < > and GO.
+- **Your first race teaches you**: steering (tilt or drag), the gas, braking into the turns, the draft and the map, each prompt once you need it.
+- **AUTO GAS** (Options): the car takes each corner at a safe speed and you just steer, with one thumb (drag anywhere) or none (tilt). The brake still works.
+- **Vibration** on hits and locked wheels (Options).
+
+## Your career online
+
+The game signs you in automatically the first time (no account: a random id and secret on
+the device, and a friend code to share). It uses the game's Supabase project: reads come
+straight from read-only tables, and every write goes through one server function that
+checks who you are and that a lap time is possible.
+
+- **Leaderboards**: your best lap on each track, with its ghost, goes up as you set it.
+- **Friends' ghosts**: practice and qualifying bring your fastest friend's best lap to
+  chase (or the world record's), in orange with their name over it.
+- **Events**: today's daily challenge has a board (finishing place, then time), and each
+  week one track hosts a time trial.
+- **XP and levels** from every race (the result, the laps, a clean race, a win); paint
+  schemes unlock as you level up.
+- **Stats**: after a race the game sends its frame rate and the device type (nothing
+  personal) so it can be tuned for real phones; Options → SHARE STATS turns it off.
+
+`tests/cloud_test.gd` runs all of it against `tests/tools/fake_cloud.py`, an offline
+stand-in for the server.
 
 ## Showtime
 
@@ -279,6 +308,32 @@ godot --headless --path . --export-release Web build/web/index.html
 - **Native resolution and 120 Hz.** The game renders at the screen's full pixel count, e.g. 2868 × 1320 on a 460 ppi iPhone 16 Pro Max in landscape, so text and the HUD are always pin-sharp. The page measures the display's refresh rate (60, 90, 120 or 144 Hz) and AUTO quality aims for that frame rate.
   - Options → RESOLUTION: **AUTO** keeps native resolution and trims only the 3D scene (down to 50%) if the frame rate can't hold, then restores it when there's headroom. **NATIVE** always renders at 100%, **BALANCED** at 75%, **PERFORMANCE** at 50%. The row shows the screen size, refresh rate and current 3D scale.
   - iPhone and iPad web apps are held to 60 Hz by iOS unless you turn off **Settings → Apps → Safari → Advanced → Feature Flags → Prefer Page Rendering Updates near 60fps**. Android Chrome runs at the full 120 Hz.
+
+## Native apps
+
+The game also exports as real Android and iOS apps: native speed (the game logic
+runs several times faster than in a browser), the full refresh rate, vibration on
+hits, and a home-screen icon.
+
+**Android:** download [`downloads/SpeedwayThunder-android.apk`](downloads/SpeedwayThunder-android.apk)
+on the phone, open it and allow installing from your browser when asked. It's a
+debug build signed with the project's debug key (`native/android/debug.keystore`),
+so later builds install over it. To build it yourself:
+```sh
+sh native/android/setup.sh          # a stand-in apksigner, SDK folder and keystore
+godot --headless --export-debug Android build/android/SpeedwayThunder.apk
+```
+The setup doesn't need the Android SDK: `apksigner` is replaced by
+`native/android/ApkSignerCli.java` on Google's `apksig` library (APK signature
+scheme v2, which every phone from Android 7 on checks). For the **Play Store**,
+create your own upload key (`keytool -genkeypair ...`), set it in the Android
+preset's release keystore fields, and export with `--export-release` (Play wants
+an Android App Bundle: turn on Gradle build in the preset, which needs the full SDK).
+
+**iOS:** on a Mac with Xcode, open the project in Godot 4.7, put your Apple team ID
+in the **iOS** preset (it holds a placeholder, `TEAMID0000`) and export. Godot
+writes an Xcode project; open it, pick your signing team and run it on your phone,
+or archive it for TestFlight and the App Store (needs an Apple Developer account).
 
 ## Install it on your phone
 

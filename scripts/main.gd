@@ -1692,7 +1692,32 @@ func _player2_input() -> void:
 var _rumble_t := [0.0, 0.0]
 
 
+var _buzz_cool := 0.0
+var _buzz_hit := 0.0
+
+
+## The phone buzzes: a pulse that scales with each hit (contact, walls, big
+## bumps) and light ticks while a wheel is locked. Short and only on events,
+## not a constant rumble, so it's felt without draining the battery.
+func _phone_haptics(p: Node3D) -> void:
+	if not Game.touch_active or int(Game.settings.get("haptics", 1)) == 0:
+		return
+	var dt := get_physics_process_delta_time()
+	_buzz_cool -= dt
+	var h := haptics(p, Time.get_ticks_msec() / 1000.0)
+	var hit: float = h.hit
+	if hit > 0.22 and hit > _buzz_hit + 0.15 and _buzz_cool <= 0.0:
+		Input.vibrate_handheld(int(30 + 90 * hit), clamp(0.35 + hit * 0.65, 0.0, 1.0))
+		_buzz_cool = 0.12
+	elif p.locked_wheels != 0 and _buzz_cool <= 0.0 and p.speed() > 8.0:
+		Input.vibrate_handheld(12, 0.3)
+		_buzz_cool = 0.14
+	_buzz_hit = move_toward(_buzz_hit, hit, dt * 3.0) if hit < _buzz_hit else hit
+
+
 func _rumble(p: Node3D, device: int) -> void:
+	if device == 0:
+		_phone_haptics(p)
 	if Input.get_connected_joypads().find(device) < 0:
 		return
 	_rumble_t[device] -= get_physics_process_delta_time()
@@ -2433,6 +2458,7 @@ func _enter_options() -> void:
 		{"id": "smooth", "label": "MOTION SMOOTHING", "values": ["OFF", "ON"], "index": 1 if Game.smoothing else 0, "hint": "SMOOTH MOTION ON 120/144 HZ SCREENS (ADDS UNDER 1 FRAME OF DELAY)"},
 		{"id": "blur", "label": "MOTION BLUR", "values": ["OFF", "LOW", "HIGH"], "index": Game.motion_blur, "hint": "DESKTOP MODERN LOOK ONLY"},
 		{"id": "wheel_setup", "label": "WHEEL SETUP", "hint": "STEERING WHEEL, PEDALS AND FORCE FEEDBACK"},
+		{"id": "haptics", "label": "VIBRATION", "values": ["OFF", "ON"], "index": int(Game.settings.get("haptics", 1)), "hint": "PHONES: A BUZZ ON HITS AND LOCKED WHEELS"},
 		{"id": "share_stats", "label": "SHARE STATS", "values": ["OFF", "ON"], "index": int(Game.settings.get("share_stats", 1)), "hint": "SENDS YOUR FRAME RATE AND DEVICE TYPE AFTER A RACE (NOTHING PERSONAL) TO HELP TUNE THE GAME"},
 		{"id": "auto_gas", "label": "GAS", "values": ["YOU", "AUTO"], "index": int(Game.settings.get("auto_gas", 0)), "hint": "AUTO: THE CAR TAKES EACH CORNER AT A SAFE SPEED, YOU STEER (ONE THUMB). BRAKE STILL WORKS"},
 		{"id": "tilt_sens", "label": "TILT STEERING", "values": ["GENTLE", "NORMAL", "QUICK", "VERY QUICK"], "index": int(Game.settings.get("tilt_sens", 1)), "hint": "PHONES: HOW FAR YOU TILT FOR FULL LOCK (18 / 12 / 9 / 6 DEGREES)"},
@@ -2525,7 +2551,7 @@ func _on_menu_changed(id: String, idx: int) -> void:
 			elif id == "tilt_sens":
 				Game.settings["tilt_sens"] = idx
 				Game.save_settings()
-			elif id == "auto_gas" or id == "share_stats":
+			elif id == "auto_gas" or id == "share_stats" or id == "haptics":
 				Game.settings[id] = idx
 				Game.save_settings()
 			elif id == "vsync":
