@@ -58,15 +58,29 @@ Motion smoothing), and Options → VSync off gives the lowest input delay.
 
 | Mode | What it is |
 |---|---|
+| **Quick Race** | Straight into a short green-flag race at a random track, no setup. |
 | **Arcade** | The 1999 cabinet game: 16 cars, a short race and a countdown clock with EXTENDED TIME each lap. |
 | **Single Race** | A full race weekend (practice, qualifying, race) with 20–40 cars and the full rules below. |
 | **Season** | A 6-, 12- or 36-race championship with points, wins and top 5s. Standings are saved between sessions. |
 | **Career** | Rookie to champion. Start underfunded, then earn prize money and reputation, sign sponsors and buy engine, aero, chassis and pit-crew R&D. It runs season after season with a career record. |
 | **2 Player** | Split-screen racing. Player 2 uses I/J/K/L (U to pit) or a second gamepad. |
-| **Lightning Challenges** | Eight race-defining scenarios, such as a last-lap draft, a charge from the back or saving fuel. Completing five unlocks the #00 Thunderbolt legend car. |
+| **Lightning Challenges** | Eight race-defining scenarios, such as a last-lap draft, a charge from the back or saving fuel. Completing five unlocks the #00 Thunderbolt legend car. A **Daily Challenge** picks a new scenario and track each day, the same for everyone. |
 | **Paint Shop** | Create your own car: number, driver name, sponsor and colours. You can race it in every mode. |
 | **Online** | Race friends over the internet or a local network. One player hosts (desktop, port 24565), others join by address. Green-flag races with an AI field. |
 | **Track Editor** | Build a track from straights and turns (radius, angle, banking), see it drawn live, test-drive it and save it as a mod. |
+
+## Showtime
+
+- **An opening.** The game starts with a race-day intro: a helicopter sweep over the speedway, the field thundering past the apron, a jet flyover and the title, all over a synthesised anthem. Press anything to skip it.
+- **The showroom.** Car select and the Paint Shop put your car on a turntable in a lit studio. It rolls in in grey primer, the paint sweeps on and the engine blips.
+- **A TV broadcast.** A running-order ticker, position bugs and battle graphics for close fights. Two booth voices (text-to-speech, can be turned off in Options) call the start, the lead changes, the wrecks, the white flag and the finish.
+- **Wreck replays.** A big crash cuts to an instant replay from the helicopter, a chase camera and the blimp, then hands back to the live race.
+- **Last-lap drama.** The last-lap music builds, the crowd stands and the camera widens. A close finish goes to slow-motion photo-finish.
+- **Victory lane.** Win and you do a burnout, then drive into victory lane for the trophy, confetti and the crew.
+- **Night racing.** Glowing brake discs, bright brake lights, and flames on lift at high revs.
+- **Ghost laps.** Your best lap at each track is saved and driven by a see-through car in practice, qualifying and time challenges.
+- **Clips.** F9 (or the CLIP button on touch) saves the last 15 seconds as a video on the web build.
+- **Racing AI.** The field drives a proper racing line (wide on entry, apex, out on exit) and races side by side. An optional catch-up setting (Race Setup) keeps the field close.
 
 ## Racing: how it models 2026 Next Gen racing
 
@@ -324,6 +338,11 @@ scripts/rain_fx.gd         water film and dry line, spray, drops on the glass
 scripts/track_wear.gd      the rubber line, marbles and wall scuffs (also drives grip)
 scripts/race_day.gd        pit crews, flagman, crowd reactions, fireworks, burnout
 scripts/touch_controls.gd  phone/tablet controls: tilt or drag steering, pedals, menu pad
+scripts/car_body.gd        the four car bodies (lofted meshes, LODs, lights, flames)
+scripts/showtime.gd        intro, showroom, TV package, commentary, wreck replays,
+                           last lap, photo finish, victory lane
+scripts/music.gd           the synthesised score (anthem, menu, last lap, victory)
+scripts/ghost.gd           best-lap ghost recording and playback
 tests/                     headless test benches and screenshot scripts (see below)
 ```
 
@@ -362,6 +381,10 @@ All tests run headless (`godot --headless --fixed-fps 60 --path . -s <script>`):
 | `tests/career_test.gd` | Career money, R&D, season rollover |
 | `tests/challenge_test.gd` | Every Lightning Challenge reaches a verdict |
 | `tests/tracks_test.gd` | Every track builds and laps cleanly |
+| `tests/makes_test.gd` | The four bodies and the even split across the field |
+| `tests/engine_sound_test.gd` | The V8 note follows rpm, and pops on lift |
+| `tests/fit_test.gd` | Menus and HUD fit phone, tablet and ultrawide screens |
+| `tests/shots_wow.gd` | Intro, showroom, TV race, wreck replay and victory lane (screenshots with `OUT=dir`) |
 | `tests/split_shots.gd` | Two-player race (screenshot with `OUT=dir` and a renderer) |
 
 `tests/screenshots.gd`, `tests/menu_shots.gd` and `tests/replay_shots.gd` capture
