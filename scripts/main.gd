@@ -321,8 +321,9 @@ func _apply_graphics() -> void:
 		env.ambient_light_source = Environment.AMBIENT_SOURCE_SKY
 		env.ambient_light_energy = 1.0 if not night else 0.6
 		env.reflected_light_source = Environment.REFLECTION_SOURCE_SKY
-		env.tonemap_mode = Environment.TONE_MAPPER_ACES
-		env.tonemap_exposure = 1.0 if not night else 1.3
+		# AgX: a filmic curve, closer to how a camera sees a sunny track than ACES.
+		env.tonemap_mode = Environment.TONE_MAPPER_AGX
+		env.tonemap_exposure = 1.12 if not night else 1.45
 		env.tonemap_white = 6.0
 		env.ssao_enabled = true
 		env.ssao_radius = 1.2

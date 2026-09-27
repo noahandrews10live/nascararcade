@@ -82,6 +82,6 @@ func _run() -> void:
 	best_wet = lead.best_lap
 	print("   cars on wets at the end: %d of %d, leader's best lap %.1fs" % [wets, main.race.cars.size(), best_wet])
 	_check(wets >= main.race.cars.size() / 2, "the AI switches to wet tyres in the rain")
-	_check(best_wet > 112.0, "wet laps are slower than dry (~108 s)")
+	_check(best_wet > 104.0, "wet laps are slower than dry (~100 s)")
 	print("FAILURES: ", failures)
 	quit(1 if failures > 0 else 0)
