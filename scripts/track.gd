@@ -6,6 +6,11 @@ extends Node3D
 const STEP := 3.0 # metres between centre line samples
 const G := 9.81
 const CAR_MASS := 1600.0
+## Peak grip of a Goodyear Eagle racing slick at nominal load (the car and the
+## AI's speed plan both use it).
+const TYRE_MU := 1.35
+## How fast relative grip falls as a tyre is loaded up: mu ~ load^-LOAD_SENS.
+const LOAD_SENS := 0.16
 const PIT_LANE_EXT := 170.0 # entry / exit lanes beyond the pit road itself
 
 var cfg: Dictionary
@@ -475,7 +480,7 @@ func corner_speed(i: int, mu0: float, cla_v: float) -> float:
 		var u := (lo + hi) * 0.5
 		var nz: float = CAR_MASS * (G * cos(b) + u * u * k * sin(b)) + 0.5 * 1.2 * cla_v * u * u * 0.95
 		nz = max(nz, CAR_MASS * 2.0)
-		var mu_e: float = mu0 * pow(nz / (CAR_MASS * G), -0.3)
+		var mu_e: float = mu0 * pow(nz / (CAR_MASS * G), -LOAD_SENS)
 		var need: float = abs(u * u * k * cos(b) - G * sin(b))
 		if need <= mu_e * nz / CAR_MASS * 0.96:
 			lo = u
@@ -490,7 +495,7 @@ func _build_profile() -> void:
 	var seg := length / n
 	var cla_v: float = cfg.get("cla", 2.2)
 	for i in n:
-		speed_profile[i] = corner_speed(i, 1.0, cla_v)
+		speed_profile[i] = corner_speed(i, TYRE_MU, cla_v)
 	var decel := 10.5 # what the cars can really brake at (four-tyre model), with margin
 	for _pass in 2:
 		for idx in range(n - 1, -1, -1):

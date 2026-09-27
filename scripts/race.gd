@@ -653,7 +653,7 @@ func _drive_ai(c: Node3D, delta: float) -> void:
 	var ss: float = c.s()
 	var k: float = track.curvature_at(ss)
 	var look: float = max(c.v, 0.0) * 0.7
-	var grip_scale: float = sqrt(c.mu * c.tyre_grip() * c._track_grip) * lerp(0.92, 1.0, c.df_front_mult)
+	var grip_scale: float = sqrt(c.mu / track.TYRE_MU * c.tyre_grip() * c._track_grip) * lerp(0.92, 1.0, c.df_front_mult)
 	var target: float = track.profile_at(ss + look) * grip_scale * c.ai_skill * 0.95
 	# In the wet drivers leave a margin: less feel, spray, and puddles off line.
 	target *= 1.0 - 0.05 * c._wet

@@ -76,7 +76,7 @@ var power := 708000.0 # watts at the peak (950 hp)
 var cda := 1.0
 var cla := 2.0
 var mu := 1.0
-var grip_front := 0.98 # setup balance (wedge / track bar / stagger all end up here)
+var grip_front := 1.02 # setup balance (wedge / track bar / stagger all end up here)
 var grip_rear := 1.07
 var wear_mult := 1.0 # tyre pressure trade-off
 var gear_scale := 1.0 # gearing: >1 shorter (more accel, lower top speed)
@@ -267,7 +267,7 @@ func setup(t: Dictionary, trk: Node3D) -> void:
 	cda = float(pkg.get("cda", 1.0)) / pow(float(t.get("speed", 1.0)), 0.5)
 	cla = float(pkg.get("cla", 2.2))
 	gear_track = float(pkg.get("gear", 1.0))
-	mu = 1.0 * float(t.get("handling", 1.0))
+	mu = (trk.TYRE_MU if trk else 1.35) * float(t.get("handling", 1.0))
 	# Stagger sized for the track's turns (a touch under neutral: the car pushes a
 	# little on throttle, like a real oval setup).
 	stagger = clamp(2.0 * TW / float(pkg.get("radius", 250.0)) * 0.85, 0.003, 0.045)
@@ -495,6 +495,10 @@ static func _tyre(alpha: float, stiff: float) -> float:
 	return sin(TYRE_C * atan(stiff * alpha))
 
 
+func _load_sens() -> float:
+	return track.LOAD_SENS if track else 0.16
+
+
 func _mu_eff(load_ratio: float) -> float:
 	# Tyres lose relative grip as load rises (why real cars lift at banked tracks).
 	var surf := 1.0
@@ -502,7 +506,7 @@ func _mu_eff(load_ratio: float) -> float:
 		surf = 0.5
 	elif d < track.inner_edge():
 		surf = 0.95
-	return mu * tyre_grip() * surf * pow(max(load_ratio, 0.3), -0.3)
+	return mu * tyre_grip() * surf * pow(max(load_ratio, 0.3), -_load_sens())
 
 
 ## A network update for a remote car: dist, d, yaw, v, vy, r, roll, pitch, heave,
@@ -759,14 +763,14 @@ func _integrate(h: float) -> void:
 	var cap := _cap
 	for i in 4:
 		var ratio: float = max(_nw[i] / NOMINAL_LOAD, 0.3)
-		cap[i] = mu * surf * _tyre_factor[i] * pow(ratio, -0.3) * _nw[i] * (grip_front if i < 2 else grip_rear)
+		cap[i] = mu * surf * _tyre_factor[i] * pow(ratio, -_load_sens()) * _nw[i] * (grip_front if i < 2 else grip_rear)
 	var cap_f: float = cap[0] + cap[1]
 	var cap_r: float = cap[2] + cap[3]
 
 	# --- steering (driver input, or the yaw-rate assist)
 	var steer_ramp: float = 3.5 if abs(steer_in) > abs(steer) else 6.0
 	steer = move_toward(steer, steer_in, steer_ramp * h)
-	var max_delta: float = 0.35 / (1.0 + au / 18.0)
+	var max_delta: float = 0.35 / (1.0 + au / 30.0) # enough lock to hold a tight banked turn at the limit
 	var alpha_r: float = atan2(vy - r * CG_R, au)
 	var delta_f: float
 	if assisted:
