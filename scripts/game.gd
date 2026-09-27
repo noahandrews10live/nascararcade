@@ -208,7 +208,7 @@ const PALETTE := [
 const FIRST_NAMES := ["ACE", "BILLY", "BO", "CHARLIE", "CODY", "DALE", "DUSTY", "HANK", "JESSE", "JOHNNY", "LUKE", "MAX", "RAY", "ROCKY", "SAM", "TEX", "TOMMY", "WYATT", "ZEKE", "YOU"]
 const LAST_NAMES := ["BLAZE", "BOLT", "BURNETT", "CARVER", "DAWSON", "FIELDS", "GRANGER", "HOLT", "JAMESON", "KNOX", "MCCALL", "PARKER", "RHODES", "SHELBY", "STEELE", "THORNE", "WALLACE", "WILDER", "YATES", "RACER"]
 const SPONSORS := ["THUNDER COLA", "BIG RIG TIRES", "SIZZLE BURGERS", "GATOR JUICE", "MOTORHEAD OIL", "CRUNCHY O'S", "HOG WILD BBQ", "ROCKET PARTS", "NITRO GUM", "PEAK AUTO PARTS", "RIVER BANK", "MOONSHINE ENERGY", "TITAN TOOLS", "GOLD STAR PIZZA", "VELOCITY SODA", "YOUR NAME HERE"]
-var custom := {"num": 1, "first": 0, "last": 0, "sponsor": 0, "c1": 7, "c2": 11, "cn": 2}
+var custom := {"num": 1, "first": 0, "last": 0, "sponsor": 0, "c1": 7, "c2": 11, "cn": 2, "make": 0}
 var custom_team_idx := -1
 
 
@@ -233,7 +233,7 @@ func custom_team() -> Dictionary:
 	return {
 		"num": str(custom.num), "driver": "%s %s" % [FIRST_NAMES[custom.first], LAST_NAMES[custom.last]],
 		"sponsor": SPONSORS[custom.sponsor], "c1": PALETTE[custom.c1][1], "c2": PALETTE[custom.c2][1],
-		"cn": PALETTE[custom.cn][1], "speed": 1.0, "accel": 1.0, "handling": 1.0, "custom": true,
+		"cn": PALETTE[custom.cn][1], "speed": 1.0, "accel": 1.0, "handling": 1.0, "custom": true, "make": custom.make,
 	}
 
 

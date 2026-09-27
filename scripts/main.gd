@@ -15,6 +15,7 @@ const Synth := preload("res://scripts/audio.gd")
 const Soundscape := preload("res://scripts/soundscape.gd")
 const CamFeel := preload("res://scripts/cam_feel.gd")
 const Cockpit := preload("res://scripts/cockpit.gd")
+const CarBody := preload("res://scripts/car_body.gd")
 const Atmosphere := preload("res://scripts/atmosphere.gd")
 const RainFx := preload("res://scripts/rain_fx.gd")
 const RaceDay := preload("res://scripts/race_day.gd")
@@ -964,7 +965,7 @@ func _refresh_car_select() -> void:
 	menu_labels.num.text = "#" + t.num
 	menu_labels.num.label_settings.font_color = t.c1.lightened(0.2)
 	menu_labels.driver.text = t.driver
-	menu_labels.sponsor.text = t.sponsor
+	menu_labels.sponsor.text = "%s  -  %s" % [t.sponsor, CarBody.MAKES[CarBody.make_of(t)].name]
 	var bar := func(v: float) -> String:
 		var n := int(round(clamp((v - 0.94) / 0.12, 0.0, 1.0) * 10.0))
 		return "|".repeat(n + 4) + ".".repeat(10 - n)
@@ -2478,6 +2479,7 @@ func _enter_paint_shop() -> void:
 		{"id": "first", "label": "FIRST NAME", "values": Game.FIRST_NAMES, "index": Game.custom.first},
 		{"id": "last", "label": "LAST NAME", "values": Game.LAST_NAMES, "index": Game.custom.last},
 		{"id": "sponsor", "label": "SPONSOR", "values": Game.SPONSORS, "index": Game.custom.sponsor},
+		{"id": "make", "label": "BODY", "values": ["FASTBACK", "LONG HOOD", "SPORT COUPE"], "index": Game.custom.make, "hint": "THE THREE CUP BODIES ON ONE CHASSIS: SAME SPEED, DIFFERENT LOOKS"},
 		{"id": "c1", "label": "BODY COLOR", "values": cols, "index": Game.custom.c1},
 		{"id": "c2", "label": "TRIM COLOR", "values": cols, "index": Game.custom.c2},
 		{"id": "cn", "label": "NUMBER COLOR", "values": cols, "index": Game.custom.cn},

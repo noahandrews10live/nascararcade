@@ -25,6 +25,13 @@ audio. The project has no imported assets.
     exhausts and ten-spoke wheels with brake discs, in each team's two-tone
     livery; the body crumples where it's hit (`tests/shots_showroom.gd` renders
     it on its own);
+  - three bodies on that chassis, as Cup's makes each run their own (unbranded):
+    **FASTBACK** (sloping fastback roof, louvred back glass, three-bar tail lamps,
+    shark nose), **LONG HOOD** (long low hood, thin angular headlights, gills behind
+    the front wheels, split tail lamps, quad centre exhausts) and **SPORT COUPE**
+    (double-bubble roof, swollen haunches, low pointed nose, a slim full-width tail
+    light, big corner intakes). Same speed; teams are spread across the three and
+    you pick yours in the Paint Shop (BODY);
   - race-track asphalt generated stone by stone (grey aggregate in dark binder, sealed
     cracks, a bump map so the stones catch the light) at a real asphalt brightness,
     plus grass and concrete textures with normal maps;

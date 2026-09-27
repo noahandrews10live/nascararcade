@@ -89,7 +89,7 @@ func _run() -> void:
 		_check(not c.spinning and c.total_damage() < 0.05, "clean run")
 		var tt: PackedFloat32Array = c.tyre_temp
 		_check(tt[1] + tt[3] > tt[0] + tt[2], "right-side tyres run hotter (ovals turn left)")
-		_check(tt[1] > 70.0 and tt[1] < 150.0, "right front is in its working window (70-150 C)")
+		_check(tt[1] > 70.0 and tt[1] < 165.0, "right front is in its working window (70-165 C; Bristol right sides run ~300-330 F)")
 		race.free()
 		t.free()
 	_wreck_tests(game)

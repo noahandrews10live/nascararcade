@@ -40,7 +40,7 @@ func _run() -> void:
 	world.add_child(floor)
 	var car := Node3D.new()
 	world.add_child(car)
-	var team := {"c1": Color(0.53, 0.75, 0.88), "c2": Color(0.53, 0.75, 0.88), "cn": Color(0.53, 0.75, 0.88), "num": "", "sponsor": ""}
+	var team := {"c1": Color(0.07, 0.07, 0.08), "c2": Color(0.07, 0.07, 0.08), "cn": Color(0.07, 0.07, 0.08), "num": "", "sponsor": "", "make": int(OS.get_environment("MAKE")) if OS.get_environment("MAKE") != "" else 0}
 	var CB = load("res://scripts/car_body.gd")
 	var info = CB.build(car, team, car)
 	if OS.get_environment("DENT") == "1":
@@ -56,6 +56,6 @@ func _run() -> void:
 		for i in 6:
 			await process_frame
 		await RenderingServer.frame_post_draw
-		root.get_texture().get_image().save_png(out.path_join("show_" + k + ".png"))
+		root.get_texture().get_image().save_png(out.path_join("show%s_%s.png" % [OS.get_environment("MAKE"), k]))
 		print("saved ", k)
 	quit(0)

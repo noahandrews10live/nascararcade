@@ -32,8 +32,36 @@ const NC := 13 # control points round each half cross-section
 const TYRE := [[0.238, -0.149], [0.262, -0.159], [0.292, -0.167], [0.321, -0.163], [0.339, -0.149], [0.348, -0.126], [0.3505, -0.08], [0.351, 0.0], [0.3505, 0.08], [0.348, 0.126], [0.339, 0.149], [0.321, 0.163], [0.292, 0.167], [0.262, 0.159], [0.238, 0.149]]
 const RIM := [[0.236, -0.149], [0.229, -0.142], [0.222, -0.12], [0.221, 0.02], [0.224, 0.1], [0.229, 0.138], [0.235, 0.148]]
 
+# The three bodies, as Cup's makes each put their own nose, roof and tail on the
+# same chassis (unbranded, styled after a fastback pony car, a long-hood V8
+# coupe and a Japanese sports coupe). Each changes the study's tables above.
+const MAKES := [
+	{"name": "FASTBACK", "yt": {3: 1.0, 8: 0.64, 9: 0.52, 10: 0.40}, "yl": {}, "flare": 0.035},
+	{"name": "LONG HOOD", "yt": {4: 1.23, 5: 1.23, 6: 0.82, 7: 0.74, 8: 0.58, 9: 0.43, 10: 0.31}, "yl": {7: 0.79, 8: 0.59, 9: 0.44, 10: 0.31}, "flare": 0.04},
+	{"name": "SPORT COUPE", "yt": {1: 0.93, 3: 0.96, 4: 1.27, 9: 0.43, 10: 0.30}, "yl": {9: 0.44, 10: 0.30}, "flare": 0.06},
+]
+
 # Shared by every car (they don't depend on the team): built once.
 static var _shared := {}
+# The make being built (-1 = the plain study, used for the chassis and cage).
+static var _mk := -1
+
+
+## Which body a team runs: its own choice, or spread across the field by number.
+static func make_of(team: Dictionary) -> int:
+	if team.has("make"):
+		return clampi(int(team.make), 0, MAKES.size() - 1)
+	return posmod(hash(String(team.get("num", "0"))), MAKES.size())
+
+
+static func _table(base: Array, key: String) -> Array:
+	if _mk < 0:
+		return base
+	var t := base.duplicate()
+	var over: Dictionary = MAKES[_mk][key]
+	for i in over:
+		t[i] = over[i]
+	return t
 
 
 ## Study coordinates -> car space.
@@ -64,14 +92,15 @@ static func _flare(x: float) -> float:
 
 ## The cross-section at x: heights and the half widths of its parts.
 static func sec(x: float) -> Dictionary:
-	var yt := _cr(YT, x)
+	var yt := _cr(_table(YT, "yt"), x)
 	var yb := _cr(YB, x)
 	var hw := _cr(HW, x)
 	var fl := _flare(x)
-	var yl := _cr(YL, x) + 0.03 * fl
+	var yl: float = min(_cr(_table(YL, "yl"), x), yt) + 0.03 * fl
 	var gh: float = clamp((yt - yl) / 0.12, 0.0, 1.0) # 1 where there's a greenhouse
 	var hw_s := hw - 0.02 + 0.02 * fl
-	return {"yt": yt, "yb": yb, "hw": hw, "yl": yl, "gh": gh, "hw_l": hw - 0.015, "hw_m": hw + 0.035 * fl, "hw_s": hw_s,
+	var flare_w: float = 0.035 if _mk < 0 else float(MAKES[_mk].flare)
+	return {"yt": yt, "yb": yb, "hw": hw, "yl": yl, "gh": gh, "hw_l": hw - 0.015, "hw_m": hw + flare_w * fl, "hw_s": hw_s,
 		"rw": hw * 0.75 * (1.0 - gh) + 0.66 * gh, "gw": (hw_s - 0.1) * (1.0 - gh) + 0.82 * gh}
 
 
@@ -253,7 +282,7 @@ static func _loft(xs: PackedFloat32Array, seg: int) -> Dictionary:
 ## carbon, glass, net), each with just the vertices it uses. Built once; every
 ## car shares it and only adds its colours (and its dents).
 static func _lod_data(level: int) -> Dictionary:
-	var key := "lod%d" % level
+	var key := "lod%d_%d" % [level, _mk]
 	if _shared.has(key):
 		return _shared[key]
 	var lv: Array = [[0.08, 0.035, 6], [0.16, 0.09, 2]][level]
@@ -333,6 +362,11 @@ static func build(root: Node3D, team: Dictionary, wheels_parent: Node3D) -> Dict
 	var mats := [paint, carbon, glass, _net_mat()]
 
 	# The body: a fine mesh up close, a coarse one further away.
+	var mk := make_of(team)
+	if not _shared.has("wells"):
+		_mk = -1
+		_build_base()
+	_mk = mk
 	var lods := []
 	for level in 2:
 		var data := _lod_data(level)
@@ -349,19 +383,23 @@ static func build(root: Node3D, team: Dictionary, wheels_parent: Node3D) -> Dict
 		root.add_child(mi)
 		lods.append({"data": data, "mi": mi, "mats": mats, "cols": cols})
 
-	# Trim, wheel wells, lights and the cage inside: the same for every car.
-	if not _shared.has("trim"):
-		_build_shared()
-	var trim := _instance(root, _shared.trim, carbon)
+	# Trim, wheel wells, lights and the cage inside: the same for every car of a make.
+	var key := "make%d" % mk
+	if not _shared.has(key):
+		_shared[key] = _build_make(mk)
+	var parts: Dictionary = _shared[key]
+	var trim := _instance(root, parts.trim, carbon)
 	trim.visibility_range_end = 0.0
 	var wells := StandardMaterial3D.new()
 	wells.albedo_color = Color(0.03, 0.03, 0.035)
 	wells.roughness = 1.0
 	wells.cull_mode = BaseMaterial3D.CULL_DISABLED
 	_instance(root, _shared.wells, wells)
-	_instance(root, _shared.head, Game.make_mat("light", Color(0.55, 0.55, 0.52))).visibility_range_end = 120.0
-	_instance(root, _shared.tail, Game.make_mat("light", Color(0.55, 0.04, 0.03))).visibility_range_end = 120.0
-	_instance(root, _shared.pipes, Game.make_mat("chrome", Color(0.62, 0.62, 0.64))).visibility_range_end = 60.0
+	_instance(root, parts.head, Game.make_mat("light", Color(0.55, 0.55, 0.52))).visibility_range_end = 120.0
+	var tail_mat := Game.make_mat("light", Color(0.75, 0.01, 0.01))
+	tail_mat.emission_energy_multiplier = 1.3 # (brighter just washes out to pink)
+	_instance(root, parts.tail, tail_mat).visibility_range_end = 120.0
+	_instance(root, parts.pipes, Game.make_mat("chrome", Color(0.62, 0.62, 0.64))).visibility_range_end = 60.0
 	var interior := Node3D.new()
 	interior.name = "Interior"
 	root.add_child(interior)
@@ -425,7 +463,8 @@ static func build(root: Node3D, team: Dictionary, wheels_parent: Node3D) -> Dict
 			_instance(modern, _shared["lug_" + side], lug_mat).visibility_range_end = 50.0
 			wheels.append(spinner)
 			holders.append(holder)
-	return {"lods": lods, "wheels": wheels, "holders": holders, "interior": interior, "paint": paint}
+	_mk = -1
+	return {"lods": lods, "wheels": wheels, "holders": holders, "interior": interior, "paint": paint, "make": mk}
 
 
 ## Pushes the body in where it's been hit. `damage` is the car's per-side damage.
@@ -453,47 +492,9 @@ static func dent(info: Dictionary, damage: Dictionary, _seed_v: int) -> void:
 
 ## --- Parts every car shares
 
-static func _build_shared() -> void:
-	# Carbon trim: splitter, lower grille blade, side skirts, hood vents, roof
-	# flaps, spoiler, diffuser, mirror, arch lips and panel seams.
-	var st := SurfaceTool.new()
-	st.begin(Mesh.PRIMITIVE_TRIANGLES)
-	_bx(st, Vector3(1.92, 0.02, 0.5), _g(2.3, 0.11, 0))
-	_bx(st, Vector3(1.6, 0.02, 0.12), _g(2.56, 0.11, 0))
-	_bx(st, Vector3(1.2, 0.1, 0.04), _g(2.45, 0.25, 0))
-	_bx(st, Vector3(0.9, 0.04, 0.04), _g(2.37, 0.47, 0), Vector3(-0.72, 0, 0))
-	_bx(st, Vector3(0.9, 0.02, 0.28), _g(2.52, 0.075, 0))
-	for s in [1.0, -1.0]:
-		_bx(st, Vector3(0.06, 0.09, 1.95), _g(0.04, 0.17, s * 0.985))
-		_bx(st, Vector3(0.24, 0.004, 0.42), _g(1.44, 0.803, s * 0.63))
-		for i in 6:
-			_bx(st, Vector3(0.22, 0.012, 0.022), _g(1.26 + i * 0.07, 0.81, s * 0.63), Vector3(0.5, 0, 0))
-		for x in [0.78, -0.33]:
-			_bx(st, Vector3(0.004, 0.4, 0.006), _g(x, 0.53, s * (sec(x).hw_m + 0.003)))
-		_bx(st, Vector3(0.004, 0.004, 1.95), _g(0.05, 0.28, s * (_cr(HW, 0.0) - 0.012)))
-		_bx(st, Vector3(0.015, 0.18, 0.25), _g(-2.33, 0.97, s * 0.94))
-		for ax in AXLES:
-			var lip := TorusMesh.new()
-			lip.inner_radius = ARCH_R - 0.02
-			lip.outer_radius = ARCH_R + 0.02
-			lip.rings = 40
-			lip.ring_segments = 6
-			st.append_from(lip, 0, Transform3D(Basis.from_euler(Vector3(0, 0, PI * 0.5)), _g(float(ax), WHEEL_Y - LIFT, s * (sec(float(ax)).hw_m - 0.012))))
-	_bx(st, Vector3(1.1, 0.006, 0.004), _g(0.97, 0.848, 0))
-	for x in [-0.15, -0.5]:
-		_bx(st, Vector3(0.2, 0.006, 0.28), _g(x, 1.256, 0))
-	_bx(st, Vector3(0.09, 0.04, 0.07), _g(-2.1, 0.965, 0))
-	_bx(st, Vector3(1.88, 0.15, 0.02), _g(-2.40, 0.99, 0), Vector3(0.15, 0, 0))
-	for z in [-0.6, 0.0, 0.6]:
-		_bx(st, Vector3(0.02, 0.08, 0.07), _g(-2.36, 0.92, z))
-	_bx(st, Vector3(1.7, 0.015, 0.6), _g(-2.15, 0.1, 0))
-	for z in [-0.7, -0.35, 0.0, 0.35, 0.7]:
-		_bx(st, Vector3(0.015, 0.13, 0.6), _g(-2.17, 0.17, z))
-	_bx(st, Vector3(0.06, 0.07, 0.14), _g(0.74, 0.93, -0.87))
-	_bx(st, Vector3(0.03, 0.04, 0.16), _g(0.2, sec(0.2).yt - 0.06, 0))
-	_shared.trim = st.commit()
+static func _build_base() -> void:
 	# Wheel wells: dark open drums behind the arches.
-	st = SurfaceTool.new()
+	var st := SurfaceTool.new()
 	st.begin(Mesh.PRIMITIVE_TRIANGLES)
 	for ax in AXLES:
 		for s in [1.0, -1.0]:
@@ -507,34 +508,128 @@ static func _build_shared() -> void:
 			well.cap_bottom = false
 			st.append_from(well, 0, Transform3D(Basis.from_euler(Vector3(0, 0, PI * 0.5)), _g(float(ax), WHEEL_Y - LIFT, s * 0.78)))
 	_shared.wells = st.commit()
-	# Lights: headlight decals on the nose, a tail-light bar across the back.
+	_build_interior()
+	for side in ["l", "r"]:
+		_build_wheel(side)
+
+
+## One make's own parts (built with _mk set): carbon trim fitted to its body,
+## its headlights, tail lights and exhausts.
+static func _build_make(mk: int) -> Dictionary:
+	var out := {}
+	# Carbon trim: splitter, lower grille blade, side skirts, hood vents, roof
+	# flaps, spoiler, diffuser, mirror, arch lips and panel seams.
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	_bx(st, Vector3(1.92, 0.02, 0.5), _g(2.3, 0.11, 0))
+	_bx(st, Vector3(1.6, 0.02, 0.12), _g(2.56, 0.11, 0))
+	_bx(st, Vector3(1.2, 0.1, 0.04), _g(2.45, 0.25, 0))
+	_bx(st, Vector3(0.9, 0.04, 0.04), _g(2.37, 0.47, 0), Vector3(-0.72, 0, 0))
+	_bx(st, Vector3(0.9, 0.02, 0.28), _g(2.52, 0.075, 0))
+	var hood_y: float = float(sec(1.44).yt)
+	for s in [1.0, -1.0]:
+		_bx(st, Vector3(0.06, 0.09, 1.95), _g(0.04, 0.17, s * 0.985))
+		_bx(st, Vector3(0.24, 0.004, 0.42), _g(1.44, hood_y + 0.006, s * 0.63), Vector3(0.12, 0, 0))
+		for i in 6:
+			var vx := 1.26 + i * 0.07
+			_bx(st, Vector3(0.22, 0.012, 0.022), _g(vx, float(sec(vx).yt) + 0.012, s * 0.63), Vector3(0.5, 0, 0))
+		for x in [0.78, -0.33]:
+			_bx(st, Vector3(0.004, 0.4, 0.006), _g(x, 0.53, s * (sec(x).hw_m + 0.003)))
+		_bx(st, Vector3(0.004, 0.004, 1.95), _g(0.05, 0.28, s * (_cr(HW, 0.0) - 0.012)))
+		_bx(st, Vector3(0.015, 0.18, 0.25), _g(-2.33, float(sec(-2.33).yt) + 0.07, s * 0.94))
+		for ax in AXLES:
+			var lip := TorusMesh.new()
+			lip.inner_radius = ARCH_R - 0.02
+			lip.outer_radius = ARCH_R + 0.02
+			lip.rings = 40
+			lip.ring_segments = 6
+			st.append_from(lip, 0, Transform3D(Basis.from_euler(Vector3(0, 0, PI * 0.5)), _g(float(ax), WHEEL_Y - LIFT, s * (sec(float(ax)).hw_m - 0.012))))
+	_bx(st, Vector3(1.1, 0.006, 0.004), _g(0.97, float(sec(0.97).yt) + 0.008, 0))
+	for x in [-0.15, -0.5]:
+		_bx(st, Vector3(0.2, 0.006, 0.28), _g(x, float(sec(x).yt) + 0.006, 0))
+	var deck: float = float(sec(-2.38).yt)
+	_bx(st, Vector3(0.09, 0.04, 0.07), _g(-2.1, float(sec(-2.1).yt) + 0.02, 0))
+	_bx(st, Vector3(1.88, 0.15, 0.02), _g(-2.40, deck + 0.09, 0), Vector3(0.15, 0, 0))
+	for z in [-0.6, 0.0, 0.6]:
+		_bx(st, Vector3(0.02, 0.08, 0.07), _g(-2.36, deck + 0.02, z))
+	_bx(st, Vector3(1.7, 0.015, 0.6), _g(-2.15, 0.1, 0))
+	for z in [-0.7, -0.35, 0.0, 0.35, 0.7]:
+		_bx(st, Vector3(0.015, 0.13, 0.6), _g(-2.17, 0.17, z))
+	_bx(st, Vector3(0.06, 0.07, 0.14), _g(0.74, float(sec(0.74).yl) + 0.1, -0.87))
+	_bx(st, Vector3(0.03, 0.04, 0.16), _g(0.2, float(sec(0.2).yt) - 0.06, 0))
+	# Each make's own face and tail.
+	match mk:
+		0: # FASTBACK: louvres over the back glass, a big dark grille.
+			var gx := -1.72
+			while gx < -0.85:
+				var yy: float = float(sec(gx).yt)
+				var slope: float = atan((float(sec(gx + 0.05).yt) - float(sec(gx - 0.05).yt)) / 0.1)
+				_bx(st, Vector3(1.05, 0.012, 0.05), _g(gx, yy + 0.03, 0), Vector3(-slope - 0.35, 0, 0))
+				gx += 0.12
+			_bx(st, Vector3(0.95, 0.15, 0.02), _g(2.40, 0.40, 0), Vector3(-0.35, 0, 0))
+		1: # LONG HOOD: gills behind the front wheels.
+			for s in [1.0, -1.0]:
+				for k in 3:
+					_bx(st, Vector3(0.006, 0.16 - k * 0.03, 0.035), _g(0.86 - k * 0.07, 0.55, s * (sec(0.86 - k * 0.07).hw_m + 0.003)))
+		2: # SPORT COUPE: big corner intakes, a groove down the double-bubble roof.
+			for s in [1.0, -1.0]:
+				_bx(st, Vector3(0.3, 0.17, 0.02), _g(2.36, 0.32, s * 0.6), Vector3(-0.3, s * 0.4, 0))
+			_bx(st, Vector3(0.03, 0.006, 0.9), _g(-0.35, float(sec(-0.35).yt) + 0.004, 0))
+	out.trim = st.commit()
+	# Headlights.
 	st = SurfaceTool.new()
 	st.begin(Mesh.PRIMITIVE_TRIANGLES)
 	for s in [1.0, -1.0]:
-		_bx(st, Vector3(0.36, 0.012, 0.22), _g(2.31, 0.565, s * 0.56), Vector3(-0.72, 0, 0))
-	_shared.head = st.commit()
+		match mk:
+			0:
+				_bx(st, Vector3(0.32, 0.012, 0.16), _g(2.31, 0.565, s * 0.6), Vector3(-0.72, 0, 0))
+			1:
+				_bx(st, Vector3(0.44, 0.012, 0.07), _g(2.24, float(sec(2.24).yt) + 0.004, s * 0.62), Vector3(-0.6, s * 0.25, 0))
+			2:
+				_bx(st, Vector3(0.36, 0.012, 0.09), _g(2.3, float(sec(2.3).yt) + 0.004, s * 0.6), Vector3(-0.7, s * 0.15, 0))
+			_:
+				_bx(st, Vector3(0.36, 0.012, 0.22), _g(2.31, 0.565, s * 0.56), Vector3(-0.72, 0, 0))
+	out.head = st.commit()
+	# Tail lights.
 	st = SurfaceTool.new()
 	st.begin(Mesh.PRIMITIVE_TRIANGLES)
-	_bx(st, Vector3(1.5, 0.07, 0.02), _g(-2.445, 0.5, 0))
-	_shared.tail = st.commit()
-	# Side exhausts.
+	match mk:
+		0: # three vertical bars a side
+			for s in [1.0, -1.0]:
+				for k in 3:
+					_bx(st, Vector3(0.045, 0.14, 0.02), _g(-2.445, 0.6, s * (0.44 + k * 0.08)))
+		1: # two angular lamps a side
+			for s in [1.0, -1.0]:
+				for zz in [0.36, 0.62]:
+					_bx(st, Vector3(0.2, 0.07, 0.02), _g(-2.445, 0.64, s * zz), Vector3(0, 0, s * 0.15))
+		2: # one slim bar right across
+			_bx(st, Vector3(1.6, 0.035, 0.02), _g(-2.445, 0.66, 0))
+		_:
+			_bx(st, Vector3(1.5, 0.07, 0.02), _g(-2.445, 0.5, 0))
+	out.tail = st.commit()
+	# Exhausts: the Cup car's side pipes, plus the make's tips out the back.
 	st = SurfaceTool.new()
 	st.begin(Mesh.PRIMITIVE_TRIANGLES)
 	for s in [1.0, -1.0]:
 		for x in [-0.75, -0.88]:
-			var pipe := CylinderMesh.new()
-			pipe.top_radius = 0.045
-			pipe.bottom_radius = 0.045
-			pipe.height = 0.1
-			pipe.radial_segments = 12
-			pipe.rings = 1
-			pipe.cap_top = false
-			pipe.cap_bottom = false
-			st.append_from(pipe, 0, Transform3D(Basis.from_euler(Vector3(0, 0, PI * 0.5)), _g(x, 0.2, s * 0.99)))
-	_shared.pipes = st.commit()
-	_build_interior()
-	for side in ["l", "r"]:
-		_build_wheel(side)
+			_pipe(st, _g(x, 0.2, s * 0.99), Vector3(0, 0, PI * 0.5), 0.045)
+	var tips: Array = [[-0.55, 0.55], [-0.21, -0.07, 0.07, 0.21], [-0.12, 0.12]][mk] if mk >= 0 else []
+	for z in tips:
+		_pipe(st, _g(-2.47, 0.2, z), Vector3(PI * 0.5, 0, 0), 0.04)
+	out.pipes = st.commit()
+	return out
+
+
+static func _pipe(st: SurfaceTool, p: Vector3, rot: Vector3, r: float) -> void:
+	var pipe := CylinderMesh.new()
+	pipe.top_radius = r
+	pipe.bottom_radius = r
+	pipe.height = 0.1
+	pipe.radial_segments = 12
+	pipe.rings = 1
+	pipe.cap_top = false
+	pipe.cap_bottom = false
+	st.append_from(pipe, 0, Transform3D(Basis.from_euler(rot), p))
 
 
 ## What you see through the glass: floor, bulkhead, dash, the seat and the cage.
