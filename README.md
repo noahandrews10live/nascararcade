@@ -8,9 +8,12 @@ Modern mode:
 
 ![Title screen](docs/title.png) ![Racing](docs/race.png)
 
-A stock car racing game built in **Godot 4.7**. It has the feature set of the classic
-NASCAR console games of the early 2000s, with racing modelled on 2026 Next Gen Cup cars.
-It also keeps its roots as a 1999 arcade cabinet racer.
+A stock car racing game for **phones and tablets**, built in **Godot 4.7** and played in
+the browser or installed to the home screen (see [Install it on your phone](#install-it-on-your-phone)).
+It has the feature set of the classic NASCAR console games of the early 2000s, with racing
+modelled on 2026 Next Gen Cup cars, and keeps its roots as a 1999 arcade cabinet racer.
+Tilt or drag to steer; everything is designed touch-first. (Keyboard, gamepad, wheel and
+desktop support are still in the code, but they're no longer the focus.)
 
 Everything is generated at runtime: tracks, grandstands, cars, the HUD and the synth
 audio. The project has no imported assets.
@@ -245,18 +248,12 @@ Motion smoothing), and Options → VSync off gives the lowest input delay.
 
 ## Running
 
-**Windows, no install:** download
-[`downloads/SpeedwayThunder-windows.zip`](downloads/SpeedwayThunder-windows.zip),
-unzip it and double-click `SpeedwayThunder.exe`. The exe isn't code-signed, so Windows
-SmartScreen may warn you: click **More info → Run anyway**.
+**Play:** open the game on your phone or tablet (see [Install it on your phone](#install-it-on-your-phone)).
 
-**Any platform, from source:**
+**From source (development):**
 
-1. Install [Godot 4.7+](https://godotengine.org/download). The standard build is fine; you don't need .NET. The full Modern effects need a Vulkan (or Direct3D 12) capable GPU; on older machines, launch with `godot --path . --rendering-method gl_compatibility` for the lighter version.
-2. Open `project.godot` in the editor and press **F5**, or run from the command line:
-   ```sh
-   godot --path .
-   ```
+1. Install [Godot 4.7+](https://godotengine.org/download). The standard build is fine; you don't need .NET.
+2. Open `project.godot` in the editor and press **F5**, or run `godot --path .`. The phone layout is easiest to check with the window sized like a phone; `tests/fit_test.gd` does this for many devices.
 
 ### Web build
 

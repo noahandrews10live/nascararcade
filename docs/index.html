@@ -251,7 +251,7 @@
 <script src="index.js"></script>
 <script>
   (function () {
-    const config = {"args":[],"canvasResizePolicy":2,"emscriptenPoolSize":8,"ensureCrossOriginIsolationHeaders":false,"executable":"index","experimentalVK":false,"fileSizes":{"index.pck":3649212,"index.wasm":39513091},"focusCanvas":true,"gdextensionLibs":[],"godotPoolSize":4,"serviceWorker":"index.service.worker.js"};
+    const config = {"args":[],"canvasResizePolicy":2,"emscriptenPoolSize":8,"ensureCrossOriginIsolationHeaders":false,"executable":"index","experimentalVK":false,"fileSizes":{"index.pck":3685848,"index.wasm":39513091},"focusCanvas":true,"gdextensionLibs":[],"godotPoolSize":4,"serviceWorker":"index.service.worker.js"};
     config.canvasResizePolicy = 2; // the canvas follows the window: full screen at any size
     const $ = function (id) { return document.getElementById(id); };
     const overlay = $("overlay"), startBtn = $("start"), meter = $("meter"), bar = $("bar");
@@ -261,6 +261,11 @@
     const install = $("install"), installBtn = $("install-btn"), installText = $("install-text");
     const touchDevice = window.matchMedia("(hover: none) and (pointer: coarse)").matches || navigator.maxTouchPoints > 1;
     const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+    // A tablet: a touch screen whose short side is at least 600 CSS pixels.
+    // (iPad Safari says it's a Mac, so iPads are found by touch points.)
+    const isTablet = touchDevice && Math.min(screen.width, screen.height) >= 600;
+    window.stTouch = touchDevice;
+    window.stTablet = isTablet;
     const installed = window.matchMedia("(display-mode: fullscreen), (display-mode: standalone)").matches || navigator.standalone === true;
 
     // --- Full screen and landscape. An installed app is already full screen; in
@@ -269,7 +274,7 @@
     const canFullscreen = !installed && !!(document.fullscreenEnabled || document.webkitFullscreenEnabled);
     if (!canFullscreen) fsChoice.hidden = true;
     function lockLandscape() {
-      if (touchDevice && screen.orientation && screen.orientation.lock) {
+      if (touchDevice && !isTablet && screen.orientation && screen.orientation.lock) {
         screen.orientation.lock("landscape").catch(function () {});
       }
     }
@@ -350,7 +355,14 @@
             a.click();
             setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 5000);
           };
-          if (navigator.canShare && navigator.canShare({ files: [file] })) {
+          if (window.claude && window.claude.use) {
+            // Hosted on claude.ai: the page can't download by itself; the host
+            // asks the viewer to save the clip instead.
+            window.claude.use("downloads").then(function (d) {
+              if (!d) throw new Error("no downloads here");
+              return d.save({ filename: name, data: blob });
+            }).catch(function (e) { console.log("clip save:", e && (e.code || e.message)); });
+          } else if (navigator.canShare && navigator.canShare({ files: [file] })) {
             navigator.share({ files: [file], title: "Speedway Thunder" }).catch(save);
           } else {
             save();
@@ -387,11 +399,11 @@
       setInterval(readSafe, 1000);
     })();
 
-    // --- Portrait: phones race sideways only. The game reads window.stPortrait
-    // and pauses the race.
+    // --- Portrait: phones race sideways only (the game reads window.stPortrait
+    // and pauses the race). Tablets have room to race either way up.
     window.stPortrait = false;
     function checkRotate() {
-      const portrait = touchDevice && window.innerHeight > window.innerWidth;
+      const portrait = touchDevice && !isTablet && window.innerHeight > window.innerWidth;
       window.stPortrait = portrait;
       rotate.hidden = !portrait;
     }
