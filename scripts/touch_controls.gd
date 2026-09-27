@@ -5,7 +5,7 @@ extends Control
 ## Racing:
 ##   - steering by tilting the device like a wheel (when the browser gives us the
 ##     motion sensor), or by dragging a thumb left/right anywhere on the left side;
-##   - big GAS and BRAKE pedals on the right, pressure-free (press = full);
+##   - round GAS (green) and BRAKE (red) pedals on the right, pressure-free (press = full);
 ##   - small buttons for pause, camera, pit and switching tilt/drag steering.
 ## Menus, results and replays: a D-pad and A (select) / B (back) buttons.
 ##
@@ -75,16 +75,21 @@ func _read_tilt() -> void:
 			_tilt_center = _tilt_value # first reading: however it's held is straight
 
 
+## Radius of the round GAS and BRAKE pedals.
+const PEDAL_R := 38.0
+
+
 func _layout() -> void:
 	var sz := get_viewport_rect().size
 	var W := sz.x
 	var H := sz.y
 	_buttons.clear()
 	if _racing():
-		var pedal_top := H * 0.36
-		var pedal_h := H * 0.36
-		_buttons.append([Rect2(W - 118, pedal_top, 108, pedal_h), "GAS", "accelerate", "gas"])
-		_buttons.append([Rect2(W - 232, pedal_top + pedal_h * 0.3, 104, pedal_h * 0.7), "BRAKE", "brake", "brake"])
+		# Round pedals under the right thumb: green GAS, red BRAKE just to its left.
+		var gas_c := Vector2(W - 20 - PEDAL_R, H * 0.54)
+		var brake_c := gas_c + Vector2(-PEDAL_R * 2.0 - 22.0, PEDAL_R * 0.5)
+		_buttons.append([Rect2(gas_c - Vector2.ONE * PEDAL_R, Vector2.ONE * PEDAL_R * 2.0), "GAS", "accelerate", "gas"])
+		_buttons.append([Rect2(brake_c - Vector2.ONE * PEDAL_R, Vector2.ONE * PEDAL_R * 2.0), "BRAKE", "brake", "brake"])
 		var x := W - 58.0
 		_buttons.append([Rect2(x, 96, 48, 34), "II", "pause", "tap"])
 		_buttons.append([Rect2(x, 136, 48, 34), "CAM", "camera", "tap"])
@@ -261,11 +266,15 @@ func _draw() -> void:
 		for f in _fingers.values():
 			if f.get("action", "") == b[2]:
 				pressed = true
+		if b[3] == "gas" or b[3] == "brake":
+			var hue := Color(0.15, 0.85, 0.3) if b[3] == "gas" else Color(0.95, 0.15, 0.12)
+			var c := r.get_center()
+			var rad := r.size.x * 0.5 * (0.94 if pressed else 1.0)
+			draw_circle(c, rad, Color(hue, 0.75 if pressed else 0.45))
+			draw_arc(c, rad, 0, TAU, 48, Color(hue.lightened(0.5), 0.9), 3.0, true)
+			draw_string(_font, Vector2(r.position.x, c.y + 5.0), String(b[1]), HORIZONTAL_ALIGNMENT_CENTER, r.size.x, 14, Color(1, 1, 1, 0.9))
+			continue
 		var col := Color(1, 1, 1, 0.28 if pressed else 0.14)
-		if b[3] == "gas":
-			col = Color(0.3, 1.0, 0.4, 0.42 if pressed else 0.2)
-		elif b[3] == "brake":
-			col = Color(1.0, 0.3, 0.25, 0.42 if pressed else 0.2)
 		draw_rect(r, col)
 		draw_rect(r, Color(1, 1, 1, 0.45), false, 2.0)
 		var fs := 18 if r.size.y > 40 else 12
