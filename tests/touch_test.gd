@@ -69,7 +69,8 @@ func _run() -> void:
 	await _frames(20)
 	print("   state %s -> %s" % [state0, main.state])
 	_check(main.state != state0, "tapping the title screen moves on")
-	# --- a race
+	# --- a race (with the pedals: AUTO GAS off)
+	root.get_node("Game").settings["auto_gas"] = 0
 	main._use_track(1)
 	main._enter_track_select()
 	main._enter_car_select()
