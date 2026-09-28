@@ -506,6 +506,7 @@
       status.textContent = msg;
       startBtn.hidden = false;
       startBtn.textContent = "Try again";
+      engine = null; // a fresh start next time
     }
 
     const missing = Engine.getMissingFeatures({ threads: false });
@@ -514,18 +515,12 @@
       startBtn.hidden = true;
     }
 
-    // The download size, from the build itself, and a head start: the engine
-    // starts downloading as soon as the page opens, while you read and tap.
+    // The download size, from the build itself.
     const sizes = config.fileSizes || {};
     const totalMB = Object.keys(sizes).reduce(function (a, k) { return a + (sizes[k] || 0); }, 0) / 1048576;
     let engine = null;
-    let early = null;
-    if (!missing.length) {
-      if (totalMB > 0) blurb.textContent = "Tap start to play (a " + Math.round(totalMB) + " MB download the first time, then it's kept on this device). Sound starts after you tap.";
-      try {
-        engine = new Engine(config);
-        early = engine.init().catch(function () { early = null; });
-      } catch (e) { engine = null; }
+    if (!missing.length && totalMB > 0) {
+      blurb.textContent = "Tap start to play (a " + Math.round(totalMB) + " MB download the first time, then it's kept on this device). Sound starts after you tap.";
     }
     startBtn.addEventListener("click", function () {
       // These need the tap itself, so they go first.
