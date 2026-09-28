@@ -206,7 +206,7 @@
 <div class="overlay" id="overlay">
   <h1>Speedway Thunder '99</h1>
   <p class="tag">Stock car racing &middot; 11 tracks &middot; 40-car fields</p>
-  <p class="blurb" id="blurb">Tap start to load the game (about 38 MB). Sound starts after you tap.</p>
+  <p class="blurb" id="blurb">Tap start to play. Sound starts after you tap.</p>
   <div class="row">
     <button class="start" id="start" type="button">Start engine</button>
     <label class="check" id="fs-choice"><input type="checkbox" id="fs-on" checked> Full screen</label>
@@ -251,7 +251,7 @@
 <script src="index.js"></script>
 <script>
   (function () {
-    const config = {"args":[],"canvasResizePolicy":2,"emscriptenPoolSize":8,"ensureCrossOriginIsolationHeaders":false,"executable":"index","experimentalVK":false,"fileSizes":{"index.pck":5740900,"index.wasm":39513091},"focusCanvas":true,"gdextensionLibs":[],"godotPoolSize":4,"serviceWorker":"index.service.worker.js"};
+    const config = {"args":[],"canvasResizePolicy":2,"emscriptenPoolSize":8,"ensureCrossOriginIsolationHeaders":false,"executable":"index","experimentalVK":false,"fileSizes":{"index.pck":5759188,"index.wasm":23009630},"focusCanvas":true,"gdextensionLibs":[],"godotPoolSize":4,"serviceWorker":"index.service.worker.js"};
     config.canvasResizePolicy = 2; // the canvas follows the window: full screen at any size
     const $ = function (id) { return document.getElementById(id); };
     const overlay = $("overlay"), startBtn = $("start"), meter = $("meter"), bar = $("bar");
@@ -266,6 +266,16 @@
     const isTablet = touchDevice && Math.min(screen.width, screen.height) >= 600;
     window.stTouch = touchDevice;
     window.stTablet = isTablet;
+    // The battery, for the game's BATTERY SAVER on AUTO (Chrome; Safari has no API).
+    window.stBattery = null;
+    if (navigator.getBattery) {
+      navigator.getBattery().then((b) => {
+        const upd = () => { window.stBattery = { level: b.level, charging: b.charging }; };
+        upd();
+        b.addEventListener("levelchange", upd);
+        b.addEventListener("chargingchange", upd);
+      }).catch(() => {});
+    }
     const installed = window.matchMedia("(display-mode: fullscreen), (display-mode: standalone)").matches || navigator.standalone === true;
 
     // --- Full screen and landscape. An installed app is already full screen; in
@@ -504,7 +514,19 @@
       startBtn.hidden = true;
     }
 
+    // The download size, from the build itself, and a head start: the engine
+    // starts downloading as soon as the page opens, while you read and tap.
+    const sizes = config.fileSizes || {};
+    const totalMB = Object.keys(sizes).reduce(function (a, k) { return a + (sizes[k] || 0); }, 0) / 1048576;
     let engine = null;
+    let early = null;
+    if (!missing.length) {
+      if (totalMB > 0) blurb.textContent = "Tap start to play (a " + Math.round(totalMB) + " MB download the first time, then it's kept on this device). Sound starts after you tap.";
+      try {
+        engine = new Engine(config);
+        early = engine.init().catch(function () { early = null; });
+      } catch (e) { engine = null; }
+    }
     startBtn.addEventListener("click", function () {
       // These need the tap itself, so they go first.
       startMotion();
@@ -518,11 +540,16 @@
       status.classList.remove("error");
       status.textContent = "Loading…";
       if (!engine) engine = new Engine(config);
+      const t0 = performance.now();
+      let seenMB = 0;
       engine.startGame({
         onProgress: function (current, total) {
           if (total > 0) {
             bar.style.width = Math.min(100, (current / total) * 100).toFixed(1) + "%";
-            status.textContent = (current / 1048576).toFixed(1) + " / " + (total / 1048576).toFixed(1) + " MB";
+            seenMB = current / 1048576;
+            // Much faster than any network: it's coming from this device.
+            const fast = seenMB > 4 && seenMB / Math.max((performance.now() - t0) / 1000, 0.05) > 60;
+            status.textContent = fast ? "Starting from this device…" : (seenMB.toFixed(1) + " / " + (total / 1048576).toFixed(1) + " MB");
           }
         }
       }).then(function () {
