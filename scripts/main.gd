@@ -991,7 +991,7 @@ func _enter_title() -> void:
 	_label("", "TILT OR DRAG TO STEER    GREEN GAS    RED BRAKE" if _touchy() else "ARROWS / WASD  STEER + GAS + BRAKE     C  CAMERA     ESC  PAUSE", 11, Color(0.85, 0.85, 0.85), Vector2(0, 420), HORIZONTAL_ALIGNMENT_CENTER, 3)
 	_label("", "FREE PLAY", 16, Color(0.3, 1.0, 0.4), Vector2(0, 446), HORIZONTAL_ALIGNMENT_CENTER, 4)
 	_label("gfx", _graphics_text(), 12, Color(0.5, 0.9, 1.0), Vector2(0, 400), HORIZONTAL_ALIGNMENT_CENTER, 3)
-	_label("", "(C)1999  THUNDER ARCADE WORKS", 11, Color(0.8, 0.8, 0.8), Vector2(0, 462), HORIZONTAL_ALIGNMENT_CENTER, 3)
+	_label("", "(C)1999  THUNDER ARCADE WORKS", 11, Color(0.8, 0.8, 0.8), Vector2(0, 462 - (6 if int(Game.settings.get("big_text", 0)) == 1 else 0)), HORIZONTAL_ALIGNMENT_CENTER, 3)
 	showtime.start_intro()
 	if not showtime.intro_active:
 		showtime.music.play("menu")
