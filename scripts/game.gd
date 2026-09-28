@@ -225,6 +225,7 @@ func save_custom() -> void:
 	for k in custom:
 		cf.set_value("car", k, custom[k])
 	cf.save(CUSTOM_PATH)
+	save_changed.emit()
 	_apply_custom()
 
 
@@ -286,6 +287,7 @@ func save_career() -> void:
 	var cf := ConfigFile.new()
 	cf.set_value("career", "data", career)
 	cf.save(CAREER_PATH)
+	save_changed.emit()
 
 
 func clear_career() -> void:
@@ -422,6 +424,7 @@ func complete_challenge(idx: int) -> bool:
 	cf.load(CHALLENGES_PATH) # keep the daily results in the same file
 	cf.set_value("done", "list", challenges_done)
 	cf.save(CHALLENGES_PATH)
+	save_changed.emit()
 	return first
 
 
@@ -455,7 +458,11 @@ func weekly_event() -> Dictionary:
 # --- progression ---------------------------------------------------------------
 
 const PROGRESS_PATH := "user://progress.cfg"
-var progress := {"xp": 0}
+var progress := {"xp": 0, "streak": 0, "best_streak": 0, "streak_day": ""}
+## Daily challenge streak: bonus XP per day in a row (up to 7 days' worth), and a
+## 7-day streak earns the CHECKERED scheme.
+const STREAK_XP := 100
+const STREAK_SCHEME_DAYS := 7
 ## What each level unlocks (the paint schemes, in order).
 const SCHEME_LEVEL := [1, 1, 2, 3, 4, 5, 6] # CLASSIC, TWO-TONE, SWOOSH, TWIN STRIPES, FLAMES, ARROW, SPLIT
 
@@ -489,13 +496,64 @@ func level() -> int:
 
 
 func scheme_unlocked(i: int) -> bool:
+	if i >= SCHEME_LEVEL.size():
+		return int(progress.get("best_streak", 0)) >= STREAK_SCHEME_DAYS
 	return level() >= int(SCHEME_LEVEL[clamp(i, 0, SCHEME_LEVEL.size() - 1)])
+
+
+## What it takes to unlock a scheme, for the paint shop.
+func scheme_needs(i: int) -> String:
+	if i >= SCHEME_LEVEL.size():
+		return "%d-DAY STREAK" % STREAK_SCHEME_DAYS
+	return "LV %d" % int(SCHEME_LEVEL[i])
 
 
 func load_progress() -> void:
 	var cf := ConfigFile.new()
 	if cf.load(PROGRESS_PATH) == OK:
 		progress.xp = int(cf.get_value("progress", "xp", 0))
+		progress.streak = int(cf.get_value("progress", "streak", 0))
+		progress.best_streak = int(cf.get_value("progress", "best_streak", 0))
+		progress.streak_day = String(cf.get_value("progress", "streak_day", ""))
+
+
+func save_progress() -> void:
+	var cf := ConfigFile.new()
+	for k in progress:
+		cf.set_value("progress", k, progress[k])
+	cf.save(PROGRESS_PATH)
+	save_changed.emit()
+
+
+## The current streak as it stands today (0 if a day was missed).
+func streak_now() -> int:
+	var last := String(progress.get("streak_day", ""))
+	if last == daily_key() or last == _day_key(-1):
+		return int(progress.get("streak", 0))
+	return 0
+
+
+## A day's key like daily_key() (local date), `offset_days` from today.
+func _day_key(offset_days: int) -> String:
+	var bias: int = int(Time.get_time_zone_from_system().get("bias", 0)) # minutes from UTC
+	var d := Time.get_date_dict_from_unix_time(int(Time.get_unix_time_from_system()) + bias * 60 + offset_days * 86400)
+	return "%04d%02d%02d" % [d.year, d.month, d.day]
+
+
+## Today's daily challenge done: the streak grows (or starts again), with bonus
+## XP. Returns {streak, xp, unlocked_scheme}.
+func add_streak_day() -> Dictionary:
+	var today := daily_key()
+	if String(progress.get("streak_day", "")) == today:
+		return {"streak": int(progress.streak), "xp": 0, "unlocked_scheme": false}
+	var had := scheme_unlocked(SCHEME_LEVEL.size())
+	progress.streak = int(progress.streak) + 1 if String(progress.get("streak_day", "")) == _day_key(-1) else 1
+	progress.streak_day = today
+	progress.best_streak = maxi(int(progress.best_streak), int(progress.streak))
+	var bonus: int = STREAK_XP * mini(int(progress.streak), STREAK_SCHEME_DAYS)
+	progress.xp = int(progress.xp) + bonus
+	save_progress()
+	return {"streak": int(progress.streak), "xp": bonus, "unlocked_scheme": not had and scheme_unlocked(SCHEME_LEVEL.size())}
 
 
 ## XP for a race: the result, the laps run, a clean race, a win. Returns
@@ -510,9 +568,7 @@ func award_race(place: int, field: int, laps: int, clean: bool) -> Dictionary:
 	if clean:
 		xp += 40
 	progress.xp = int(progress.xp) + xp
-	var cf := ConfigFile.new()
-	cf.set_value("progress", "xp", progress.xp)
-	cf.save(PROGRESS_PATH)
+	save_progress()
 	return {"xp": xp, "total": progress.xp, "level": level(), "levelled_up": level() > before}
 
 
@@ -550,6 +606,7 @@ func complete_daily() -> bool:
 	cf.load(CHALLENGES_PATH)
 	cf.set_value("daily", daily_key(), true)
 	cf.save(CHALLENGES_PATH)
+	save_changed.emit()
 	return first
 
 
@@ -585,6 +642,8 @@ var wheel := {"enabled": false, "device": 0, "steer_axis": 0, "throttle_axis": 5
 
 signal graphics_changed
 
+## A file that belongs in the cloud save changed (main passes it on to the cloud).
+signal save_changed
 var _tex := {}
 ## Photo surface textures: metres per repeat (their real size, or a little more
 ## where a small patch would tile visibly). Each is a neutral grey detail map;
@@ -782,6 +841,17 @@ func battery_saving() -> bool:
 	return false
 
 
+## After a saved game came down from the cloud: load it all again.
+func reload_saved_game() -> void:
+	records = ConfigFile.new()
+	records.load(RECORDS_PATH)
+	load_custom()
+	load_progress()
+	load_challenges()
+	load_career()
+	load_season()
+
+
 ## Cars in a race: the chosen size, or on AUTO what this device handles.
 func field_size() -> int:
 	var f := int(settings.get("field", -1))
@@ -952,6 +1022,7 @@ func save_season() -> void:
 	var cf := ConfigFile.new()
 	cf.set_value("season", "data", season)
 	cf.save(SEASON_PATH)
+	save_changed.emit()
 
 
 func clear_season() -> void:
@@ -1448,6 +1519,7 @@ func submit_record(track_idx: int, key: String, value: float) -> bool:
 		return false
 	records.set_value("track_%d" % track_idx, key, value)
 	records.save(RECORDS_PATH)
+	save_changed.emit()
 	return true
 
 

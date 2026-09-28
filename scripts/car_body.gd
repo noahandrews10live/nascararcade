@@ -348,13 +348,16 @@ static func _body_mesh(data: Dictionary, cols: PackedColorArray, pos: Array, mat
 
 ## Paint schemes: how the team's two colours (and the number colour, as a
 ## pinstripe) are laid out over the body.
-const SCHEMES := ["CLASSIC", "TWO-TONE", "SWOOSH", "TWIN STRIPES", "FLAMES", "ARROW", "SPLIT"]
+const SCHEMES := ["CLASSIC", "TWO-TONE", "SWOOSH", "TWIN STRIPES", "FLAMES", "ARROW", "SPLIT", "CHECKERED"]
+## The field's cars pick from the first seven (CHECKERED is earned: a 7-day
+## streak of daily challenges).
+const AI_SCHEMES := 7
 
 
 static func scheme_of(team: Dictionary) -> int:
 	if team.has("scheme"):
 		return int(team.scheme) % SCHEMES.size()
-	return absi(hash(String(team.get("num", "0")) + "scheme")) % SCHEMES.size()
+	return absi(hash(String(team.get("num", "0")) + "scheme")) % AI_SCHEMES
 
 
 ## Per-vertex colours for one scheme (car space: -Z is the nose, +X the right).
@@ -404,6 +407,11 @@ static func scheme_colors(sf: Dictionary, scheme: int, c1: Color, c2: Color, c3:
 			6: # split: the back half in the second colour, cut on the slant
 				if u > 0.5 + (p.y - 0.6) * 0.35:
 					c = c2
+			7: # checkered: a flag band along the lower doors and over the roof
+				var band: bool = (not top and p.y > 0.28 and p.y < 0.5) or (top and u > 0.38 and u < 0.62)
+				if band:
+					var cx := int(floor(u * 18.0)) + int(floor((p.y if not top else p.x) * 9.0 + 10.0))
+					c = c2 if cx % 2 == 0 else c3
 		cols[i] = c
 	return cols
 

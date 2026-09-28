@@ -15,6 +15,8 @@ from urllib.parse import urlparse, parse_qsl
 
 TRACK_M = [3444, 2430, 869, 4216, 3685, 2591, 1996, 853, 2028, 4522, 5198]
 players, laps, events, friends, sessions = {}, {}, {}, set(), []
+saves, transfers = {}, {}  # player id -> {"data", "updated_at"}; code -> player id
+import time
 
 
 def public(p):
@@ -30,6 +32,18 @@ def embed(row):
 
 def act(body):
     a = body.get("action")
+    if a == "claim":
+        code = str(body.get("code", "")).upper()
+        pid = transfers.pop(code, None)
+        if not pid:
+            return 404, {"error": "that code isn't valid (or has expired)"}
+        for c in [c for c, p in transfers.items() if p == pid]:
+            transfers.pop(c)
+        sec = secrets.token_hex(24)
+        players[pid]["secret_hash"] = hashlib.sha256(sec.encode()).hexdigest()
+        s = saves.get(pid)
+        return 200, {"ok": True, "id": pid, "secret": sec, "friend_code": players[pid]["friend_code"], "name": players[pid]["name"],
+                     "save": s["data"] if s else None, "saved_at": s["updated_at"] if s else None}
     if a == "register":
         sec = secrets.token_hex(24)
         pid = str(uuid.uuid4())
@@ -42,6 +56,7 @@ def act(body):
         return 401, {"error": "unknown player"}
     if a == "profile":
         me["xp"] = max(me["xp"], int(body.get("xp", 0)))
+        me["streak"] = int(body.get("streak", 0))
         me["name"] = str(body.get("name", me["name"]))[:24]
         return 200, {"ok": True, "xp": me["xp"]}
     if a == "lap":
@@ -71,6 +86,20 @@ def act(body):
     if a == "session":
         sessions.append(body)
         return 200, {"ok": True}
+    if a == "save":
+        files = {k: v for k, v in (body.get("files") or {}).items() if re.match(r"^[a-z_]{1,32}\.cfg$", k) and isinstance(v, str)}
+        now = time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime()) + ".%06dZ" % (time.time_ns() // 1000 % 1000000)
+        saves[me["id"]] = {"data": {"files": files}, "updated_at": now}
+        return 200, {"ok": True, "saved_at": now, "bytes": len(json.dumps(files))}
+    if a == "load":
+        s = saves.get(me["id"])
+        return 200, {"ok": True, "save": s["data"] if s else None, "saved_at": s["updated_at"] if s else None}
+    if a == "transfer_code":
+        for c in [c for c, p in transfers.items() if p == me["id"]]:
+            transfers.pop(c)
+        code = "".join(secrets.choice("ABCDEFGHJKLMNPQRSTUVWXYZ23456789") for _ in range(8))
+        transfers[code] = me["id"]
+        return 200, {"ok": True, "code": code}
     return 400, {"error": "unknown action"}
 
 

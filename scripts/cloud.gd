@@ -10,6 +10,11 @@ extends Node
 ##
 ## Your identity is a random id and secret made on first use, saved on the
 ## device (user://cloud.cfg), with a 6-character friend code to share.
+##
+## Cloud save: your progress, garage, career, season, challenges and records are
+## kept online too (a few seconds after they change), so a new phone can carry
+## on: the old phone makes an 8-character code, the new one enters it, and the
+## account (and its save) moves over; the old phone is signed out.
 
 signal changed # your profile or friends changed
 
@@ -28,6 +33,11 @@ var online := false # the last call got through
 var enabled := true
 var _base := URL
 var _registering := false
+## The game's files that make up a saved game (settings stay with the device).
+const SYNC_FILES := ["progress.cfg", "custom_car.cfg", "career.cfg", "season.cfg", "challenges.cfg", "records.cfg"]
+var last_sync := "" # when this device last saved online (server time)
+var _save_t := -1.0 # counting down to the next online save
+signal restored # a saved game came down and was loaded
 
 
 func _ready() -> void:
@@ -41,6 +51,7 @@ func _ready() -> void:
 		id = cf.get_value("me", "id", "")
 		secret = cf.get_value("me", "secret", "")
 		friend_code = cf.get_value("me", "code", "")
+		last_sync = cf.get_value("me", "last_sync", "")
 
 
 func registered() -> bool:
@@ -112,11 +123,7 @@ func register(done := Callable()) -> void:
 			id = String(data.id)
 			secret = String(data.secret)
 			friend_code = String(data.friend_code)
-			var cf := ConfigFile.new()
-			cf.set_value("me", "id", id)
-			cf.set_value("me", "secret", secret)
-			cf.set_value("me", "code", friend_code)
-			cf.save(SAVE)
+			_save_identity()
 			changed.emit()
 		if done.is_valid():
 			done.call(registered()))
@@ -125,7 +132,115 @@ func register(done := Callable()) -> void:
 ## Your name, number and XP (the server keeps the highest XP it has seen).
 func push_profile() -> void:
 	var t: Dictionary = Game.custom_team()
-	_act("profile", {"name": t.driver, "num": t.num, "xp": int(Game.progress.xp)})
+	_act("profile", {"name": t.driver, "num": t.num, "xp": int(Game.progress.xp), "streak": Game.streak_now()})
+	save_soon()
+
+
+func _save_identity() -> void:
+	var cf := ConfigFile.new()
+	cf.set_value("me", "id", id)
+	cf.set_value("me", "secret", secret)
+	cf.set_value("me", "code", friend_code)
+	cf.set_value("me", "last_sync", last_sync)
+	cf.save(SAVE)
+
+
+# --- cloud save -----------------------------------------------------------------------
+
+## Something worth keeping changed: save online in a few seconds (changes close
+## together go up as one).
+func save_soon() -> void:
+	if enabled:
+		_save_t = 4.0
+
+
+func _process(delta: float) -> void:
+	if _save_t >= 0.0:
+		_save_t -= delta
+		if _save_t < 0.0:
+			push_save()
+
+
+func _local_files() -> Dictionary:
+	var files := {}
+	for f in SYNC_FILES:
+		var path: String = "user://" + String(f)
+		if FileAccess.file_exists(path):
+			files[f] = FileAccess.get_file_as_string(path)
+	return files
+
+
+func push_save(done := Callable()) -> void:
+	_act("save", {"files": _local_files()}, func(ok: bool, data):
+		if ok and data is Dictionary:
+			last_sync = String(data.get("saved_at", ""))
+			_save_identity()
+		if done.is_valid():
+			done.call(ok))
+
+
+## At start-up: if another device saved since this one last did (or this one
+## never has, and has nothing yet), the online save wins; otherwise this
+## device's goes up.
+func sync(done := Callable()) -> void:
+	_act("load", {}, func(ok: bool, data):
+		if not ok or not (data is Dictionary):
+			if done.is_valid():
+				done.call(false)
+			return
+		var saved_at := String(data.get("saved_at", "")) if data.get("saved_at") != null else ""
+		var save = data.get("save")
+		if save is Dictionary and saved_at != "" and saved_at > last_sync and (last_sync != "" or int(Game.progress.xp) == 0):
+			restore(save.get("files", {}))
+			last_sync = saved_at
+			_save_identity()
+		else:
+			push_save()
+		if done.is_valid():
+			done.call(true))
+
+
+## Writes a saved game's files and loads them into the game.
+func restore(files: Dictionary) -> void:
+	for f in files:
+		if f in SYNC_FILES:
+			var fa := FileAccess.open("user://" + f, FileAccess.WRITE)
+			if fa:
+				fa.store_string(String(files[f]))
+				fa.close()
+	Game.reload_saved_game()
+	restored.emit()
+
+
+## Old phone: a one-time code to move this account to a new phone.
+## done(ok, code or error message).
+func transfer_code(done: Callable) -> void:
+	push_save(func(_ok: bool):
+		_act("transfer_code", {}, func(ok: bool, data):
+			if ok and data is Dictionary:
+				done.call(true, String(data.code))
+			else:
+				done.call(false, String(data.get("error", "COULDN'T REACH THE SERVER")).to_upper() if data is Dictionary else "COULDN'T REACH THE SERVER")))
+
+
+## New phone: take over the account the code belongs to, and its saved game.
+## done(ok, message).
+func claim(code: String, done: Callable) -> void:
+	_call(HTTPClient.METHOD_POST, "/functions/v1/st", {"action": "claim", "code": code.strip_edges().to_upper()}, func(ok: bool, data):
+		if not ok or not (data is Dictionary) or not data.has("id"):
+			done.call(false, String(data.get("error", "COULDN'T REACH THE SERVER")).to_upper() if data is Dictionary else "COULDN'T REACH THE SERVER")
+			return
+		id = String(data.id)
+		secret = String(data.secret)
+		friend_code = String(data.friend_code)
+		var save = data.get("save")
+		if save is Dictionary:
+			restore(save.get("files", {}))
+		last_sync = String(data.get("saved_at", "")) if data.get("saved_at") != null else ""
+		_save_identity()
+		changed.emit()
+		load_friends()
+		done.call(true, "WELCOME BACK, %s" % String(data.get("name", "DRIVER"))))
 
 
 # --- laps and ghosts -------------------------------------------------------------------

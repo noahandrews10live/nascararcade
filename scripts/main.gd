@@ -38,6 +38,8 @@ var resume_t := 0.0 # > 0: counting 3-2-1 back into the race after a pause
 var _bg_paused := false # paused because the app went to the background
 var _resume_label: Label
 const RESUME_PATH := "user://race_resume.cfg"
+var _code_edit: LineEdit
+var _account_note := ""
 ## A checkpoint being resumed (see _save_checkpoint), while the race is rebuilt.
 var _resume := {}
 var _ckpt_lap := -1
@@ -280,10 +282,16 @@ func _ready() -> void:
 	cloud = Cloud.new()
 	cloud.name = "Cloud"
 	add_child(cloud)
+	Game.save_changed.connect(cloud.save_soon)
+	cloud.restored.connect(func():
+		_sub("YOUR SAVED GAME IS HERE", 2.5)
+		if state == State.MODE_SELECT:
+			_enter_mode_select())
 	if cloud.enabled:
 		cloud.register(func(ok: bool):
 			if ok:
-				cloud.push_profile()
+				cloud.sync(func(_ok: bool):
+					cloud.push_profile())
 				cloud.load_friends())
 
 	var scan_layer := CanvasLayer.new()
@@ -1067,6 +1075,9 @@ func _enter_mode_select() -> void:
 	_panel(Rect2(104, 398, 180, 10), Color(0, 0, 0, 0.6))
 	_panel(Rect2(104, 398, 180.0 * float(lp[0]) / max(float(lp[1]), 1.0), 10), Color(0.3, 0.8, 1.0))
 	_label("", "%d / %d XP" % [int(lp[0]), int(lp[1])], 10, Color(0.8, 0.85, 0.9), Vector2(104, 410), HORIZONTAL_ALIGNMENT_LEFT, 3)
+	var streak := Game.streak_now()
+	if streak > 0:
+		_label("", "DAILY STREAK %d%s" % [streak, "  (DONE TODAY)" if Game.progress.get("streak_day", "") == Game.daily_key() else "  - KEEP IT GOING TODAY"], 10, Color(1.0, 0.7, 0.2), Vector2(18, 426), HORIZONTAL_ALIGNMENT_LEFT, 3)
 	_tiles.clear()
 	var x0 := 322.0
 	var y := 18.0
@@ -1402,6 +1413,14 @@ func _on_finished(car: Node3D, place: int) -> void:
 		if ok:
 			var first := Game.complete_daily() if challenge_idx < 0 else Game.complete_challenge(challenge_idx)
 			challenge_result = "CHALLENGE COMPLETE!" + ("   LEGEND UNLOCKED: #00 THUNDERBOLT" if first and Game.challenges_done.size() == 5 else "")
+			if challenge_idx < 0:
+				# The daily: keep the streak going.
+				var st: Dictionary = Game.add_streak_day()
+				if int(st.xp) > 0:
+					challenge_result += "   %d-DAY STREAK! +%d XP" % [int(st.streak), int(st.xp)]
+				if st.unlocked_scheme:
+					challenge_result += "   CHECKERED SCHEME UNLOCKED"
+				cloud.push_profile()
 		else:
 			challenge_result = "CHALLENGE FAILED"
 		if challenge.goal == "time":
@@ -2184,6 +2203,92 @@ func _update_battery(delta: float) -> void:
 		Engine.max_fps = 30 if on else 0
 
 
+# --- your account: the saved game online, and moving to a new phone ----------
+
+func _enter_account() -> void:
+	var cl: bool = cloud.enabled
+	var code_line: String = "FRIEND CODE  " + (cloud.friend_code if cloud.registered() else "(NOT ONLINE YET)")
+	var sync_line: String = "SAVED ONLINE  " + (cloud.last_sync.substr(0, 16).replace("T", " ") if cloud.last_sync != "" else "NOT YET")
+	var rows := [
+		{"id": "info", "label": code_line, "hint": "FRIENDS ADD YOU WITH THIS CODE"},
+		{"id": "save_now", "label": sync_line, "hint": "TAP TO SAVE NOW (IT ALSO SAVES BY ITSELF AFTER EACH RACE)"},
+		{"id": "give_code", "label": "MOVE TO A NEW PHONE", "hint": "GET A CODE HERE, THEN TYPE IT ON THE NEW PHONE (IT WORKS FOR 24 HOURS)"},
+		{"id": "take_code", "label": "I HAVE A CODE FROM MY OLD PHONE", "hint": "BRINGS YOUR ACCOUNT AND SAVED GAME TO THIS PHONE"},
+		{"id": "back", "label": "DONE"},
+	]
+	if not cl:
+		rows[1].hint = "OFFLINE: CLOUD SAVE NEEDS AN INTERNET CONNECTION"
+	_open_menu("account", "ACCOUNT", rows, rows.size() - 1)
+	if _account_note != "":
+		_sub(_account_note, 4.0)
+		_account_note = ""
+
+
+func _account_action(id: String) -> void:
+	match id:
+		"save_now":
+			_sub("SAVING...", 1.5)
+			cloud.push_save(func(ok: bool):
+				_sub("SAVED ONLINE" if ok else "COULDN'T REACH THE SERVER", 2.5)
+				if menu_kind == "account":
+					_enter_account())
+		"give_code":
+			_sub("GETTING A CODE...", 2.0)
+			cloud.transfer_code(func(ok: bool, text: String):
+				if ok:
+					_account_note = "YOUR CODE: %s   TYPE IT ON THE NEW PHONE WITHIN 24 HOURS" % text
+					transfer_code_shown = text
+				else:
+					_account_note = text
+				if menu_kind == "account":
+					_enter_account())
+		"take_code":
+			_ask_code()
+		"back":
+			if _code_edit:
+				_code_edit.visible = false
+			_enter_options()
+
+
+var transfer_code_shown := ""
+
+
+func _ask_code() -> void:
+	if _code_edit == null:
+		_code_edit = LineEdit.new()
+		_code_edit.position = Vector2(170, 380)
+		_code_edit.size = Vector2(300, 44)
+		_code_edit.add_theme_font_size_override("font_size", 24)
+		_code_edit.max_length = 8
+		_code_edit.alignment = HORIZONTAL_ALIGNMENT_CENTER
+		_code_edit.placeholder_text = "8-LETTER CODE"
+		_code_edit.virtual_keyboard_type = LineEdit.KEYBOARD_TYPE_DEFAULT
+		_code_edit.text_submitted.connect(_claim_code)
+		_code_edit.text_changed.connect(func(t: String):
+			var up := t.to_upper()
+			if up != t:
+				_code_edit.text = up
+				_code_edit.caret_column = up.length()
+			if up.length() == 8:
+				_claim_code(up))
+		ui_root.add_child(_code_edit)
+	_code_edit.text = ""
+	_code_edit.visible = true
+	_code_edit.grab_focus()
+
+
+func _claim_code(code: String) -> void:
+	if _code_edit:
+		_code_edit.visible = false
+	_sub("CHECKING THE CODE...", 2.0)
+	cloud.claim(code, func(ok: bool, text: String):
+		_account_note = text if ok else text
+		if ok:
+			synth.beep(1760.0, 0.2)
+		if menu_kind == "account":
+			_enter_account())
+
+
 # --- carrying on an interrupted race ----------------------------------------
 # Every lap you complete under green in a full race (Single Race, Season,
 # Career) is saved: where every car is on the track, its speed, fuel, tyres,
@@ -2744,6 +2849,7 @@ func _enter_options() -> void:
 		{"id": "commentary", "label": "COMMENTARY", "values": ["OFF", "ON"], "index": int(Game.settings.get("commentary", 1)), "hint": "THE TV BOOTH: PLAY-BY-PLAY AND ANALYST (SPOKEN WITH RADIO VOICE ON)"},
 		{"id": "vsync", "label": "VSYNC", "values": ["OFF", "ON"], "index": 1 if Game.vsync else 0, "hint": "OFF: LOWEST INPUT DELAY, MAY TEAR"},
 		{"id": "scan", "label": "SCANLINES (1999)", "values": ["OFF", "ON"], "index": 1 if Game.scanlines else 0},
+		{"id": "account", "label": "ACCOUNT + NEW PHONE", "hint": "YOUR SAVED GAME ONLINE, AND MOVING IT TO A NEW PHONE"},
 		{"id": "reset", "label": "RESET LAP RECORDS"},
 		{"id": "back", "label": "DONE"},
 	]
@@ -2791,7 +2897,7 @@ func _on_menu_changed(id: String, idx: int) -> void:
 		"paint":
 			if id == "scheme" and not Game.scheme_unlocked(idx):
 				# Locked: show what it looks like, but it isn't yours yet.
-				_sub("%s UNLOCKS AT LEVEL %d" % [CarBody.SCHEMES[idx], Game.SCHEME_LEVEL[idx]], 2.5)
+				_sub("%s UNLOCKS WITH %s" % [CarBody.SCHEMES[idx], Game.scheme_needs(idx).replace("LV ", "LEVEL ")], 2.5)
 				var keep: int = Game.custom.scheme
 				Game.custom.scheme = idx
 				_paint_preview()
@@ -2863,6 +2969,9 @@ func _on_menu_changed(id: String, idx: int) -> void:
 
 func _on_menu_activated(id: String) -> void:
 	synth.beep(1320.0, 0.06)
+	if menu_kind == "account":
+		_account_action(id)
+		return
 	if id.begins_with("up_"):
 		var key := id.substr(3)
 		if Game.buy_upgrade(key):
@@ -2939,9 +3048,12 @@ func _on_menu_activated(id: String) -> void:
 				preview_car.queue_free()
 				preview_car = null
 			_enter_mode_select()
+		"account":
+			_enter_account()
 		"reset":
 			Game.records = ConfigFile.new()
 			Game.records.save(Game.RECORDS_PATH)
+			Game.save_changed.emit()
 			_sub("RECORDS CLEARED", 2.0)
 		"back":
 			_on_menu_cancelled()
@@ -2976,6 +3088,10 @@ func _on_menu_cancelled() -> void:
 			_enter_career_hub()
 		"hub", "options":
 			_enter_mode_select()
+		"account":
+			if _code_edit:
+				_code_edit.visible = false
+			_enter_options()
 		"challenges":
 			_enter_mode_select()
 		"paint":
@@ -3174,7 +3290,7 @@ func _enter_paint_shop() -> void:
 		{"id": "last", "label": "LAST NAME", "values": Game.LAST_NAMES, "index": Game.custom.last},
 		{"id": "sponsor", "label": "SPONSOR", "values": Game.SPONSORS, "index": Game.custom.sponsor},
 		{"id": "make", "label": "BODY", "values": CarBody.MAKES.map(func(m): return m.name), "index": Game.custom.make, "hint": "FOUR BODIES ON ONE CHASSIS: SAME SPEED, DIFFERENT LOOKS"},
-		{"id": "scheme", "label": "SCHEME", "values": range(CarBody.SCHEMES.size()).map(func(i): return CarBody.SCHEMES[i] if Game.scheme_unlocked(i) else "%s (LV %d)" % [CarBody.SCHEMES[i], Game.SCHEME_LEVEL[i]]), "index": Game.custom.scheme, "hint": "HOW YOUR COLORS GO ON. RACE TO LEVEL UP AND UNLOCK MORE"},
+		{"id": "scheme", "label": "SCHEME", "values": range(CarBody.SCHEMES.size()).map(func(i): return CarBody.SCHEMES[i] if Game.scheme_unlocked(i) else "%s (%s)" % [CarBody.SCHEMES[i], Game.scheme_needs(i)]), "index": Game.custom.scheme, "hint": "HOW YOUR COLORS GO ON. RACE TO LEVEL UP AND UNLOCK MORE"},
 		{"id": "c1", "label": "BODY COLOR", "values": cols, "index": Game.custom.c1},
 		{"id": "c2", "label": "TRIM COLOR", "values": cols, "index": Game.custom.c2},
 		{"id": "cn", "label": "NUMBER COLOR", "values": cols, "index": Game.custom.cn},
