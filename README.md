@@ -184,13 +184,14 @@ stand-in for the server.
 
   Driving assists are OFF, MILD (steering help only, looser traction and ABS) or
   FULL. Gamepads rumble with scrub, bumps, locked brakes and hits.
-- **Power.** Gen-3 style, unrestricted 950 hp everywhere:
-  - superspeedways run tall gears and trimmed drag: about 208–212 mph alone and
-    215–220 mph in the draft;
+- **Power.** Gen-3 style packages by track (see above):
+  - superspeedways run 510 hp, tall gears and trimmed drag: about 183 mph alone,
+    204–209 mph in a two-car tandem and up to 215 mph in a pack
+    (`tests/draft_speed_bench.gd` drives it for real);
   - everywhere else the cars carry more drag and downforce, so they're quick off
     the corners but top out around 180–195 mph.
 - **Drafting.**
-  - Superspeedways: pack drafting worth about 9 mph that builds through a line of cars. A car on your bumper pushes you, and a car alongside your rear quarter slows you down (side-drafting).
+  - Superspeedways: pack drafting worth over 30 mph that builds through a line of cars and reaches a long way back, so a car that falls off the back can still catch up. A car on your bumper pushes you (a whole line outruns a lone car), and a car alongside your rear quarter slows you down (side-drafting). The AI runs nose to tail in the pack.
   - Other tracks: the draft is smaller, and a car close behind another loses front downforce in its dirty air and pushes up the track.
 - **Contact and wrecks.** Car-to-car and wall contact is resolved as physical impulses at the contact point:
   - A tap in the right rear can hook a car into a spin.

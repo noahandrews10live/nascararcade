@@ -558,6 +558,12 @@ func _aero(delta: float) -> void:
 	##   sides    - side-draft from a car at your rear quarter, and the "air wall" of
 	##              turbulent air at the edge of a line when you pull out.
 	var strength: float = float(track.cfg.draft)
+	# Superspeedways boost both: the tow (a car closing on a line gets a run) and
+	# the push (the car behind fills your wake, so a whole line outruns a lone car).
+	var tow_x: float = float(track.cfg.get("tow", 1.0))
+	var push_x: float = float(track.cfg.get("push", 1.0))
+	var push_reach: float = 3.0 * float(track.cfg.get("push_reach", 1.0)) # metres the push fades over
+	var tow_reach: float = 25.0 * float(track.cfg.get("tow_reach", 1.0)) # and the tow
 	var n := cars.size()
 	var drag := PackedFloat32Array()
 	drag.resize(n)
@@ -590,21 +596,21 @@ func _aero(delta: float) -> void:
 				var x: float = max(gap - Car.LENGTH, 0.0) # our nose to their tail
 				var sigma: float = 1.5 + 0.03 * x
 				var j: int = o.get_meta("idx", 0)
-				var core: float = exp(-x / 25.0) * exp(-(y * y) / (sigma * sigma))
+				var core: float = exp(-x / tow_reach) * exp(-(y * y) / (sigma * sigma))
 				tow = max(tow, core * (1.0 + 0.6 * draft_amt[j]))
 				dirty = max(dirty, exp(-x / 12.0) * exp(-(y * y) / 1.44))
 				# The wake's turbulent edge: pulling out of line hits a wall of air.
 				wall = max(wall, exp(-x / 8.0) * exp(-pow((y - 2.4) / 0.5, 2.0)))
 			else:
 				var xb: float = max(-gap - Car.LENGTH, 0.0) # their nose to our bumper
-				push = max(push, exp(-xb / 3.0) * exp(-(y * y)))
+				push = max(push, exp(-xb / push_reach) * exp(-(y * y)))
 				# A car beside us with its nose at our rear quarter side-drafts us: the
 				# low pressure between the cars holds us back.
 				side = max(side, exp(-pow((-gap - 2.5) / 2.0, 2.0)) * exp(-pow((y - 2.6) / 0.6, 2.0)))
 				loosen = max(loosen, exp(-xb / 4.0) * clamp((y - 0.4) / 0.6, 0.0, 1.0) * clamp((2.6 - y) / 0.6, 0.0, 1.0))
 		tow = min(tow, 1.3)
 		draft_amt[i] = tow
-		var reduction: float = tow * 0.13 * strength + push * 0.05 * strength
+		var reduction: float = min(tow * 0.13 * strength * tow_x + push * 0.05 * strength * push_x, 0.5)
 		drag[i] = (1.0 - reduction) * (1.0 + side * 0.07 * strength) * (1.0 + wall * 0.04 * strength)
 		# Dirty air matters most where the draft doesn't dominate.
 		front[i] = 1.0 - dirty * 0.38 * (1.2 - strength)
@@ -766,7 +772,7 @@ func _drive_ai(c: Node3D, delta: float) -> void:
 			if sign(c.ai_lane - c.d) == sign(side) and abs(c.ai_lane - c.d) > 0.3:
 				c.ai_lane = clamp(c.d, lanes[0], lanes[2]) # hold our line
 	# Following distance: time based, tighter where the draft rewards it.
-	var want_gap: float = max(7.0, c.v * (0.14 if drafting_track else 0.32))
+	var want_gap: float = max(7.0, c.v * (float(track.cfg.get("pack_gap", 0.14)) if drafting_track else 0.32))
 	# More room into a corner behind a slower car: it may be on old tyres and
 	# checking up (the classic way to get a wreck started).
 	if ahead and abs(k) > 0.002 and ahead.v < c.v - 1.0:
@@ -785,6 +791,10 @@ func _drive_ai(c: Node3D, delta: float) -> void:
 		# Never close faster than we could stop behind it.
 		var av: float = max(ahead.v, 0.0)
 		var match_v: float = sqrt(av * av + 2.0 * 4.5 * err) if err >= 0.0 else av + err * 0.6
+		if drafting_track and err > 0.0 and not controlled:
+			# Pack racing: close right up into the tow (the stopping-distance
+			# rule above barely lets a car gain at 190 mph).
+			match_v = max(match_v, av + min(err * 0.35, 4.0))
 		if bump_ok and ahead_gap < 8.0:
 			match_v = ahead.v + (1.6 if c.rivals.get(ahead, 0.0) > 0.6 else 1.0)
 		target = min(target, match_v)
