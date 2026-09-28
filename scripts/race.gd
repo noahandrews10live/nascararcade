@@ -141,6 +141,7 @@ func setup(trk: Node3D, player_team: int, lap_count: int, size := 25, grid: Arra
 		var tm: Dictionary = Game.teams[roster[p]].duplicate()
 		tm["make"] = makes[p]
 		c.setup(tm, track)
+		c.set_meta("team_idx", roster[p])
 		c.is_player = (player_team >= 0 and p == grid_player) or p == grid_p2
 		c.ai = not c.is_player
 		c.assisted = true

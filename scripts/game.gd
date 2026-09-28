@@ -612,7 +612,8 @@ var settings := {
 	# field: -1 = AUTO (see field_size), else an index into FIELDS.
 	"length": 1, "difficulty": 1, "field": -1, "auto_field": 0, "cautions": 1, "damage": 1, "wear": 1, "weather": 0,
 	"assists": 2, "manual": 0, "weekend": 1, "touch_tilt": true, "tilt_sens": 1, "res_mode": 0, "commentary": 1, "catchup": 0,
-	"auto_gas": 0, "tutorial_done": 0, "share_stats": 1, "haptics": 1,
+	"auto_gas": 0, "tutorial_done": 0, "share_stats": 1, "haptics": 1, "battery": 1,
+	"big_text": 0, "map_contrast": 0, "hand": 0, # accessibility: larger text, high-contrast map, left-handed controls
 }
 ## Garage setup (applied to the player's car): -3..3 balance (tight..loose),
 ## tyre pressure 0 low / 1 std / 2 high, gearing 0 short / 1 std / 2 long.
@@ -753,6 +754,32 @@ func load_settings() -> void:
 func _apply_assists() -> void:
 	assist_level = ASSIST_LEVELS[clamp(int(settings.assists), 0, 2)]
 	assists = assist_level > 0.0
+
+
+## The battery: [percent 0..100 or -1 if unknown, on battery (not charging)].
+## Only browsers that share it (Chrome, Android) say; elsewhere it's unknown.
+func battery() -> Array:
+	if OS.has_feature("web") and Engine.has_singleton("JavaScriptBridge"):
+		var b = JavaScriptBridge.eval("window.stBattery ? JSON.stringify(window.stBattery) : ''", true)
+		if b is String and b != "":
+			var d = JSON.parse_string(b)
+			if d is Dictionary:
+				return [int(round(float(d.get("level", 1.0)) * 100.0)), not bool(d.get("charging", true))]
+		return [-1, false]
+	return [-1, false] # Godot 4 has no battery API on the phone apps
+
+
+## BATTERY SAVER: OFF / AUTO (on battery at 20% or less) / ON. Saving means 30
+## frames a second instead of the screen's full rate (the race itself still
+## runs 60 steps a second, so it drives the same).
+func battery_saving() -> bool:
+	match int(settings.get("battery", 1)):
+		2:
+			return true
+		1:
+			var b := battery()
+			return b[1] and b[0] >= 0 and b[0] <= 20
+	return false
 
 
 ## Cars in a race: the chosen size, or on AUTO what this device handles.
@@ -1605,7 +1632,8 @@ func make_label(text: String, size: int, color := Color.WHITE, outline := 6) -> 
 	l.text = text
 	var ls := LabelSettings.new()
 	ls.font = arcade_font
-	ls.font_size = size
+	# LARGE TEXT: the small print grows (a 12 becomes 16); titles of 24 and up stay.
+	ls.font_size = size if int(settings.get("big_text", 0)) == 0 else int(round(size * (1.0 + max(24 - size, 0) / 36.0)))
 	ls.font_color = color
 	ls.outline_size = outline
 	ls.outline_color = Color(0, 0, 0)

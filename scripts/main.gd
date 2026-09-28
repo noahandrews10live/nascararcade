@@ -34,6 +34,15 @@ const SELECT_TIME := 20.0
 var state := State.TITLE
 var state_time := 0.0
 var paused := false
+var resume_t := 0.0 # > 0: counting 3-2-1 back into the race after a pause
+var _bg_paused := false # paused because the app went to the background
+var _resume_label: Label
+const RESUME_PATH := "user://race_resume.cfg"
+## A checkpoint being resumed (see _save_checkpoint), while the race is rebuilt.
+var _resume := {}
+var _ckpt_lap := -1
+var _battery_t := 0.0 # seconds until the battery saver looks again
+var battery_saver_on := false
 
 var tracks := {}
 var track: Node3D
@@ -119,9 +128,13 @@ const DESK_MODES := ["2p", "editor"]
 
 ## The modes on offer on this device.
 func _modes() -> Array:
+	var list: Array = MODES
 	if Game.touch_device() or Game.touch_active:
-		return MODES.filter(func(m): return not DESK_MODES.has(m[2]))
-	return MODES
+		list = MODES.filter(func(m): return not DESK_MODES.has(m[2]))
+	var ck := resume_info()
+	if not ck.is_empty():
+		list = [["RESUME RACE", "LAP %d OF %d AT %s, RUNNING %s. CARRY ON WHERE YOU LEFT OFF." % [ck.lap, ck.laps, ck.track_name, Game.ordinal(ck.place)], "resume"]] + list
+	return list
 
 
 var mode_idx := 0
@@ -234,6 +247,12 @@ func _ready() -> void:
 	pl.size = Vector2(640, 60)
 	pl.position = Vector2(0, 170)
 	pause_frame.add_child(pl)
+	_resume_label = Game.make_label("", 96, Color(1, 0.9, 0.2), 10)
+	_resume_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_resume_label.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_resume_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	_resume_label.visible = false
+	ui_layer.add_child(_resume_label)
 	pause_keys = Game.make_label("ESC  RESUME        Q  QUIT / END SESSION", 18, Color.WHITE, 5)
 	pause_keys.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	pause_keys.size = Vector2(640, 30)
@@ -744,6 +763,8 @@ func _auto_quality(delta: float) -> void:
 		return
 	_aq_cool = max(_aq_cool - delta, 0.0)
 	var hz: float = max(display_hz(), 30.0)
+	if battery_saver_on:
+		hz = 30.0 # capped on purpose: judge against 30 fps
 	var budget: float = 1.0 / min(hz, 144.0)
 	_aq_time += delta
 	_aq_frames += 1
@@ -832,6 +853,12 @@ func _new_race(player_team: int) -> void:
 	elif mode == "2p":
 		var size2: int = Game.field_size()
 		race.setup(track, player_team, Game.race_laps(Game.selected_track), size2, [], team2)
+		race.enable_rules()
+		race.control.message.connect(_on_control_message)
+		race.control.flag_changed.connect(_on_flag)
+	elif sim and session == "race" and not _resume.is_empty():
+		var roster: Array = _resume.cars.map(func(c): return int(c.team))
+		race.setup(track, player_team, int(_resume.laps), roster.size(), roster)
 		race.enable_rules()
 		race.control.message.connect(_on_control_message)
 		race.control.flag_changed.connect(_on_flag)
@@ -975,6 +1002,8 @@ func _quick_race() -> void:
 
 func _start_mode(id: String) -> void:
 	match id:
+		"resume":
+			resume_race()
 		"quick":
 			_quick_race()
 		"arcade", "race":
@@ -1185,6 +1214,10 @@ func _enter_countdown() -> void:
 	elif session == "practice":
 		lead = -60.0
 	race.grid_up(lead, PACE_SPEED)
+	_ckpt_lap = -1
+	if not _resume.is_empty():
+		_apply_resume()
+		return
 	var chase_self: bool = session in ["practice", "qualify"] or (mode == "challenge" and String(challenge.get("goal", "")) == "time")
 	if race.player:
 		ghost.begin(Game.selected_track, chase_self and split_cams.is_empty(), race.player.team)
@@ -1374,6 +1407,8 @@ func _on_finished(car: Node3D, place: int) -> void:
 		if challenge.goal == "time":
 			challenge_result += "   LAP %s" % Game.format_time(car.best_lap)
 	# XP for the race (not practice or qualifying), and how the game ran.
+	if car == race.player:
+		clear_checkpoint()
 	if session == "race" and car == race.player and mode != "2p":
 		last_award = Game.award_race(place, race.cars.size(), race.laps, car.total_damage() < 0.08)
 		cloud.push_profile()
@@ -1422,9 +1457,18 @@ func _unhandled_input(event: InputEvent) -> void:
 		return
 	if state in [State.COUNTDOWN, State.RACE, State.FINISHED]:
 		if event.is_action_pressed("pause"):
-			paused = not paused
-			pause_layer.visible = paused
+			if resume_t > 0.0:
+				_cancel_resume() # paused again during the count
+			elif paused and state == State.RACE and _count_back():
+				_start_resume()
+			else:
+				paused = not paused
+				pause_layer.visible = paused
+				_bg_paused = false
 		elif paused and event.is_action_pressed("quit_race"):
+			clear_checkpoint() # quitting on purpose: nothing to come back to
+			resume_t = 0.0
+			_resume_label.visible = false
 			paused = false
 			pause_layer.visible = false
 			if session == "practice":
@@ -1698,6 +1742,7 @@ var _rumble_t := [0.0, 0.0]
 
 
 var _buzz_cool := 0.0
+var _buzz_gear := 0
 var _buzz_hit := 0.0
 
 
@@ -1717,6 +1762,15 @@ func _phone_haptics(p: Node3D) -> void:
 	elif p.locked_wheels != 0 and _buzz_cool <= 0.0 and p.speed() > 8.0:
 		Input.vibrate_handheld(12, 0.3)
 		_buzz_cool = 0.14
+	elif p.gear != _buzz_gear and _buzz_gear > 0 and _buzz_cool <= 0.0:
+		Input.vibrate_handheld(10, 0.45) # a click through the shifter
+		_buzz_cool = 0.08
+	elif p.on_grass and p.speed() > 12.0 and _buzz_cool <= 0.0:
+		# Off the edge: a quick rhythm, faster with speed, like running over the
+		# rumble strip and onto the grass.
+		Input.vibrate_handheld(8, 0.35)
+		_buzz_cool = clamp(3.0 / p.speed(), 0.05, 0.16)
+	_buzz_gear = p.gear
 	_buzz_hit = move_toward(_buzz_hit, hit, dt * 3.0) if hit < _buzz_hit else hit
 
 
@@ -1827,7 +1881,10 @@ func _note_perf() -> void:
 	var total := 0.0
 	for f in _frame_ms:
 		total += f
-	Game.note_race_perf(race.cars.size(), _script_ms / _frame_ms.size(), total / _frame_ms.size())
+	# With the battery saver's 30 fps cap the frame time says nothing about
+	# headroom; the script time still does.
+	var frame: float = 16.7 if battery_saver_on else total / _frame_ms.size()
+	Game.note_race_perf(race.cars.size(), _script_ms / _frame_ms.size(), frame)
 
 
 ## How the game ran this race (frame rate on this device), anonymously.
@@ -2049,7 +2106,209 @@ func _on_flag(flag: String) -> void:
 			synth.beep(990.0, 0.3)
 
 
+## Phones: the race stops when the app goes to the background (a call, a
+## notification, another app) and the sound goes quiet; coming back shows the
+## pause screen, and RESUME counts 3-2-1 back in.
+func _notification(what: int) -> void:
+	match what:
+		NOTIFICATION_APPLICATION_FOCUS_OUT, NOTIFICATION_APPLICATION_PAUSED, NOTIFICATION_WM_WINDOW_FOCUS_OUT:
+			AudioServer.set_bus_mute(0, true)
+			auto_pause()
+		NOTIFICATION_APPLICATION_FOCUS_IN, NOTIFICATION_APPLICATION_RESUMED, NOTIFICATION_WM_WINDOW_FOCUS_IN:
+			AudioServer.set_bus_mute(0, false)
+
+
+## Pauses a race in progress (not online: the others race on), e.g. when the
+## app is backgrounded. Returns whether it paused.
+func auto_pause() -> bool:
+	if race == null or state not in [State.COUNTDOWN, State.RACE] or paused or mode == "online" \
+			or photo_mode or (pit_menu and is_instance_valid(pit_menu)):
+		return false
+	if resume_t > 0.0:
+		_cancel_resume()
+		return true
+	paused = true
+	pause_layer.visible = true
+	_bg_paused = true
+	return true
+
+
+## After a pause mid-race, a count back in, so you're not thrown straight into
+## a corner: always after the app was away, and on touch screens.
+func _count_back() -> bool:
+	return _bg_paused or _touchy()
+
+
+func _start_resume() -> void:
+	resume_t = 3.0
+	pause_layer.visible = false
+	_bg_paused = false
+
+
+func _cancel_resume() -> void:
+	resume_t = 0.0
+	_resume_label.visible = false
+	pause_layer.visible = true
+
+
+func _update_resume(delta: float) -> void:
+	if resume_t <= 0.0:
+		return
+	if not paused or state != State.RACE:
+		resume_t = 0.0
+		_resume_label.visible = false
+		return
+	var before := ceili(resume_t)
+	resume_t -= delta
+	if resume_t <= 0.0:
+		resume_t = 0.0
+		_resume_label.visible = false
+		paused = false
+		synth.beep(1320.0, 0.15)
+		return
+	_resume_label.visible = true
+	_resume_label.text = str(ceili(resume_t))
+	_resume_label.scale = Vector2.ONE
+	if ceili(resume_t) != before:
+		synth.beep(880.0, 0.08)
+
+
+func _update_battery(delta: float) -> void:
+	_battery_t -= delta
+	if _battery_t > 0.0:
+		return
+	_battery_t = 10.0
+	var on := Game.battery_saving()
+	if on != battery_saver_on:
+		battery_saver_on = on
+		Engine.max_fps = 30 if on else 0
+
+
+# --- carrying on an interrupted race ----------------------------------------
+# Every lap you complete under green in a full race (Single Race, Season,
+# Career) is saved: where every car is on the track, its speed, fuel, tyres,
+# damage and laps, and the race's time, cautions and stage. If the app is
+# closed or killed, the garage offers RESUME RACE, which rebuilds the race and
+# puts everyone back, then counts 3-2-1.
+
+func _checkpoint_ok() -> bool:
+	return race != null and race.control != null and race.player != null and session == "race" \
+		and mode in ["race", "season", "career"] and split_cams.is_empty() and not race.arcade
+
+
+func _maybe_checkpoint() -> void:
+	if state != State.RACE or paused or not _checkpoint_ok():
+		return
+	var p: Node3D = race.player
+	if p.lap_idx == _ckpt_lap or p.finished or p.out or p.pit_state != 0 or race.control.flag != race.control.Flag.GREEN:
+		return
+	_ckpt_lap = p.lap_idx
+	if p.lap_idx >= 1:
+		save_checkpoint()
+
+
+func save_checkpoint() -> void:
+	var cars: Array = []
+	for c in race.cars:
+		cars.append({"team": int(c.get_meta("team_idx", -1)), "dist": c.dist, "d": c.d, "v": c.v, "fuel": c.fuel,
+			"wear": c.tyre_wear, "damage": c.damage.duplicate(), "out": c.out, "why": c.out_reason,
+			"best": c.best_lap, "last": c.last_lap, "lap_start": c.lap_start_time, "led": c.laps_led,
+			"stage_pts": c.stage_points, "player": c == race.player})
+	var ctl: Node = race.control
+	var data := {"mode": mode, "track": Game.selected_track, "team": Game.selected_team, "laps": race.laps,
+		"lap": mini(race.player.lap() + 1, race.laps), "place": race.order.find(race.player) + 1,
+		"time": race.time, "cautions": ctl.caution_count, "stage": ctl.stage, "stage_results": ctl.stage_results,
+		"cars": cars, "saved": Time.get_unix_time_from_system()}
+	if race.weather:
+		data.weather = {"hour": race.weather.hour, "rain": race.weather.rain, "target": race.weather._rain_target, "wet": race.weather.wet}
+	var cf := ConfigFile.new()
+	cf.set_value("race", "data", data)
+	cf.save(RESUME_PATH)
+
+
+func clear_checkpoint() -> void:
+	if FileAccess.file_exists(RESUME_PATH):
+		DirAccess.remove_absolute(ProjectSettings.globalize_path(RESUME_PATH))
+
+
+## The saved race, if there is one: {lap, laps, track_name, place, data}.
+func resume_info() -> Dictionary:
+	if not FileAccess.file_exists(RESUME_PATH):
+		return {}
+	var cf := ConfigFile.new()
+	if cf.load(RESUME_PATH) != OK:
+		return {}
+	var d = cf.get_value("race", "data", {})
+	if not (d is Dictionary) or not d.has("cars") or int(d.get("track", -1)) < 0 or int(d.track) >= Game.tracks.size():
+		return {}
+	return {"lap": int(d.get("lap", 1)), "laps": int(d.laps), "track_name": String(Game.tracks[int(d.track)].get("name", "")), "place": int(d.get("place", 1)), "data": d}
+
+
+func resume_race() -> void:
+	var info := resume_info()
+	if info.is_empty():
+		_enter_mode_select()
+		return
+	var d: Dictionary = info.data
+	mode = String(d.mode)
+	session = "race"
+	Game.selected_team = int(d.team)
+	_use_track(int(d.track))
+	_resume = d
+	_enter_countdown()
+
+
+## After the race is rebuilt from a checkpoint: everyone back where they were,
+## then 3-2-1 and go.
+func _apply_resume() -> void:
+	var d: Dictionary = _resume
+	_resume = {}
+	race.time = float(d.time)
+	for i in min(race.cars.size(), d.cars.size()):
+		var c: Node3D = race.cars[i]
+		var s: Dictionary = d.cars[i]
+		c.pace_mode = false
+		c.dist = float(s.dist)
+		c.d = float(s.d)
+		c.ai_lane = c.d
+		c.v = float(s.v)
+		c.yaw = 0.0
+		c.fuel = float(s.fuel)
+		c.tyre_wear = float(s.wear)
+		for k in s.damage:
+			c.damage[k] = float(s.damage[k])
+		c._update_damage_visual()
+		c.out = bool(s.out)
+		c.out_reason = String(s.why)
+		c.best_lap = float(s.best)
+		c.last_lap = float(s.last)
+		c.lap_start_time = float(s.lap_start)
+		c.laps_led = int(s.led)
+		c.stage_points = int(s.stage_pts)
+		c.lap_idx = c.lap()
+		c.sync_visual()
+	var ctl: Node = race.control
+	ctl.caution_count = int(d.cautions)
+	ctl.stage = int(d.stage)
+	ctl.stage_results = d.stage_results
+	if race.weather and d.has("weather"):
+		race.weather.hour = float(d.weather.hour)
+		race.weather.rain = float(d.weather.rain)
+		race.weather._rain_target = float(d.weather.target)
+		race.weather.wet = d.weather.wet
+		race.weather.apply()
+	race._update_order()
+	race.go_green()
+	_ckpt_lap = race.player.lap_idx if race.player else -1
+	_set_state(State.RACE)
+	paused = true
+	_start_resume()
+
+
 func _process(delta: float) -> void:
+	_update_resume(delta)
+	_maybe_checkpoint()
+	_update_battery(delta)
 	if wheel and wheel.poll_detect() and state == State.MENU and menu_kind == "wheel":
 		_enter_wheel_setup()
 	if showtime:
@@ -2473,6 +2732,10 @@ func _enter_options() -> void:
 		{"id": "smooth", "label": "MOTION SMOOTHING", "values": ["OFF", "ON"], "index": 1 if Game.smoothing else 0, "hint": "SMOOTH MOTION ON 120/144 HZ SCREENS (ADDS UNDER 1 FRAME OF DELAY)"},
 		{"id": "blur", "label": "MOTION BLUR", "values": ["OFF", "LOW", "HIGH"], "index": Game.motion_blur, "hint": "DESKTOP MODERN LOOK ONLY"},
 		{"id": "wheel_setup", "label": "WHEEL SETUP", "hint": "STEERING WHEEL, PEDALS AND FORCE FEEDBACK"},
+		{"id": "big_text", "label": "LARGE TEXT", "values": ["OFF", "ON"], "index": int(Game.settings.get("big_text", 0)), "hint": "BIGGER SMALL PRINT IN MENUS AND THE RACE SCREEN"},
+		{"id": "map_contrast", "label": "MAP DOTS", "values": ["TEAM COLOURS", "HIGH CONTRAST"], "index": int(Game.settings.get("map_contrast", 0)), "hint": "HIGH CONTRAST: WHITE DOTS, THE LEADER RINGED, YOU A BLINKING SQUARE"},
+		{"id": "hand", "label": "CONTROLS", "values": ["RIGHT-HANDED", "LEFT-HANDED"], "index": int(Game.settings.get("hand", 0)), "hint": "LEFT-HANDED: PEDALS ON THE LEFT, STEER ON THE RIGHT"},
+		{"id": "battery", "label": "BATTERY SAVER", "values": ["OFF", "AUTO", "ON"], "index": int(Game.settings.get("battery", 1)), "hint": "30 FPS TO SAVE BATTERY AND HEAT.  AUTO: ON BATTERY AT 20% OR LESS"},
 		{"id": "haptics", "label": "VIBRATION", "values": ["OFF", "ON"], "index": int(Game.settings.get("haptics", 1)), "hint": "PHONES: A BUZZ ON HITS AND LOCKED WHEELS"},
 		{"id": "share_stats", "label": "SHARE STATS", "values": ["OFF", "ON"], "index": int(Game.settings.get("share_stats", 1)), "hint": "SENDS YOUR FRAME RATE AND DEVICE TYPE AFTER A RACE (NOTHING PERSONAL) TO HELP TUNE THE GAME"},
 		{"id": "auto_gas", "label": "GAS", "values": ["YOU", "AUTO"], "index": int(Game.settings.get("auto_gas", 0)), "hint": "AUTO: THE CAR TAKES EACH CORNER AT A SAFE SPEED, YOU STEER (ONE THUMB). BRAKE STILL WORKS"},
@@ -2568,6 +2831,22 @@ func _on_menu_changed(id: String, idx: int) -> void:
 				Game.save_settings()
 			elif id == "tilt_sens":
 				Game.settings["tilt_sens"] = idx
+				Game.save_settings()
+			elif id == "battery":
+				Game.settings["battery"] = idx
+				Game.save_settings()
+				_battery_t = 0.0
+			elif id == "big_text":
+				Game.settings["big_text"] = idx
+				Game.save_settings()
+				_enter_options() # rebuild the screen in the new size
+				for i in menu.rows.size():
+					if String(menu.rows[i].get("id", "")) == "big_text":
+						menu.cursor = i
+				menu._keep_cursor_visible()
+				menu._refresh()
+			elif id == "map_contrast" or id == "hand":
+				Game.settings[id] = idx
 				Game.save_settings()
 			elif id == "auto_gas" or id == "share_stats" or id == "haptics":
 				Game.settings[id] = idx
@@ -3585,15 +3864,18 @@ func _build_split() -> void:
 	var split_frame := Game.center_frame(Control.new())
 	split_layer.add_child(split_frame)
 	for i in 2:
-		var cont := SubViewportContainer.new()
-		cont.stretch = true
-		cont.position = Vector2(0, i * 241)
-		cont.size = Vector2(640, 239)
-		split_frame.add_child(cont)
+		# Each half: its own viewport, shown as a picture (no SubViewportContainer,
+		# which the trimmed web engine leaves out).
 		var vp := SubViewport.new()
 		vp.size = Vector2i(640, 239)
 		vp.audio_listener_enable_3d = false
-		cont.add_child(vp)
+		split_frame.add_child(vp)
+		var cont := TextureRect.new()
+		cont.position = Vector2(0, i * 241)
+		cont.size = Vector2(640, 239)
+		cont.stretch_mode = TextureRect.STRETCH_SCALE
+		cont.texture = vp.get_texture()
+		split_frame.add_child(cont)
 		var c := Camera3D.new()
 		c.far = 3000.0
 		c.near = 0.3

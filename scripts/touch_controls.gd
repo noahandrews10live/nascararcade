@@ -41,6 +41,12 @@ var _portrait := false # the page says the phone is upright: the race waits (pau
 
 
 func _ready() -> void:
+	Input.joy_connection_changed.connect(func(_dev: int, connected: bool):
+		if main and main.has_method("_sub"):
+			main._sub("CONTROLLER CONNECTED" if connected else "CONTROLLER DISCONNECTED", 2.0)
+		if not connected and Input.get_connected_joypads().is_empty() and Game.touch_device():
+			active = true # back to the screen
+			visible = true)
 	set_anchors_preset(Control.PRESET_FULL_RECT)
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_font = Game.arcade_font
@@ -80,6 +86,10 @@ func _read_tilt() -> void:
 const PEDAL_R := 38.0
 
 
+func _lefty() -> bool:
+	return int(Game.settings.get("hand", 0)) == 1
+
+
 func _layout() -> void:
 	# Everything stays inside the safe part of the screen (clear of a notch,
 	# rounded corners and the home bar), and is sized for thumbs: k shrinks it on
@@ -101,6 +111,10 @@ func _layout() -> void:
 		var upright := sr.size.y > sr.size.x
 		var gas_c := Vector2(R - 20.0 * k - pr, T + sr.size.y * (0.7 if upright else 0.58))
 		var brake_c := gas_c + Vector2(-pr * 2.0 - 22.0 * k, pr * 0.5)
+		if _lefty():
+			# LEFT-HANDED: the pedals under the left thumb, steering on the right.
+			gas_c.x = L + 20.0 * k + pr
+			brake_c = gas_c + Vector2(pr * 2.0 + 22.0 * k, pr * 0.5)
 		if _one_thumb():
 			# AUTO GAS: no gas pedal; the brake sits where the gas was.
 			_buttons.append([Rect2(gas_c - Vector2.ONE * pr, Vector2.ONE * pr * 2.0), "BRAKE", "brake", "brake"])
@@ -195,7 +209,8 @@ func _input(event: InputEvent) -> void:
 			visible = true
 		_touch(event)
 		get_viewport().set_input_as_handled()
-	elif active and (event is InputEventKey or event is InputEventJoypadButton) and event.is_pressed() and not event.is_echo():
+	elif active and ((event is InputEventKey or event is InputEventJoypadButton) and event.is_pressed() and not event.is_echo() \
+			or event is InputEventJoypadMotion and absf(event.axis_value) > 0.6):
 		# Someone picked up a keyboard or controller.
 		active = false
 		visible = false
@@ -215,7 +230,7 @@ func _touch(event: InputEvent) -> void:
 						_tap(b[2])
 					return
 			if _racing():
-				if p.x < get_viewport_rect().size.x * 0.5 or _one_thumb():
+				if (p.x >= get_viewport_rect().size.x * 0.5) == _lefty() or _one_thumb():
 					_fingers[idx] = {"zone": "steer", "start": p, "pos": p}
 			else:
 				# Menus: a tap, a swipe or a drag (scrolling a list); decided on release.

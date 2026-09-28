@@ -307,6 +307,11 @@ func map_rect() -> Rect2:
 	return Rect2(W - 14.0 - mm, 92.0, mm, mm)
 
 
+var high_contrast: bool:
+	get:
+		return int(Game.settings.get("map_contrast", 0)) == 1
+
+
 func _draw_map(p: Node3D) -> void:
 	var r := map_rect()
 	var mm_size := r.size.x
@@ -328,12 +333,25 @@ func _draw_map(p: Node3D) -> void:
 		if c == p or (c.out and control):
 			continue
 		var cp: Vector2 = mm_pos + track.to_minimap(c.global_position) * mm_size
-		draw_circle(cp, 3.4, Color(0, 0, 0, 0.8))
-		draw_circle(cp, 2.6, c.team.c1)
+		if high_contrast:
+			# Colour-blind safe: everyone white on black, the leader ringed in yellow.
+			draw_circle(cp, 4.2, Color.BLACK)
+			draw_circle(cp, 3.0, Color(0.92, 0.92, 0.92))
+			if i == 0:
+				draw_arc(cp, 5.2, 0.0, TAU, 16, Color(1, 0.85, 0.0), 1.6)
+		else:
+			draw_circle(cp, 3.4, Color(0, 0, 0, 0.8))
+			draw_circle(cp, 2.6, c.team.c1)
 		if i == 0 or abs(i - ppos) == 1:
 			var tag := str(i + 1)
 			draw_string_outline(f, cp + Vector2(4, -3), tag, HORIZONTAL_ALIGNMENT_LEFT, -1, 10, 3, Color.BLACK)
 			draw_string(f, cp + Vector2(4, -3), tag, HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color(1, 0.9, 0.3) if i == 0 else Color.WHITE)
 	var pp: Vector2 = mm_pos + track.to_minimap(p.global_position) * mm_size
-	draw_circle(pp, 5.0, Color(0, 0, 0))
-	draw_circle(pp, 4.0, Color(1, 0.9, 0.1) if int(blink * 5.0) % 2 == 0 else Color(1, 0.3, 0.1))
+	if high_contrast:
+		# You: a big square that blinks black / white, told apart by shape, not colour.
+		var on := int(blink * 5.0) % 2 == 0
+		draw_rect(Rect2(pp - Vector2(6, 6), Vector2(12, 12)), Color.WHITE if on else Color.BLACK)
+		draw_rect(Rect2(pp - Vector2(6, 6), Vector2(12, 12)), Color.BLACK if on else Color.WHITE, false, 2.0)
+	else:
+		draw_circle(pp, 5.0, Color(0, 0, 0))
+		draw_circle(pp, 4.0, Color(1, 0.9, 0.1) if int(blink * 5.0) % 2 == 0 else Color(1, 0.3, 0.1))

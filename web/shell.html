@@ -263,6 +263,16 @@ $GODOT_HEAD_INCLUDE
     const isTablet = touchDevice && Math.min(screen.width, screen.height) >= 600;
     window.stTouch = touchDevice;
     window.stTablet = isTablet;
+    // The battery, for the game's BATTERY SAVER on AUTO (Chrome; Safari has no API).
+    window.stBattery = null;
+    if (navigator.getBattery) {
+      navigator.getBattery().then((b) => {
+        const upd = () => { window.stBattery = { level: b.level, charging: b.charging }; };
+        upd();
+        b.addEventListener("levelchange", upd);
+        b.addEventListener("chargingchange", upd);
+      }).catch(() => {});
+    }
     const installed = window.matchMedia("(display-mode: fullscreen), (display-mode: standalone)").matches || navigator.standalone === true;
 
     // --- Full screen and landscape. An installed app is already full screen; in
