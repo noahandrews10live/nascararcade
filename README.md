@@ -86,7 +86,7 @@ Motion smoothing), and Options → VSync off gives the lowest input delay.
 - **BATTERY SAVER** (Options): OFF, AUTO or ON. ON runs at 30 fps to save battery and heat; the race still runs 60 steps a second, so it drives the same. AUTO switches it on at 20% battery or less, not charging, in browsers that report the battery (Chrome on Android). The phone apps can't read the battery, so there it's OFF or ON.
 - **Controllers**: a Bluetooth pad works too. Pressing a button or pushing a stick hides the touch controls, and connecting or disconnecting it is announced.
 - **Accessibility** (Options): LARGE TEXT (the small print grows, titles stay), MAP DOTS: HIGH CONTRAST (white dots, the leader ringed, you a blinking square, not told apart by colour) and LEFT-HANDED controls (pedals on the left, steering on the right).
-- **A smaller download**: the browser version runs on an engine built with only what the game uses (no physics engine, navigation, VR, video or complex-script text): a 21.9 MB engine instead of 39.5 MB. It starts downloading as soon as the page opens, the page gives the real size, and the installed web app keeps everything for offline play. The build profile is `native/web/build_profile.py`, and the template is `native/web/web_release_trimmed.zip`.
+- **A smaller download**: the browser version runs on an engine built with only what the game uses (no physics engine, navigation, VR, video or the complex-script text shaper): a 23 MB engine instead of 39.5 MB. It starts downloading as soon as the page opens, the page gives the real size, and the installed web app keeps everything for offline play. The build profile is `native/web/build_profile.py`, and the template is `native/web/web_release_trimmed.zip`.
 
 ## Your career online
 
