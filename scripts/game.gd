@@ -399,7 +399,7 @@ const CHALLENGES_PATH := "user://challenges.cfg"
 const CHALLENGES := [
 	{"name": "LAST LAP LUNGE", "desc": "WHITE FLAG AT THUNDER BEACH. YOU'RE 2ND IN THE DRAFT. WIN IT.", "track": 0, "laps": 1, "field": 16, "grid": 2, "start": -500.0, "goal": "win"},
 	{"name": "SHORT TRACK SCRAPPER", "desc": "START 20TH AT THUNDER VALLEY. 6 LAPS TO GET INTO THE TOP 5.", "track": 2, "laps": 6, "field": 24, "grid": 20, "goal": "top5"},
-	{"name": "HOLD THE LINE", "desc": "LEADING AT BIG SKY WITH 3 TO GO AND THE PACK BEHIND YOU. WIN.", "track": 3, "laps": 3, "field": 30, "grid": 1, "goal": "win"},
+	{"name": "HOLD THE LINE", "desc": "LEADING AT BIG SKY WITH 3 TO GO AND THE PACK BEHIND YOU. WIN.", "track": 3, "laps": 3, "field": 25, "grid": 1, "goal": "win"},
 	{"name": "PAPERCLIP PATIENCE", "desc": "MAGNOLIA. 12 LAPS, START 8TH WITH A BENT FENDER. WIN.", "track": 7, "laps": 12, "field": 20, "grid": 8, "damage": 0.2, "goal": "win"},
 	{"name": "FUEL MISER", "desc": "GULF COAST. 8 LAPS, NOT QUITE ENOUGH FUEL. FINISH TOP 10.", "track": 5, "laps": 8, "field": 24, "grid": 6, "fuel": 0.15, "goal": "top10", "wear": true},
 	{"name": "ROAD WARRIOR", "desc": "CANYON RIDGE ROAD COURSE. START 12TH, 3 LAPS. TOP 3.", "track": 10, "laps": 3, "field": 20, "grid": 12, "goal": "top3"},
@@ -596,7 +596,10 @@ const SETTINGS_PATH := "user://settings.cfg"
 const SEASON_PATH := "user://season.cfg"
 const LENGTHS := [["SPRINT", 0.05], ["SHORT", 0.1], ["MEDIUM", 0.25], ["LONG", 0.5], ["FULL", 1.0]]
 const DIFFICULTIES := [["ROOKIE", 0.955], ["VETERAN", 0.985], ["LEGEND", 1.0]]
-const FIELDS := [20, 25, 30, 40]
+## The most cars in any race (every mode: the field sizes, AUTO, challenges,
+## online). Keeps a race smooth on phones.
+const MAX_CARS := 25
+const FIELDS := [20, 25]
 ## Field size "AUTO" (settings.field = -1): as many cars as this device runs
 ## smoothly. Worked out from how the last race ran: the script time per frame
 ## against a model of it (a fixed part plus a part per car, in ms on the
@@ -758,16 +761,14 @@ func field_size() -> int:
 	if f >= 0:
 		return FIELDS[clampi(f, 0, FIELDS.size() - 1)]
 	var a := int(settings.get("auto_field", 0))
-	return a if a > 0 else first_field_guess()
+	return mini(a, MAX_CARS) if a > 0 else first_field_guess()
 
 
 ## Before any race has been timed: careful in a browser on a phone.
 func first_field_guess() -> int:
 	if OS.has_feature("web"):
 		return 20 if touch_device() else 25
-	if OS.has_feature("mobile"):
-		return 25
-	return 40
+	return MAX_CARS
 
 
 ## What the field size on AUTO should be after a race with `cars` cars that took

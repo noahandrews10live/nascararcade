@@ -7,7 +7,7 @@ func _initialize():
 	root.get_node("Game").debug_seed = 7
 	var race = load("res://scripts/race.gd").new()
 	root.add_child(race)
-	race.setup(t, -1, 5, 40)
+	race.setup(t, -1, 5, 25)
 	race.debug_no_lane_changes = OS.get_environment("NOLANE") == "1"
 	race.grid_up(-150.0, 30.0)
 	for i in 180:
@@ -45,7 +45,7 @@ func _initialize():
 			for c in race.cars:
 				if c.bump > 2.0: bumps += 1
 				if c.spinning: spins += 1
-			print("t=%.1f slow=%d avgdmg=%.2f bumps=%d spins=%d" % [i/60.0, slow, dm/40, bumps, spins])
+			print("t=%.1f slow=%d avgdmg=%.2f bumps=%d spins=%d" % [i/60.0, slow, dm/25, bumps, spins])
 	for c in race.order:
 		print("%2d #%-3s lap=%d v=%.0f d=%.1f lane=%.1f yaw=%.2f dmg=%.2f hits=%d thr=%.1f brk=%.1f" % [race.position_of(c), c.team.num, c.lap(), c.v*2.237, c.d, c.ai_lane, c.yaw, c.total_damage(), hits.get(c,0), c.throttle, c.brake])
 	quit()

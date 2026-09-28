@@ -64,7 +64,7 @@ func _exit_tree() -> void:
 var catchup := false
 
 
-func setup(trk: Node3D, player_team: int, lap_count: int, size := 40, grid: Array = [], player2_team := -1) -> void:
+func setup(trk: Node3D, player_team: int, lap_count: int, size := 25, grid: Array = [], player2_team := -1) -> void:
 	track = trk
 	track.rubber_laps = 0.0
 	skids = SkidMarks.new()
@@ -77,7 +77,7 @@ func setup(trk: Node3D, player_team: int, lap_count: int, size := 40, grid: Arra
 	track.wear = wear
 	_build_debris_mesh()
 	laps = lap_count
-	field_size = size
+	field_size = mini(size, Game.MAX_CARS)
 	if Game.debug_seed != 0:
 		rng.seed = Game.debug_seed
 		seed(Game.debug_seed)

@@ -92,7 +92,7 @@ func _run() -> void:
 		# Full field
 		var race: Node3D = Race.new()
 		root.add_child(race)
-		race.setup(t, -1, 3, 40)
+		race.setup(t, -1, 3, 25)
 		race.grid_up(-150.0, 30.0)
 		for i in 180:
 			race.tick(DT)
@@ -114,7 +114,7 @@ func _run() -> void:
 					hits += 1
 		var leader: Node3D = race.order[0]
 		var last: Node3D = race.order[race.order.size() - 1]
-		print("   40-car race %.0fs: leader lap %d best %.2fs, spins %d, retired %d, wall hits %d, spread %.0f m" % [sim, leader.lap(), leader.best_lap, spins, outs, hits, leader.dist - last.dist])
+		print("   25-car race %.0fs: leader lap %d best %.2fs, spins %d, retired %d, wall hits %d, spread %.0f m" % [sim, leader.lap(), leader.best_lap, spins, outs, hits, leader.dist - last.dist])
 		race.free()
 		t.free()
 	quit()

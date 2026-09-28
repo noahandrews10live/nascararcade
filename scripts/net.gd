@@ -223,7 +223,7 @@ func start_race(track_idx: int, laps: int, field: int) -> void:
 			t = (t + 1) % Game.teams.size()
 		used[t] = true
 		humans.append([id, t])
-	var size: int = max(field, humans.size())
+	var size: int = mini(max(field, humans.size()), Game.MAX_CARS)
 	var others: Array = range(Game.teams.size()).filter(func(i): return not used.has(i) and not Game.teams[i].get("legend", false))
 	others.shuffle()
 	var roster: Array = []

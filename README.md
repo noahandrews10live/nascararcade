@@ -64,7 +64,7 @@ Motion smoothing), and Options → VSync off gives the lowest input delay.
 |---|---|
 | **Quick Race** | Straight into a short green-flag race at a random track, no setup. |
 | **Arcade** | The 1999 cabinet game: 16 cars, a short race and a countdown clock with EXTENDED TIME each lap. |
-| **Single Race** | A full race weekend (practice, qualifying, race) with 20–40 cars and the full rules below. FIELD SIZE is **AUTO** by default: see below. |
+| **Single Race** | A full race weekend (practice, qualifying, race) with 20 or 25 cars (25 is the most in any race) and the full rules below. FIELD SIZE is **AUTO** by default: see below. |
 | **Season** | A 6-, 12- or 36-race championship with points, wins and top 5s. Standings are saved between sessions. |
 | **Career** | Rookie to champion. Start underfunded, then earn prize money and reputation, sign sponsors and buy engine, aero, chassis and pit-crew R&D. It runs season after season with a career record. |
 | **2 Player** | Split-screen racing. Player 2 uses I/J/K/L (U to pit) or a second gamepad. |
@@ -117,7 +117,7 @@ stand-in for the server.
 - **Night racing.** Glowing brake discs, bright brake lights, and flames on lift at high revs.
 - **Ghost laps.** Your best lap at each track is saved and driven by a see-through car in practice, qualifying and time challenges.
 - **Clips.** F9 (or the CLIP button on touch) saves the last 15 seconds as a video on the web build: the share sheet on phones, a download on computers, and a save prompt when the game is played on claude.ai.
-- **Racing AI.** The field drives a proper racing line (wide on entry, apex, out on exit) nose to tail when strung out, and leaves it to race side by side or to set up a pass. An optional catch-up setting (Race Setup) keeps the field close. `tests/line_field_test.gd` runs 40-car races on the flat tracks and checks line use, passing, crashes and pace.
+- **Racing AI.** The field drives a proper racing line (wide on entry, apex, out on exit) nose to tail when strung out, and leaves it to race side by side or to set up a pass. An optional catch-up setting (Race Setup) keeps the field close. `tests/line_field_test.gd` runs 25-car races on the flat tracks and checks line use, passing, crashes and pace.
 - **The course map** sits right under your position, top right: every car as a dot in its colours, you flashing on top, and the leader and the cars either side of you numbered.
 
 ## Racing: how it models 2026 Next Gen racing
@@ -305,10 +305,10 @@ godot --headless --path . --export-release Web build/web/index.html
   - Two round pedals on the right: green GAS and red BRAKE just to its left. Small buttons beside the course map: II pause, CAM, CLIP, PIT.
   - Menus, results and replays show a D-pad with A (select) and B (back). The pause screen shows RESUME and QUIT, and the TILT/DRAG steering switch and CENTRE.
   - Tilt needs the motion sensor: iPhone asks permission when you tap Start. The page reads the accelerometer, or the orientation sensor where that's all there is. It works out each phone's sign convention from which edge of the screen is higher. Where the browser or an embedding page blocks the sensor, the game says so and uses drag steering. The installed app isn't embedded, so tilt works there.
-- **Light on the CPU.** Browsers run a 20-car field by default (40 on desktop), distant cars run their physics at a lower rate, and the fine detail (wheels, lights, flames, loose bodywork) is only animated for cars near the camera. `tests/cpu_bench.gd` times a 40-car race frame by frame without rendering.
+- **Light on the CPU.** Races have at most 25 cars (20 by default in a phone browser), distant cars run their physics at a lower rate, and the fine detail (wheels, lights, flames, loose bodywork) is only animated for cars near the camera. `tests/cpu_bench.gd` times a full 25-car race frame by frame without rendering.
 - **Native resolution and 120 Hz.** The game renders at the screen's full pixel count, e.g. 2868 × 1320 on a 460 ppi iPhone 16 Pro Max in landscape, so text and the HUD are always pin-sharp. The page measures the display's refresh rate (60, 90, 120 or 144 Hz) and AUTO quality aims for that frame rate.
   - Options → RESOLUTION: **AUTO** keeps native resolution and trims only the 3D scene (down to 50%) if the frame rate can't hold, then restores it when there's headroom. **NATIVE** always renders at 100%, **BALANCED** at 75%, **PERFORMANCE** at 50%. The row shows the screen size, refresh rate and current 3D scale.
-  - **Field size on AUTO.** Each car costs a little CPU time every frame (about 0.13 ms on a fast desktop, several times that in a phone's browser). On AUTO the game times its own work 20 seconds into every race and picks the next race's field from 20, 25, 30 or 40 cars, leaving room in each 60 Hz frame for drawing. It drops a size straight away when a race runs short of time and moves up one size per race when there's room. The first race uses 20 cars in a phone's browser, 25 in a desktop browser or the phone apps, and 40 on a computer. RACE SETTINGS → FIELD SIZE shows the current AUTO size, and you can pick a fixed size there instead.
+  - **Field size on AUTO.** Each car costs a little CPU time every frame (about 0.13 ms on a fast desktop, several times that in a phone's browser). On AUTO the game times its own work 20 seconds into every race and picks the next race's field: 20 or 25 cars, never more than 25 in any mode, leaving room in each 60 Hz frame for drawing. It drops a size straight away when a race runs short of time and moves up one size per race when there's room. The first race uses 20 cars in a phone's browser and 25 everywhere else. RACE SETTINGS → FIELD SIZE shows the current AUTO size, and you can pick a fixed size there instead.
   - **Sound for next to nothing.** The V8 engine model is rendered once, in the menus, into short seamless loops at eight rpm points, on and off the throttle, which the mixer pitch-shifts and cross-fades. Each music cue is recorded the first time it plays and then replays from the recording. Engine sound drops from about 0.55 ms to 0.04 ms a frame, and the music from about 0.8 ms to nothing. Only the intro anthem and the last-lap build, which change as they play, are still synthesised live (`tests/audio_cost_bench.gd`).
   - iPhone and iPad web apps are held to 60 Hz by iOS unless you turn off **Settings → Apps → Safari → Advanced → Feature Flags → Prefer Page Rendering Updates near 60fps**. Android Chrome runs at the full 120 Hz.
 
@@ -434,7 +434,7 @@ All tests run headless (`godot --headless --fixed-fps 60 --path . -s <script>`):
 | `tests/net_test.gd` | Online: run with ROLE=host and ROLE=client together; includes a caution, the client's pit call and the restart. RELAY=1 goes through the room-code relay (`tests/tools/fake_realtime.py` stands in for Supabase offline) |
 | `tests/wheel_test.gd` | Starts the force-feedback helper and checks it answers |
 | `tests/telemetry_test.gd` | Chassis telemetry (roll, tyre loads, temperatures, bump stops) and wreck physics checks |
-| `tests/physics_test.gd` | Solo lap speeds, draft gain and a 40-car race per track |
+| `tests/physics_test.gd` | Solo lap speeds, draft gain and a 25-car race per track |
 | `tests/field_test.gd` | Full-field AI race with incident tracing (`TRACK=n SECS=s TRACE=car#`) |
 | `tests/rules_test.gd` | A full rules race: cautions, pits, stages and points |
 | `tests/caution_test.gd` | Quick cautions: the pit call screen, AI pit calls, the restart order, about 15 s yellow to green |
@@ -447,8 +447,8 @@ All tests run headless (`godot --headless --fixed-fps 60 --path . -s <script>`):
 | `tests/engine_sound_test.gd` | The V8 note follows rpm, and pops on lift |
 | `tests/field_auto_test.gd` | FIELD SIZE on AUTO: old saves move to it, how a race ran picks the next size, and the race uses it |
 | `tests/fit_test.gd` | Menus and HUD fit phone, tablet and ultrawide screens |
-| `tests/line_field_test.gd` | 40-car races on the flat tracks: the line is used, cars still pass, few crashes, the pack's pace |
-| `tests/cpu_bench.gd` | CPU time per frame of a 40-car race (no rendering) |
+| `tests/line_field_test.gd` | 25-car races on the flat tracks: the line is used, cars still pass, few crashes, the pack's pace |
+| `tests/cpu_bench.gd` | CPU time per frame of a 25-car race (no rendering) |
 | `tests/shots_wow.gd` | Intro, showroom, TV race, wreck replay and victory lane (screenshots with `OUT=dir`) |
 | `tests/split_shots.gd` | Two-player race (screenshot with `OUT=dir` and a renderer) |
 

@@ -16,7 +16,7 @@ func _run() -> void:
 	var laps := int(OS.get_environment("LAPS")) if OS.get_environment("LAPS") != "" else int(game.tracks[idx].race_laps)
 	var race: Node3D = load("res://scripts/race.gd").new()
 	root.add_child(race)
-	race.setup(t, -1, laps, int(OS.get_environment("FIELD")) if OS.get_environment("FIELD") != "" else 40)
+	race.setup(t, -1, laps, int(OS.get_environment("FIELD")) if OS.get_environment("FIELD") != "" else 25)
 	race.enable_rules()
 	var ctl: Node = race.control
 	var log := []

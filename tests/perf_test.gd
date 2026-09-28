@@ -1,5 +1,5 @@
 extends SceneTree
-## Measures how long the game's per-frame work takes in a 40-car Single Race.
+## Measures how long the game's per-frame work takes in a 25-car Single Race.
 var main: Node
 
 
@@ -13,7 +13,7 @@ func _run() -> void:
 	var game := root.get_node("Game")
 	for i in 20:
 		await process_frame
-	game.settings.field = int(OS.get_environment("FIELD")) if OS.get_environment("FIELD") != "" else 3
+	game.settings.field = int(OS.get_environment("FIELD")) if OS.get_environment("FIELD") != "" else 1
 	main.mode = "race"
 	main.session = "race"
 	main._use_track(1)

@@ -1,5 +1,5 @@
 extends SceneTree
-## The racing line with a full field: 40 AI cars race on each flat track (where
+## The racing line with a full field: 25 AI cars race on each flat track (where
 ## the line is used) and it checks that they
 ##   - actually use the line when they have clear road (share of car-time on it),
 ##   - still pass each other (position changes per car per minute),
@@ -43,7 +43,7 @@ func _run() -> void:
 		var solo := await _solo_lap(t)
 		var race = load("res://scripts/race.gd").new()
 		root.add_child(race)
-		race.setup(t, -1, 50, 40)
+		race.setup(t, -1, 50, 25)
 		race.grid_up(-150.0, 30.0)
 		for i in 180:
 			race.tick(1.0 / 60.0)
@@ -73,7 +73,7 @@ func _run() -> void:
 						swaps += 1
 				prev_order = race.order.duplicate()
 		var share: float = float(on_line) / max(samples, 1)
-		var passes_pm: float = float(swaps) / 40.0 / (secs / 60.0)
+		var passes_pm: float = float(swaps) / 25.0 / (secs / 60.0)
 		var incidents: int = box.incidents
 		var best_lap: float = box.best
 		print("%s: on line %.0f%%, passes %.2f per car per min, incidents %d, best lap %.2f s (alone %.2f s)" % [t.cfg.short, share * 100.0, passes_pm, incidents, best_lap, solo])
