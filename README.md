@@ -38,9 +38,10 @@ audio. The project has no imported assets.
     with arrow running lights, deep scoops behind the doors, the widest haunches, thin
     L-shaped tail lamps). Same speed. Every field is split evenly between the four
     (your own pick counts toward its make); choose yours in the Paint Shop (BODY);
-  - race-track asphalt generated stone by stone (grey aggregate in dark binder, sealed
-    cracks, a bump map so the stones catch the light) at a real asphalt brightness,
-    plus grass and concrete textures with normal maps;
+  - photographed surfaces: real race-track asphalt, poured-concrete walls with their
+    formwork seams, and dense turf, each with its normal map (CC0 from Poly Haven and
+    ambientCG; see `assets/textures/CREDITS.md`). They're grey detail maps, so every
+    track keeps its own colours (the procedural textures remain as a fallback);
   - real skies for lighting: the cars' paint, glass and chrome reflect photographed
     CC0 skies from Poly Haven (clear day, sunset, overcast, night; see
     `assets/hdri/CREDITS.md`), turned so the photo's sun sits where the game's sun is

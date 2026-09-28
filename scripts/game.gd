@@ -586,6 +586,10 @@ var wheel := {"enabled": false, "device": 0, "steer_axis": 0, "throttle_axis": 5
 signal graphics_changed
 
 var _tex := {}
+## Photo surface textures: metres per repeat (their real size, or a little more
+## where a small patch would tile visibly). Each is a neutral grey detail map;
+## the track's own colours tint it.
+const PHOTO_TILE := {"asphalt": 3.0, "concrete": 4.0, "grass": 2.8}
 
 # --- settings, garage setup, season ------------------------------------------------
 const SETTINGS_PATH := "user://settings.cfg"
@@ -1111,7 +1115,7 @@ func style(m: StandardMaterial3D) -> void:
 					m.uv1_triplanar = true
 					m.uv1_world_triplanar = true
 					m.uv1_triplanar_sharpness = 4.0
-					var sc: float = {"asphalt": 0.35, "grass": 0.12, "concrete": 0.25}[kind]
+					var sc: float = 1.0 / PHOTO_TILE[kind] if _photo(kind) else {"asphalt": 0.35, "grass": 0.12, "concrete": 0.25}[kind]
 					m.uv1_scale = Vector3(sc, sc, sc)
 					m.albedo_texture = texture(kind, false)
 					m.normal_enabled = true
@@ -1121,7 +1125,7 @@ func style(m: StandardMaterial3D) -> void:
 					if kind == "asphalt":
 						# Weathered race asphalt reflects about an eighth of the light.
 						m.albedo_color = Color(1.75, 1.75, 1.72)
-						m.uv1_scale = Vector3(0.33, 0.33, 0.33)
+						m.uv1_scale = Vector3.ONE * (1.0 / PHOTO_TILE.asphalt if _photo("asphalt") else 0.33)
 					if kind == "grass":
 						# Tame the arcade-bright greens toward real turf.
 						m.albedo_color = Color(0.78, 0.74, 0.6)
@@ -1160,7 +1164,7 @@ func style(m: StandardMaterial3D) -> void:
 				m.roughness = 0.95
 				m.uv1_triplanar = true
 				m.uv1_world_triplanar = true
-				m.uv1_scale = Vector3(0.05, 0.05, 0.05)
+				m.uv1_scale = Vector3.ONE * (0.12 if _photo("grass") else 0.05)
 				m.albedo_texture = texture("grass", false)
 				m.normal_enabled = true
 				m.normal_texture = texture("grass", true)
@@ -1196,6 +1200,11 @@ func chain_link_texture() -> Texture2D:
 func texture(kind: String, normal: bool) -> Texture2D:
 	var key := kind + ("_n" if normal else "")
 	if _tex.has(key):
+		return _tex[key]
+	# Photographed surfaces (CC0, assets/textures/CREDITS.md) for the modern look.
+	var photo := "res://assets/textures/%s_%s.jpg" % [kind, "normal" if normal else "albedo"]
+	if modern and PHOTO_TILE.has(kind) and ResourceLoader.exists(photo):
+		_tex[key] = load(photo)
 		return _tex[key]
 	if kind == "asphalt" and modern:
 		_make_asphalt()
@@ -1234,6 +1243,10 @@ func texture(kind: String, normal: bool) -> Texture2D:
 		t.color_ramp = ramp
 	_tex[key] = t
 	return t
+
+
+func _photo(kind: String) -> bool:
+	return modern and PHOTO_TILE.has(kind) and ResourceLoader.exists("res://assets/textures/%s_albedo.jpg" % kind)
 
 
 ## Race-track asphalt, close up: grey stone aggregate in dark binder, the odd
