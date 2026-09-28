@@ -80,7 +80,13 @@ Motion smoothing), and Options → VSync off gives the lowest input delay.
 - **Menus are cards** you tap; a card's < > change its value, long lists drag to scroll, BACK is top left. The course and car pickers swipe, or use < > and GO.
 - **Your first race teaches you**: steering (tilt or drag), the gas, braking into the turns, the draft and the map, each prompt once you need it.
 - **AUTO GAS** (Options): the car takes each corner at a safe speed and you just steer, with one thumb (drag anywhere) or none (tilt). The brake still works.
-- **Vibration** on hits and locked wheels (Options).
+- **Vibration** on hits and locked wheels, a click on each gear change, and a rhythm when you run off the edge (Options).
+- **A call or another app pauses the race** (and mutes the sound). RESUME counts 3-2-1 back in. Online races carry on, as the others are still racing.
+- **Carry on later**: full races (Single Race, Season, Career) save a checkpoint every lap under green. If the app is closed, the garage leads with RESUME RACE: every car goes back where it was (fuel, tyres, damage, the clock) and it counts you back in. Quitting a race on purpose throws the checkpoint away.
+- **BATTERY SAVER** (Options): OFF, AUTO or ON. ON runs at 30 fps to save battery and heat; the race still runs 60 steps a second, so it drives the same. AUTO switches it on at 20% battery or less, not charging, in browsers that report the battery (Chrome on Android). The phone apps can't read the battery, so there it's OFF or ON.
+- **Controllers**: a Bluetooth pad works too. Pressing a button or pushing a stick hides the touch controls, and connecting or disconnecting it is announced.
+- **Accessibility** (Options): LARGE TEXT (the small print grows, titles stay), MAP DOTS: HIGH CONTRAST (white dots, the leader ringed, you a blinking square, not told apart by colour) and LEFT-HANDED controls (pedals on the left, steering on the right).
+- **A smaller download**: the browser version runs on an engine built with only what the game uses (no physics engine, navigation, VR, video or complex-script text): a 21.9 MB engine instead of 39.5 MB. It starts downloading as soon as the page opens, the page gives the real size, and the installed web app keeps everything for offline play. The build profile is `native/web/build_profile.py`, and the template is `native/web/web_release_trimmed.zip`.
 
 ## Your career online
 
@@ -96,6 +102,14 @@ checks who you are and that a lap time is possible.
   week one track hosts a time trial.
 - **XP and levels** from every race (the result, the laps, a clean race, a win); paint
   schemes unlock as you level up.
+- **Daily streaks**: each day in a row you finish the daily challenge adds 100 XP more
+  (up to 700 a day); the garage shows the streak, and a 7-day streak unlocks the
+  CHECKERED paint scheme.
+- **Cloud save**: your progress, garage, career, season, challenges and records go
+  online a few seconds after they change. Options → ACCOUNT + NEW PHONE shows your
+  friend code and moves the account: MOVE TO A NEW PHONE gives an 8-character code
+  (valid 24 hours, once); type it on the new phone under I HAVE A CODE and everything
+  comes over (the old phone is signed out). The server side is in `supabase/`.
 - **Stats**: after a race the game sends its frame rate and the device type (nothing
   personal) so it can be tuned for real phones; Options → SHARE STATS turns it off.
 
@@ -446,6 +460,10 @@ All tests run headless (`godot --headless --fixed-fps 60 --path . -s <script>`):
 | `tests/makes_test.gd` | The four bodies and the even split across the field |
 | `tests/engine_sound_test.gd` | The V8 note follows rpm, and pops on lift |
 | `tests/field_auto_test.gd` | FIELD SIZE on AUTO: old saves move to it, how a race ran picks the next size, and the race uses it |
+| `tests/phone_life_test.gd` | Backgrounding pauses and mutes; RESUME counts 3-2-1; BATTERY SAVER caps at 30 fps |
+| `tests/resume_test.gd` | A full race saves a checkpoint each lap; RESUME RACE puts every car back and carries on |
+| `tests/access_test.gd` | LARGE TEXT, LEFT-HANDED pedals and steering, HIGH CONTRAST map, a controller hides touch |
+| `tests/cloud_save_test.gd` | The saved game goes online; a code moves it to a new phone; daily streaks and CHECKERED |
 | `tests/fit_test.gd` | Menus and HUD fit phone, tablet and ultrawide screens |
 | `tests/line_field_test.gd` | 25-car races on the flat tracks: the line is used, cars still pass, few crashes, the pack's pace |
 | `tests/cpu_bench.gd` | CPU time per frame of a 25-car race (no rendering) |

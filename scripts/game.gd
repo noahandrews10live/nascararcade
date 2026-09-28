@@ -1280,7 +1280,7 @@ func chain_link_texture() -> Texture2D:
 	if _tex.has("chain"):
 		return _tex["chain"]
 	var sz := 64
-	var img := Image.create(sz, sz, false, Image.FORMAT_RGBA8)
+	var img := Image.create_empty(sz, sz, false, Image.FORMAT_RGBA8)
 	for y in sz:
 		for x in sz:
 			var a := posmod(x + y, sz / 4)
@@ -1412,8 +1412,8 @@ func _make_asphalt() -> void:
 				var k := posmod(int(py) + w, sz) * sz + posmod(int(px), sz)
 				col[k] = 0.35
 				height[k] = -0.2
-	var img := Image.create(sz, sz, false, Image.FORMAT_RGB8)
-	var nimg := Image.create(sz, sz, false, Image.FORMAT_RGB8)
+	var img := Image.create_empty(sz, sz, false, Image.FORMAT_RGB8)
+	var nimg := Image.create_empty(sz, sz, false, Image.FORMAT_RGB8)
 	for y in sz:
 		for x in sz:
 			var c: float = clamp(col[y * sz + x], 0.0, 1.0)

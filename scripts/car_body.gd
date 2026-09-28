@@ -982,7 +982,7 @@ static func _tube(st: SurfaceTool, pts: Array) -> void:
 ## The driver's window net: a dark grid with see-through holes.
 static func _net_mat() -> Material:
 	if not _shared.has("net_mat"):
-		var img := Image.create(64, 64, false, Image.FORMAT_RGBA8)
+		var img := Image.create_empty(64, 64, false, Image.FORMAT_RGBA8)
 		img.fill(Color(0, 0, 0, 0))
 		img.fill_rect(Rect2i(0, 0, 64, 9), Color(0.05, 0.05, 0.05, 1))
 		img.fill_rect(Rect2i(0, 0, 9, 64), Color(0.05, 0.05, 0.05, 1))
@@ -1016,7 +1016,7 @@ static func c3_contrast(c1: Color, c2: Color, cn: Color) -> Color:
 static func _decal_mat() -> StandardMaterial3D:
 	if _shared.has("decal_mat"):
 		return _shared.decal_mat
-	var img := Image.create(128, 48, false, Image.FORMAT_RGBA8)
+	var img := Image.create_empty(128, 48, false, Image.FORMAT_RGBA8)
 	img.fill(Color(0, 0, 0, 0))
 	var tags := [Color(1, 0.85, 0.1), Color(0.9, 0.1, 0.1), Color(0.1, 0.3, 0.8), Color(1, 1, 1), Color(0.1, 0.6, 0.2), Color(0.05, 0.05, 0.05), Color(0.95, 0.45, 0.05), Color(0.6, 0.6, 0.65)]
 	for k in 8:

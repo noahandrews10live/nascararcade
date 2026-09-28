@@ -1018,7 +1018,7 @@ func _build_infield(rng: RandomNumberGenerator) -> void:
 		arr[Mesh.ARRAY_NORMAL] = normals
 		var am := ArrayMesh.new()
 		am.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arr)
-		var img := Image.create(2, 1, false, Image.FORMAT_RGB8)
+		var img := Image.create_empty(2, 1, false, Image.FORMAT_RGB8)
 		var g: Color = cfg.grass
 		img.set_pixel(0, 0, g.lightened(0.06))
 		img.set_pixel(1, 0, g.darkened(0.07))

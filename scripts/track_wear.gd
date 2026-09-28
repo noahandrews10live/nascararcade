@@ -34,7 +34,7 @@ func setup(t: Node3D) -> void:
 	rubber.fill(0.0)
 	marbles.resize(rows * BANDS)
 	marbles.fill(0.0)
-	_img = Image.create(BANDS, rows, false, Image.FORMAT_RG8)
+	_img = Image.create_empty(BANDS, rows, false, Image.FORMAT_RG8)
 	_img.fill(Color(0, 0, 0))
 	_tex = ImageTexture.create_from_image(_img)
 	_build_overlay()

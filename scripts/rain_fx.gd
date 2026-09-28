@@ -107,7 +107,7 @@ var _band_tex: ImageTexture
 
 
 func _band_texture(bands: int) -> Texture2D:
-	_band_img = Image.create(bands, 1, false, Image.FORMAT_RGBA8)
+	_band_img = Image.create_empty(bands, 1, false, Image.FORMAT_RGBA8)
 	_band_img.fill(Color(1, 1, 1, 0))
 	_band_tex = ImageTexture.create_from_image(_band_img)
 	return _band_tex
