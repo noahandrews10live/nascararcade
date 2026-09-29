@@ -204,7 +204,7 @@ func _air_tests(game: Node) -> void:
 	race.setup(t, -1, 5, 6)
 	for i in 6:
 		var c: Node3D = race.cars[i]
-		c.dist = 800.0 - i * 8.0
+		c.dist = 800.0 - i * 20.0 # spread out: nose to tail the tow is capped for everyone
 		c.d = race.lanes[0]
 	race._build_neighbors()
 	race._aero(10.0)
