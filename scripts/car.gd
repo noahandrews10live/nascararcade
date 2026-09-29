@@ -41,6 +41,20 @@ const WHEEL_OF_HOLDER := [0, 2, 1, 3] # model wheel order (FL, RL, FR, RR) -> ph
 const NOMINAL_LOAD := 1600.0 * 9.81 * 0.25
 const SPOOL_K := 5.0 # how hard the locked rear resists the wheels turning at different speeds
 const AERO_SIDE := 3.2 # side force area (m^2)
+## Engine braking at the rear wheels with the throttle shut: this much force (N)
+## at peak revs in top gear, more in the lower gears (the gearing multiplies it).
+const ENGINE_BRAKE := 900.0
+## A sequential box: drive is cut this long (s) while an upshift happens.
+const SHIFT_CUT := 0.04
+## Tyre relaxation length (m): how far a tyre rolls to build its cornering force.
+const RELAX_LEN := 0.4
+## The wheel-speed model (your car): slip curve stiffness and the rotating mass
+## of each axle, as an equivalent mass at the tyre (kg; the rear includes the
+## driveline).
+const TYRE_BX := 18.0
+const TYRE_CX := 1.4
+const AXLE_MASS_R := 60.0
+const AXLE_MASS_F := 20.0
 const AERO_LIFT_SIDE := 3.0 # lift area when sideways (the roof becomes a wing)
 const AERO_LIFT_BACK := 3.2 # lift area when backwards (enough to fly at ~200 mph)
 # Contact points relative to the CG in car space (x right, y up, z back): tyres
@@ -217,6 +231,13 @@ var _cap := PackedFloat32Array([0, 0, 0, 0])
 var _fx := PackedFloat32Array([0, 0, 0, 0])
 var _fy_prev := PackedFloat32Array([0, 0, 0, 0])
 var _alpha := PackedFloat32Array([0, 0, 0, 0])
+var _fy_state := PackedFloat32Array([0, 0, 0, 0]) # cornering force, lagging the slip (relaxation)
+var _cam_grip := PackedFloat32Array([1, 1, 1, 1]) # grip from each tyre's camber
+var _wr_v := 0.0 # rear wheel surface speed (m/s) and front: the wheel-speed model
+var _wf_v := 0.0
+var kappa_r := 0.0 # slip ratios (+ = spinning, - = locking), for telemetry and haptics
+var kappa_f := 0.0
+var _shift_t := 0.0 # drive cut left during an upshift
 var _road := PackedFloat32Array([0, 0, 0, 0])
 var _road_rate := PackedFloat32Array([0, 0, 0, 0])
 var _f_static := PackedFloat32Array([0, 0, 0, 0])
@@ -487,6 +508,7 @@ func _auto_shift() -> void:
 		return
 	if gear < 5 and u * RPM_PER_MPS[gear - 1] * gear_scale * gear_track > 9000.0:
 		gear += 1
+		_shift_t = SHIFT_CUT
 	elif gear > 1 and u * RPM_PER_MPS[gear - 2] * gear_scale * gear_track < 8200.0:
 		gear -= 1
 
@@ -494,6 +516,37 @@ func _auto_shift() -> void:
 ## Pacejka-ish lateral force for a slip angle, as a fraction of the grip limit.
 static func _tyre(alpha: float, stiff: float) -> float:
 	return sin(TYRE_C * atan(stiff * alpha))
+
+
+## Longitudinal tyre force (fraction of the grip) for slip ratio `kappa`.
+static func _tyre_x(kappa: float) -> float:
+	return sin(TYRE_CX * atan(TYRE_BX * kappa))
+
+
+## One axle of the wheel-speed model over a step `h`: the wheels' surface speed
+## `vw`, the car's speed `u`, the torque demand `demand` (as a force at the tyre),
+## the axle's grip `cap` and rotating mass `m`. Returns [new vw, tyre force, slip].
+func _axle(vw: float, u: float, demand: float, cap: float, m: float, h: float) -> Array:
+	var den: float = max(abs(u), 3.0)
+	var kap: float = (vw - u) / den
+	var f: float = cap * _tyre_x(kap)
+	# The slope of the force against wheel speed, for the implicit step.
+	var e := 0.002
+	var dfdv: float = cap * (_tyre_x(kap + e) - _tyre_x(kap - e)) / (2.0 * e) / den
+	var vw2: float = vw + h * (demand - f) / (m + h * max(dfdv, 0.0))
+	if u >= 0.0:
+		vw2 = max(vw2, 0.0) # brakes stop a wheel; they don't spin it backwards
+	var kap2: float = (vw2 - u) / den
+	# Traction control and ABS (FULL holds the wheels at the grip peak; MILD lets
+	# them slip further first).
+	var lim: float = 0.12 if assist_level >= 1.0 else 0.2
+	if assisted and throttle > 0.05 and kap2 > lim:
+		kap2 = lim
+		vw2 = u + kap2 * den
+	elif assisted and brake > 0.05 and kap2 < -lim:
+		kap2 = -lim
+		vw2 = u + kap2 * den
+	return [vw2, cap * _tyre_x(kap2), kap2]
 
 
 func _load_sens() -> float:
@@ -586,6 +639,14 @@ func _sample_road(ss: float, h: float) -> void:
 
 
 func reset_chassis() -> void:
+	# Wheels rolling with the car, no tyre force built up yet.
+	_wr_v = v
+	_wf_v = v
+	kappa_r = 0.0
+	kappa_f = 0.0
+	_shift_t = 0.0
+	for i in 4:
+		_fy_state[i] = 0.0
 	chassis_z = 0.0
 	chassis_vz = 0.0
 	chassis_pitch = 0.0
@@ -701,6 +762,14 @@ func _integrate(h: float) -> void:
 	if rpm_now >= REDLINE or fuel <= 0.0:
 		p_avail = 0.0
 	var fx_drive: float = throttle * p_avail * 0.88 / max(abs(u), 4.0)
+	if _shift_t > 0.0:
+		_shift_t -= h
+		fx_drive = 0.0 # the dog box between gears
+	# Engine braking with the throttle shut: stronger at high revs and in the
+	# lower gears, where the gearing multiplies it.
+	var fx_eb := 0.0
+	if u > 1.0 and fuel > 0.0:
+		fx_eb = (1.0 - throttle) * ENGINE_BRAKE * clamp(rpm_now / 8500.0, 0.3, 1.1) * RPM_PER_MPS[gear - 1] / 100.0 * gear_scale * gear_track
 	var fx_brake: float = brake * 2.3 * MASS * G * (1.0 if u > 0.3 else 0.0)
 	var reverse := false
 	if u <= 0.3 and brake > 0.5 and throttle < 0.1 and ((is_player and not ai) or ai_reverse > 0.0):
@@ -766,6 +835,19 @@ func _integrate(h: float) -> void:
 		mp += _nw[i] * WX[i]
 		mr += _nw[i] * WY[i]
 
+	# --- camber: the body leaning out in a turn tilts the wheels with it. Oval cars
+	# run the right side leaning in and the left side leaning out so that, rolled
+	# over in a left turn, the loaded right tyres sit nearly flat; road-course cars
+	# run the same on both sides.
+	var lean: float = ((_defl[1] + _defl[3]) - (_defl[0] + _defl[2])) / (4.0 * TW) # + = leaning right
+	var road_setup: bool = track.turns_both_ways()
+	for i in 4:
+		var right_side: bool = WY[i] > 0.0
+		var nc: float = (0.035 if road_setup else (0.05 if right_side else -0.04)) # static negative camber
+		nc += (-0.6 * lean) if right_side else (0.6 * lean)
+		var err: float = nc - 0.02
+		_cam_grip[i] = clamp(1.0 - 6.0 * err * err, 0.9, 1.0)
+
 	# --- tyre grip per corner (load sensitivity, temperature, wear, surface)
 	var surf := 1.0
 	if on_grass:
@@ -776,7 +858,7 @@ func _integrate(h: float) -> void:
 	var cap := _cap
 	for i in 4:
 		var ratio: float = max(_nw[i] / NOMINAL_LOAD, 0.3)
-		cap[i] = mu * surf * _tyre_factor[i] * pow(ratio, -_load_sens()) * _nw[i] * (grip_front if i < 2 else grip_rear)
+		cap[i] = mu * surf * _tyre_factor[i] * pow(ratio, -_load_sens()) * _nw[i] * (grip_front if i < 2 else grip_rear) * _cam_grip[i]
 	var cap_f: float = cap[0] + cap[1]
 	var cap_r: float = cap[2] + cap[3]
 
@@ -810,8 +892,8 @@ func _integrate(h: float) -> void:
 	var fx := _fx
 	fx[0] = -fx_brake * brake_bias * 0.5
 	fx[1] = -fx_brake * brake_bias * 0.5
-	fx[2] = fx_drive * 0.5 - fx_brake * (1.0 - brake_bias) * 0.5
-	fx[3] = fx_drive * 0.5 - fx_brake * (1.0 - brake_bias) * 0.5
+	fx[2] = (fx_drive - fx_eb) * 0.5 - fx_brake * (1.0 - brake_bias) * 0.5
+	fx[3] = (fx_drive - fx_eb) * 0.5 - fx_brake * (1.0 - brake_bias) * 0.5
 	# A flat tyre drags (rim and rubber on the ground), pulling the car that way.
 	for i in 4:
 		if tyre_air[i] < 0.9:
@@ -822,6 +904,7 @@ func _integrate(h: float) -> void:
 	fx[3] -= f_sp
 	var locked := 0
 	var spun := 0
+	var wheel_model: bool = is_player and not ai
 	for i in 4:
 		var c_i: float = cap[i]
 		if assisted and not reverse:
@@ -829,12 +912,43 @@ func _integrate(h: float) -> void:
 			var spare: float = sqrt(max(c_i * c_i - pow(_fy_prev[i] * 1.15, 2.0), pow(c_i * 0.22, 2.0)))
 			var lim: float = spare * (0.9 if assist_level >= 1.0 else 0.97)
 			fx[i] = clamp(fx[i], -lim, lim)
+		if wheel_model:
+			continue # handled below, by the wheels' own speeds
 		if fx[i] < -c_i:
 			fx[i] = -c_i * 0.85 # locked wheel: sliding friction
 			locked |= 1 << i
 		elif fx[i] > c_i:
 			fx[i] = c_i * 0.85 # wheelspin
 			spun |= 1 << i
+	if wheel_model:
+		# Your car: each axle's wheels have their own speed. Drive and brake torque
+		# spin them up or slow them; the tyre's force comes from the slip between
+		# wheel and road (peak near 11%), so wheelspin builds on a heavy throttle
+		# and a wheel locks progressively under hard braking. Solved semi-
+		# implicitly, so it stays stable at the physics rate.
+		var d_r: float = fx[2] + fx[3] # (the spool's twist cancels across the axle)
+		var d_f: float = fx[0] + fx[1]
+		var res_r: Array = _axle(_wr_v, u, d_r, cap_r, AXLE_MASS_R, h)
+		var res_f: Array = _axle(_wf_v, u, d_f, cap_f, AXLE_MASS_F, h)
+		_wr_v = res_r[0]
+		_wf_v = res_f[0]
+		kappa_r = res_r[2]
+		kappa_f = res_f[2]
+		fx[2] = res_r[1] * 0.5 + f_sp
+		fx[3] = res_r[1] * 0.5 - f_sp
+		fx[0] = res_f[1] * 0.5
+		fx[1] = res_f[1] * 0.5
+		if kappa_r > 0.25:
+			spun |= 12
+		elif kappa_r < -0.25:
+			locked |= 12
+		if kappa_f < -0.25:
+			locked |= 3
+	else:
+		_wr_v = u
+		_wf_v = u
+		kappa_r = 0.0
+		kappa_f = 0.0
 
 	# --- lateral forces (friction circle) and the totals
 	var fx_tot := 0.0
@@ -851,7 +965,13 @@ func _integrate(h: float) -> void:
 		var fyi: float
 		if (locked | spun) & (1 << i):
 			lat *= 0.45
-		fyi = -lat * _tyre(alpha, TYRE_B_F if i < 2 else TYRE_B_R)
+		# A loaded tyre is relatively softer (it peaks at a bigger slip angle); and
+		# its force builds over the first half-metre of rolling (relaxation).
+		var b_eff: float = (TYRE_B_F if i < 2 else TYRE_B_R) * clamp(pow(NOMINAL_LOAD / max(_nw[i], 1.0), 0.25), 1.0, 1.35)
+		var fy_target: float = -lat * _tyre(alpha, b_eff)
+		var relax: float = clamp(max(abs(vxi), 2.0) * h / RELAX_LEN, 0.0, 1.0)
+		_fy_state[i] += (fy_target - _fy_state[i]) * relax
+		fyi = clamp(_fy_state[i], -lat, lat)
 		_fy_prev[i] = fyi
 		_alpha[i] = alpha
 		# Heat from the work the tyre does: cornering slip, plus braking and drive

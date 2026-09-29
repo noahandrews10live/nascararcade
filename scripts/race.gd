@@ -1029,12 +1029,26 @@ func _contact(a: Node3D, b: Node3D, rel: Vector2) -> void:
 	# How much a touch twists the car: a lean or a rub barely does (the drivers hold
 	# them, the sheet metal gives); a real hit at the corner turns it around.
 	var lever: float = clamp((vn - 0.5) / 6.0, 0.2, 1.0)
+	var soft_push := false
+	if abs(n.x) > 0.9 and abs(a.yaw - b.yaw) < 0.08 and abs(rel.y) < 0.6 and vn < 4.0:
+		# Bump drafting: square bumper to bumper at a small closing speed. The
+		# bumpers are built for it: a firm push, next to no twist or damage.
+		lever = 0.05
+		soft_push = true
+	else:
+		# The hook: a nose into the rear quarter, off to one side, turns the car
+		# ahead around even at a few mph (a lever arm from the rear axle).
+		var victim_is_b: bool = n.x > 0.5
+		var vp: Vector2 = (b.track_to_body(rb_p) if victim_is_b else a.track_to_body(ra_p))
+		if vp.x < -1.4 and abs(vp.y) > 0.45 and abs(n.x) > 0.5:
+			lever = max(lever, clamp(0.55 + vn / 8.0, 0.0, 1.0))
+	var dmg_j: float = j * (0.3 if soft_push else 1.0)
 	if not a.remote:
 		a.apply_impulse(-imp, ra_p * lever)
-		a.add_damage(j, ra_p)
+		a.add_damage(dmg_j, ra_p)
 	if not b.remote:
 		b.apply_impulse(imp, rb_p * lever)
-		b.add_damage(j, rb_p)
+		b.add_damage(dmg_j, rb_p)
 	# Grudges: the car that got hit (in the rear or turned) remembers who did it.
 	if vn > 3.0 and not arcade:
 		var victim: Node3D = b if n.x > 0.3 else a # b is ahead along n: a hit b from behind

@@ -60,7 +60,7 @@ var tracks: Array[Dictionary] = [
 		"back": 1150.0, "radius": 300.0, "dog_phi": 14.0, "dog_r": 900.0, "front_mid": 0.0, "front_side": 420.0,
 		"width": 24.0, "apron": 10.0, "infield": 16.0,
 		"bank_turn": 33.0, "bank_straight": 3.0,
-		"laps": 3, "draft": 1.0, "tow": 3.0, "tow_reach": 2.0, "push": 16.5, "push_reach": 2.5, "pack_gap": 0.1, "grid_player": 24,
+		"laps": 3, "draft": 1.0, "tow": 3.0, "tow_reach": 2.0, "push": 15.8, "push_reach": 2.5, "pack_gap": 0.1, "grid_player": 24,
 		"hp": 510, "cda": 0.92, "cla": 2.6, "gear": 0.9, "pit_mph": 55, "race_laps": 20, "full_laps": 188,
 		"sky_top": Color(0.25, 0.45, 0.85), "sky_horizon": Color(0.8, 0.85, 0.95),
 		"grass": Color(0.3, 0.5, 0.2), "fog": Color(0.75, 0.8, 0.9),
@@ -297,7 +297,7 @@ func clear_career() -> void:
 
 func new_career(team_idx: int) -> void:
 	career = {
-		"team": team_idx, "money": 250000, "rep": 10, "year": 1,
+		"team": team_idx, "money": 1000000, "rep": 10, "year": 1,
 		"upgrades": {"engine": 0, "aero": 0, "chassis": 0, "crew": 0},
 		"sponsor": {"name": "LOCAL TIRE SHOP", "per_race": 40000, "bonus_win": 100000},
 		"offers": [],

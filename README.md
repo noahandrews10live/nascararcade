@@ -70,7 +70,7 @@ Motion smoothing), and Options → VSync off gives the lowest input delay.
 | **Arcade** | The 1999 cabinet game: 16 cars, a short race and a countdown clock with EXTENDED TIME each lap. |
 | **Single Race** | A full race weekend (practice, qualifying, race) with 20 or 25 cars (25 is the most in any race) and the full rules below. FIELD SIZE is **AUTO** by default: see below. |
 | **Season** | A 6-, 12- or 36-race championship with points, wins and top 5s. Standings are saved between sessions. |
-| **Career** | Rookie to champion. Start underfunded, then earn prize money and reputation, sign sponsors and buy engine, aero, chassis and pit-crew R&D. It runs season after season with a career record. |
+| **Career** | Rookie to champion. Every career starts with $1,000,000 in the bank to spend on R&D, then earn prize money and reputation, sign sponsors and buy engine, aero, chassis and pit-crew R&D. It runs season after season with a career record. |
 | **2 Player** | Split-screen racing. Player 2 uses I/J/K/L (U to pit) or a second gamepad. |
 | **Lightning Challenges** | Eight race-defining scenarios, such as a last-lap draft, a charge from the back or saving fuel. Completing five unlocks the #00 Thunderbolt legend car. A **Daily Challenge** picks a new scenario and track each day, the same for everyone. |
 | **Paint Shop** | Create your own car: number, driver name, sponsor, body, paint scheme (classic, two-tone, swoosh, twin stripes, flames, arrow, split) and colours. You can race it in every mode. |
@@ -184,6 +184,20 @@ stand-in for the server.
   - **3D wrecks**: a car that tips far enough, gets lifted in a hit, or goes
     sideways at speed becomes a free 3D body and can get airborne, barrel-roll and
     land on its wheels or its roof;
+  - **a drivetrain you can feel** (your car): the driven wheels and the fronts have
+    their own speeds, and tyre force comes from the slip between wheel and road
+    (peaking near 11%). A heavy throttle with the assists off spins the rears up;
+    a hard stab of brake locks a wheel. Traction control and ABS hold the slip
+    near the peak (FULL) or let it run a little further (MILD);
+  - **engine braking** when you lift, stronger at high revs and in the low gears,
+    and a 50 ms drive cut on each upshift;
+  - **tyres that take a moment to bite**: side force builds over about 0.4 m of
+    rolling (relaxation length), so a sudden flick at low speed is softer than at
+    racing speed; a lightly loaded tyre gets stiffer (its grip peaks at a smaller
+    slip angle);
+  - **camber**: oval cars run the right side leaning in and the left leaning out,
+    so as the body rolls in a left turn the loaded tyres sit flat; too much roll
+    tilts them off their best angle and costs grip;
   - a 5-speed sequential gearbox and fuel burn.
 
   Driving assists are OFF, MILD (steering help only, looser traction and ABS) or
@@ -198,7 +212,8 @@ stand-in for the server.
   - Superspeedways: pack drafting worth over 30 mph that builds through a line of cars and reaches a long way back, so a car that falls off the back can still catch up. A car on your bumper pushes you (a whole line outruns a lone car), and a car alongside your rear quarter slows you down (side-drafting). The AI runs nose to tail in the pack.
   - Other tracks: the draft is smaller, and a car close behind another loses front downforce in its dirty air and pushes up the track.
 - **Contact and wrecks.** Car-to-car and wall contact is resolved as physical impulses at the contact point:
-  - A tap in the right rear can hook a car into a spin.
+  - A nose into the right rear, off to the side, hooks the car ahead into a spin, even at a few mph.
+  - Square bumper-to-bumper bump drafting pushes the car ahead with next to no twist or damage.
   - Pack wrecks collect several cars.
   - Damage reduces aero, power and alignment, and heavy damage retires the car.
 - **Race rules.**
@@ -453,6 +468,7 @@ All tests run headless (`godot --headless --fixed-fps 60 --path . -s <script>`):
 | `tests/director_test.gd` | Replay director, photo mode and the highlight reel |
 | `tests/net_test.gd` | Online: run with ROLE=host and ROLE=client together; includes a caution, the client's pit call and the restart. RELAY=1 goes through the room-code relay (`tests/tools/fake_realtime.py` stands in for Supabase offline) |
 | `tests/wheel_test.gd` | Starts the force-feedback helper and checks it answers |
+| `tests/drivetrain_test.gd` | Wheelspin, traction control, lock-up and ABS, engine braking, the upshift cut, tyre relaxation |
 | `tests/telemetry_test.gd` | Chassis telemetry (roll, tyre loads, temperatures, bump stops) and wreck physics checks |
 | `tests/physics_test.gd` | Solo lap speeds, draft gain and a 25-car race per track |
 | `tests/field_test.gd` | Full-field AI race with incident tracing (`TRACK=n SECS=s TRACE=car#`) |
