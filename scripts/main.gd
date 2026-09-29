@@ -3142,7 +3142,16 @@ func _start_session() -> void:
 ## their spot even in a smaller field), otherwise random with the player mid-pack.
 func _grid_for(size: int, player_team: int) -> Array:
 	if qual_grid.is_empty():
-		return []
+		# No qualifying: start in the middle of the pack, not at the back of it.
+		if Game.teams.size() < size:
+			Game._fill_teams()
+		var others: Array = range(Game.teams.size()).filter(func(i): return i != player_team)
+		others.shuffle()
+		var slot: int = (size - 1) / 2
+		var out: Array = []
+		for i in size:
+			out.append(player_team if i == slot else others.pop_back())
+		return out
 	var grid: Array = []
 	for t in qual_grid:
 		var room: int = size - (0 if grid.has(player_team) or t == player_team else 1)

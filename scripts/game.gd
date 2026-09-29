@@ -327,10 +327,10 @@ func buy_upgrade(key: String) -> bool:
 	return true
 
 
-## What each R&D level is worth. A rookie team starts a little down on the
-## field; each level is a step you can feel, and a maxed car is well clear of it.
+## What each R&D level is worth. A new career car is as quick as the rest of
+## the field; each level is a step you can feel, and a maxed car is well clear.
 const UPGRADE_STEP := {"engine": 0.03, "aero": 0.025, "chassis": 0.02, "crew": 0.07}
-const UPGRADE_BASE := {"engine": 0.97, "aero": 1.02, "chassis": 0.985, "crew": 1.15}
+const UPGRADE_BASE := {"engine": 1.0, "aero": 1.0, "chassis": 1.0, "crew": 1.0}
 ## Superspeedways keep engine and aero gains in check (the rules there are
 ## about the pack, and 215 mph is plenty), so those count for a third there.
 const PACK_UPGRADE_SHARE := 0.35
@@ -970,7 +970,7 @@ func ai_skill_scale() -> float:
 ## Applies the garage setup to the player's car.
 func apply_setup(c: Node3D) -> void:
 	var bal: float = setup.balance # + = looser
-	c.grip_front = 0.98 + bal * 0.012
+	c.grip_front = 1.02 + bal * 0.012 # at 0, the same balance as every other car
 	c.grip_rear = 1.07 - bal * 0.014
 	# Real setup pieces: wedge (cross weight), springs, sway bar, bump stops,
 	# stagger, pressures per side, brake bias and gearing.
