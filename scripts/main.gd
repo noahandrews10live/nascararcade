@@ -3025,10 +3025,21 @@ func _on_menu_activated(id: String) -> void:
 			_enter_sponsors()
 		"stats":
 			_enter_career_stats()
+		"restart":
+			_enter_career_confirm("restart")
 		"retire":
+			_enter_career_confirm("retire")
+		"cr_same":
+			_restart_career(true)
+		"cr_new":
+			_restart_career(false)
+		"cr_retire":
+			_drop_career_checkpoint()
 			Game.clear_career()
 			Game.clear_season()
 			_enter_title()
+		"cr_cancel":
+			_enter_career_hub()
 		"settings":
 			_enter_race_setup("hub")
 		"standings":
@@ -3061,6 +3072,8 @@ func _on_menu_activated(id: String) -> void:
 
 func _on_menu_cancelled() -> void:
 	match menu_kind:
+		"career_confirm":
+			_enter_career_hub()
 		"boards":
 			if _friend_edit:
 				_friend_edit.visible = false
@@ -3374,11 +3387,57 @@ func _enter_career_hub() -> void:
 		{"id": "standings", "label": "STANDINGS", "hint": ("SEASON %d: %s WITH %d POINTS" % [cr.year, Game.ordinal(pos), pts]) if pos > 0 else "SEASON %d: NO RACES RUN YET" % cr.year},
 		{"id": "stats", "label": "CAREER RECORD", "hint": cr.get("last", "")},
 		{"id": "main", "label": "SAVE + MAIN MENU"},
+		{"id": "restart", "label": "RESTART CAREER", "hint": "START AGAIN FROM YEAR 1 WITH $%s" % Game.money_text(Game.CAREER_START_MONEY)},
 		{"id": "retire", "label": "RETIRE", "hint": "ENDS AND DELETES THIS CAREER"},
 	]
 	_open_menu("hub", "YEAR %d  -  $%s  -  REP %d" % [cr.year, Game.money_text(cr.money), cr.rep], rows, 0)
 	menu.row_h = 28
 	menu.build(menu.title, rows, 0)
+
+
+## Restarting or retiring throws away everything this career has done, so ask
+## first (the safe choice is the one the cursor starts on).
+func _enter_career_confirm(kind: String) -> void:
+	var cr: Dictionary = Game.career
+	var t: Dictionary = Game.teams[int(cr.team)]
+	var lost := "YEAR %d, $%s, %d WINS" % [int(cr.year), Game.money_text(cr.money), int(cr.stats.wins)]
+	var rows: Array
+	var title: String
+	if kind == "restart":
+		title = "RESTART CAREER?"
+		rows = [
+			{"id": "cr_cancel", "label": "KEEP MY CAREER", "hint": lost},
+			{"id": "cr_same", "label": "START OVER IN THE #%s" % t.num, "hint": "YEAR 1, $%s IN THE BANK, NO UPGRADES. THIS CAREER IS DELETED" % Game.money_text(Game.CAREER_START_MONEY)},
+			{"id": "cr_new", "label": "START OVER IN A NEW CAR", "hint": "PICK ANY CAR, THEN YEAR 1 WITH $%s. THIS CAREER IS DELETED" % Game.money_text(Game.CAREER_START_MONEY)},
+		]
+	else:
+		title = "RETIRE?"
+		rows = [
+			{"id": "cr_cancel", "label": "KEEP RACING", "hint": lost},
+			{"id": "cr_retire", "label": "RETIRE AND DELETE THIS CAREER", "hint": "THIS CAN'T BE UNDONE"},
+		]
+	_open_menu("career_confirm", title, rows, 0)
+
+
+## A race checkpoint from the old career would put you back in it.
+func _drop_career_checkpoint() -> void:
+	if String(resume_info().get("data", {}).get("mode", "")) == "career":
+		clear_checkpoint()
+
+
+func _restart_career(same_car: bool) -> void:
+	var team: int = int(Game.career.team)
+	_drop_career_checkpoint()
+	Game.clear_career()
+	Game.clear_season()
+	mode = "career"
+	if same_car:
+		Game.selected_team = team
+		Game.new_career(team)
+		_enter_career_hub()
+		_sub("NEW CAREER: YEAR 1, $%s IN THE BANK" % Game.money_text(Game.CAREER_START_MONEY), 3.0)
+	else:
+		_enter_car_select()
 
 
 func _enter_rnd(cursor := 0) -> void:

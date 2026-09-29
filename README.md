@@ -70,7 +70,7 @@ Motion smoothing), and Options → VSync off gives the lowest input delay.
 | **Arcade** | The 1999 cabinet game: 16 cars, a short race and a countdown clock with EXTENDED TIME each lap. |
 | **Single Race** | A full race weekend (practice, qualifying, race) with 20 or 25 cars (25 is the most in any race) and the full rules below. FIELD SIZE is **AUTO** by default: see below. |
 | **Season** | A 6-, 12- or 36-race championship with points, wins and top 5s. Standings are saved between sessions. |
-| **Career** | Rookie to champion. Every career starts with $1,000,000 in the bank to spend on R&D, then earn prize money and reputation, sign sponsors and buy engine, aero, chassis and pit-crew R&D. It runs season after season with a career record. |
+| **Career** | Rookie to champion. Every career starts with $1,000,000 in the bank to spend on R&D, then earn prize money and reputation, sign sponsors and buy engine, aero, chassis and pit-crew R&D. It runs season after season with a career record. RESTART CAREER in the career hub starts over from year 1 (same car or a new one); both it and RETIRE ask first. |
 | **2 Player** | Split-screen racing. Player 2 uses I/J/K/L (U to pit) or a second gamepad. |
 | **Lightning Challenges** | Eight race-defining scenarios, such as a last-lap draft, a charge from the back or saving fuel. Completing five unlocks the #00 Thunderbolt legend car. A **Daily Challenge** picks a new scenario and track each day, the same for everyone. |
 | **Paint Shop** | Create your own car: number, driver name, sponsor, body, paint scheme (classic, two-tone, swoosh, twin stripes, flames, arrow, split) and colours. You can race it in every mode. |
@@ -477,6 +477,7 @@ All tests run headless (`godot --headless --fixed-fps 60 --path . -s <script>`):
 | `tests/race_mode_test.gd` | Single Race through the real game flow |
 | `tests/weekend_test.gd` | Practice → qualifying → race, plus a season round |
 | `tests/career_test.gd` | Career money, R&D, season rollover |
+| `tests/career_restart_test.gd` | Restarting (same car or a new one) and retiring a career, each behind a confirm |
 | `tests/challenge_test.gd` | Every Lightning Challenge reaches a verdict |
 | `tests/tracks_test.gd` | Every track builds and laps cleanly |
 | `tests/makes_test.gd` | The four bodies and the even split across the field |

@@ -267,6 +267,7 @@ func selectable_teams() -> Array:
 
 # --- Career ------------------------------------------------------------------------
 const CAREER_PATH := "user://career.cfg"
+const CAREER_START_MONEY := 1000000
 const UPGRADES := [
 	["engine", "ENGINE", "MORE HORSEPOWER"],
 	["aero", "AERO", "LESS DRAG DOWN THE STRAIGHTS"],
@@ -293,11 +294,12 @@ func save_career() -> void:
 func clear_career() -> void:
 	career = {}
 	DirAccess.remove_absolute(ProjectSettings.globalize_path(CAREER_PATH))
+	save_changed.emit()
 
 
 func new_career(team_idx: int) -> void:
 	career = {
-		"team": team_idx, "money": 1000000, "rep": 10, "year": 1,
+		"team": team_idx, "money": CAREER_START_MONEY, "rep": 10, "year": 1,
 		"upgrades": {"engine": 0, "aero": 0, "chassis": 0, "crew": 0},
 		"sponsor": {"name": "LOCAL TIRE SHOP", "per_race": 40000, "bonus_win": 100000},
 		"offers": [],

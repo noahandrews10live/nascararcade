@@ -151,6 +151,28 @@ func _run() -> void:
 	await _screen("race_setup")
 	main._enter_options()
 	await _screen("options")
+	# The career hub and its confirm screens (with a throwaway career, then the
+	# player's own put back).
+	var had_career: Dictionary = game.career.duplicate(true)
+	var had_season: Dictionary = game.season.duplicate(true)
+	game.new_career(2)
+	main._enter_career_hub()
+	await _screen("career_hub")
+	main._enter_career_confirm("restart")
+	await _screen("career_restart")
+	main._enter_career_confirm("retire")
+	await _screen("career_retire")
+	game.career = had_career
+	game.season = had_season
+	if had_career.is_empty():
+		game.clear_career()
+	else:
+		game.save_career()
+	if had_season.is_empty():
+		game.clear_season()
+	else:
+		game.save_season()
+	main.mode = "race"
 	main._use_track(1)
 	main._enter_track_select()
 	await _screen("track_select")
