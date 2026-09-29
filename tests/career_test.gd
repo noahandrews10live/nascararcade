@@ -45,8 +45,9 @@ func _run() -> void:
 	var money0: int = game.career.money
 	_check(await _race_to_results(), "career race reaches results")
 	var p: Node3D = main.race.player
-	var base_power: float = float(game.tracks[game.selected_track].get("hp", 670)) * 745.7
-	_check(p.power < base_power, "rookie car has less power than a top team (%.0f vs %.0f hp)" % [p.power / 745.7, base_power / 745.7])
+	# A new career car matches the field; the engine level bought above adds to it.
+	var base_power: float = float(game.tracks[game.selected_track].get("hp", 670)) * 745.7 * float(game.teams[0].get("speed", 1.0))
+	_check(p.power > base_power * 1.005 and p.power <= base_power * game.upgrade_mult("engine", 1) + 1.0, "the engine upgrade adds its horsepower (%.0f vs %.0f hp stock)" % [p.power / 745.7, base_power / 745.7])
 	main._after_season_race()
 	_check(game.career.money > money0 and game.career.stats.starts == 1, "earned money and logged a start (%s)" % game.career.last)
 	# Jump to the last race of the season.
