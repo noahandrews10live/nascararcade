@@ -47,6 +47,10 @@ audio. The project has no imported assets.
     `assets/hdri/CREDITS.md`), turned so the photo's sun sits where the game's sun is
     and swapped as the race clock and the weather change; AgX filmic tone mapping;
   - grandstands full of fans, pine and broadleaf trees and a chain-link catch fence;
+  - race-day props from Kenney's Racing Kit (CC0; see `assets/models/kenney/CREDITS.md`):
+    team tents and cones in the paddock, sponsor billboards outside the backstretch,
+    a TV dish by the media centre, and red and white barriers lining the road
+    course's tight corners. Each model is drawn once for all its copies;
   - a procedural sky with clouds (stars at night), sun shadows and bloom;
   - on desktop (Forward+): ambient occlusion, screen-space reflections, volumetric fog
     with light-tower beams at night, and FSR 2 upscaling with temporal anti-aliasing.
@@ -418,6 +422,7 @@ scripts/touch_controls.gd  phone/tablet controls: tilt or drag steering, pedals,
 scripts/car_body.gd        the four car bodies (lofted meshes, LODs, lights, flames)
 scripts/showtime.gd        intro, showroom, TV package, commentary, wreck replays,
                            last lap, photo finish, victory lane
+scripts/props.gd           race-day props (Kenney Racing Kit): tents, cones, billboards, barriers
 scripts/music.gd           the synthesised score (anthem, menu, last lap, victory)
 scripts/ghost.gd           best-lap ghost recording and playback
 tests/                     headless test benches and screenshot scripts (see below)

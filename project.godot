@@ -38,6 +38,8 @@ window/stretch/aspect="keep"
 
 [rendering]
 
+textures/lossless_compression/force_png=true
+
 textures/vram_compression/import_etc2_astc=true
 
 renderer/rendering_method="forward_plus"

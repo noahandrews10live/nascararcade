@@ -49,7 +49,18 @@ func setup(config: Dictionary) -> void:
 	_build_fence()
 	_build_crowd()
 	_build_motorhomes()
+	_build_props()
 	_build_probes()
+
+
+## Race-day props from Kenney's Racing Kit (tents, cones, billboards, barriers).
+func _build_props() -> void:
+	var Props: GDScript = load("res://scripts/props.gd")
+	if not Props.available():
+		return
+	var p: Node3D = Props.new()
+	add_child(p)
+	p.build(self)
 
 
 # --- geometry ----------------------------------------------------------------
