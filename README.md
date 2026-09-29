@@ -160,7 +160,7 @@ stand-in for the server.
   | Keystone | Pocono | 166 | ~171 |
   | Canyon Ridge | Watkins Glen / COTA | 114 | ~110 |
 
-  Within 3 mph of real on average (rms). `tests/lap_bench.gd` runs these in seconds.
+  Within about 3.5 mph of real on average (rms). `tests/lap_bench.gd` runs these in seconds.
 
 - **Car physics.** Each car is simulated like a real stock car:
   - **four tyres**, each with its own load, slip angle, grip peak and fall-off, a
