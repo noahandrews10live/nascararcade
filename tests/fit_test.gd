@@ -158,6 +158,9 @@ func _run() -> void:
 	game.new_career(2)
 	main._enter_career_hub()
 	await _screen("career_hub")
+	game.career.upgrades.engine = 2
+	main._enter_rnd()
+	await _screen("career_rnd")
 	main._enter_career_confirm("restart")
 	await _screen("career_restart")
 	main._enter_career_confirm("retire")

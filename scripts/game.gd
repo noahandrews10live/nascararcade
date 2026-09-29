@@ -327,13 +327,47 @@ func buy_upgrade(key: String) -> bool:
 	return true
 
 
-## A rookie team starts down on everything; R&D closes the gap and then some.
+## What each R&D level is worth. A rookie team starts a little down on the
+## field; each level is a step you can feel, and a maxed car is well clear of it.
+const UPGRADE_STEP := {"engine": 0.03, "aero": 0.025, "chassis": 0.02, "crew": 0.07}
+const UPGRADE_BASE := {"engine": 0.97, "aero": 1.02, "chassis": 0.985, "crew": 1.15}
+## Superspeedways keep engine and aero gains in check (the rules there are
+## about the pack, and 215 mph is plenty), so those count for a third there.
+const PACK_UPGRADE_SHARE := 0.35
+
+
+## Multipliers for an R&D level: power, drag (lower is better), grip and pit-stop
+## time (lower is better).
+func upgrade_mult(key: String, lvl: int, pack_track := false) -> float:
+	var step: float = UPGRADE_STEP[key] * float(lvl)
+	if pack_track and (key == "engine" or key == "aero"):
+		step *= PACK_UPGRADE_SHARE
+	match key:
+		"aero", "crew":
+			return UPGRADE_BASE[key] - step
+	return UPGRADE_BASE[key] + step
+
+
+## The shop's line for an upgrade: what it does now, against a stock car.
+func upgrade_effect_text(key: String, lvl: int) -> String:
+	var m: float = upgrade_mult(key, lvl)
+	match key:
+		"engine":
+			return "%+d%% HORSEPOWER" % roundi((m - 1.0) * 100.0)
+		"aero":
+			return "%+d%% DRAG" % roundi((m - 1.0) * 100.0)
+		"chassis":
+			return "%+d%% GRIP" % roundi((m - 1.0) * 100.0)
+	return "%+d%% PIT STOP TIME" % roundi((m - 1.0) * 100.0)
+
+
 func apply_career(c: Node3D) -> void:
 	var u: Dictionary = career.upgrades
-	c.power *= 0.965 + 0.011 * float(u.engine)
-	c.cda *= 1.03 - 0.01 * float(u.aero)
-	c.mu *= 0.975 + 0.009 * float(u.chassis)
-	c.pit_crew_mult = 1.15 - 0.05 * float(u.crew)
+	var pack: bool = c.track != null and c.track.cfg.has("pack_gap")
+	c.power *= upgrade_mult("engine", int(u.engine), pack)
+	c.cda *= upgrade_mult("aero", int(u.aero), pack)
+	c.mu *= upgrade_mult("chassis", int(u.chassis), pack)
+	c.pit_crew_mult = upgrade_mult("crew", int(u.crew), pack)
 
 
 func sponsor_offers() -> Array:

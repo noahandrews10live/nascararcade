@@ -3445,8 +3445,9 @@ func _enter_rnd(cursor := 0) -> void:
 	for u in Game.UPGRADES:
 		var lvl: int = Game.career.upgrades[u[0]]
 		var bar := "|".repeat(lvl) + ".".repeat(Game.MAX_UPGRADE - lvl)
-		var cost := "MAXED" if lvl >= Game.MAX_UPGRADE else "$" + Game.money_text(Game.upgrade_cost(u[0]))
-		rows.append({"id": "up_" + u[0], "label": "%s  %s" % [u[1], bar], "hint": "%s  -  NEXT LEVEL %s" % [u[2], cost]})
+		var now := "NOW " + Game.upgrade_effect_text(u[0], lvl)
+		var nxt := "MAXED" if lvl >= Game.MAX_UPGRADE else "NEXT: %s FOR $%s" % [Game.upgrade_effect_text(u[0], lvl + 1), Game.money_text(Game.upgrade_cost(u[0]))]
+		rows.append({"id": "up_" + u[0], "label": "%s  %s" % [u[1], bar], "hint": "%s  -  %s" % [now, nxt]})
 	rows.append({"id": "back", "label": "DONE"})
 	_open_menu("rnd", "R&D  -  BANK $%s" % Game.money_text(Game.career.money), rows, cursor)
 
