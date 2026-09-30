@@ -338,8 +338,6 @@ var _player_best := 99
 var _player_mark := 99
 var _player_mark_t := 0.0
 var _last_pit_leader: Node3D
-var _voice_pbp := ""
-var _voice_color := ""
 
 
 ## A line from the bank, not one said in the last few calls.
@@ -376,47 +374,6 @@ func _update_commentary(delta: float) -> void:
 	_booth_t = 4.0
 	_say_cool = 3.0
 	_story_t = 0.0
-	if Game.radio_voice and main.state != main.State.REPLAY:
-		if _voice_pbp == "":
-			_pick_voices()
-		if _voice_pbp != "":
-			var v: String = _voice_pbp if who == "pbp" else _voice_color
-			DisplayServer.tts_speak(text.to_lower(), v, 65, 1.0 if who == "pbp" else 0.9, 1.12 if who == "pbp" else 1.02, 0, false)
-
-
-## The two booth voices: the most natural-sounding English voices the device
-## has (the "natural", "neural", "enhanced" and premium ones first), and two
-## different ones if there are two.
-func _pick_voices() -> void:
-	var all: Array = DisplayServer.tts_get_voices()
-	var scored: Array = []
-	for v in all:
-		var lang: String = String(v.get("language", ""))
-		if not lang.begins_with("en"):
-			continue
-		var nm: String = String(v.get("name", "")).to_lower()
-		var sc := 0
-		for good in ["natural", "neural", "online", "enhanced", "premium", "google us english", "google uk english"]:
-			if nm.contains(good):
-				sc += 10
-		for named in ["samantha", "alex", "daniel", "aaron", "evan", "nathan", "guy", "davis", "tony", "jenny", "aria", "christopher", "eric"]:
-			if nm.contains(named):
-				sc += 4
-		if lang.begins_with("en-US") or lang.begins_with("en_US"):
-			sc += 2
-		if nm.contains("compact") or nm.contains("espeak"):
-			sc -= 5
-		scored.append([sc, String(v.get("id", ""))])
-	scored.sort_custom(func(a, b): return a[0] > b[0])
-	if scored.is_empty():
-		var ids := DisplayServer.tts_get_voices_for_language("en")
-		if ids.is_empty():
-			return
-		_voice_pbp = ids[0]
-		_voice_color = ids[min(1, ids.size() - 1)]
-		return
-	_voice_pbp = scored[0][1]
-	_voice_color = scored[min(1, scored.size() - 1)][1]
 
 
 func _track_name() -> String:

@@ -1369,7 +1369,7 @@ func _on_lap(car: Node3D, laps_done: int, lap_time: float) -> void:
 		var fuel_laps: int = int(car.fuel / max(track.length / 1000.0 * 0.62 * car.burn_scale, 0.001))
 		var tyre: String = "tires are good" if car.tyre_grip() > 0.95 else ("tires are going away" if car.tyre_grip() > 0.88 else "tires are gone")
 		var where: String = "you're the leader" if pos == 1 else "P%d, %.1f back of the leader" % [pos, gap]
-		_radio("%s. %s, fuel for %d laps." % [where, tyre, fuel_laps], "chief")
+		_radio("%s. %s, fuel for %d laps." % [where, tyre, fuel_laps])
 	if mode != "arcade":
 		if session == "practice":
 			_msg(Game.format_time(lap_time), 2.0, Color.WHITE)
@@ -2076,29 +2076,26 @@ func _near_pit_entry(p: Node3D) -> bool:
 	return to_entry < 500.0
 
 
-## Radio: the spotter and the crew chief speak their calls (the OS / browser voice).
+## Radio: the crew chief speaks his calls (the OS / browser voice). The spotter
+## and the TV booth are on screen only.
 var telemetry: Control
 var _voices: PackedStringArray = []
 
 
-func _radio(text: String, who: String) -> void:
+func _radio(text: String) -> void:
 	if not Game.radio_voice or state == State.REPLAY:
 		return
 	if _voices.is_empty():
 		_voices = DisplayServer.tts_get_voices_for_language("en")
 		if _voices.is_empty():
 			return
-	var spotter := who == "spotter"
-	var v: String = _voices[0] if spotter or _voices.size() < 2 else _voices[1]
-	DisplayServer.tts_speak(text.to_lower(), v, 70, 1.15 if spotter else 0.9, 1.35 if spotter else 1.1, 0, spotter)
+	DisplayServer.tts_speak(text.to_lower(), _voices[min(1, _voices.size() - 1)], 70, 0.9, 1.1, 0, false)
 
 
 func _on_control_message(text: String, kind: String) -> void:
 	match kind:
-		"spotter":
-			_radio({"CAR LOW": "car low", "CAR HIGH": "car high", "3 WIDE": "three wide, stay put", "CLEAR": "clear"}.get(text, text.replace("SPOTTER: ", "")), "spotter")
 		"pit", "flag", "stage":
-			_radio(text, "chief")
+			_radio(text)
 	match kind:
 		"flag":
 			_msg(text, 2.5, Color(1, 0.9, 0.2) if text.begins_with("CAUTION") or text == "ONE TO GO" else (Color(0.3, 1.0, 0.3) if text.begins_with("GREEN") else Color.WHITE))
@@ -2845,8 +2842,8 @@ func _enter_options() -> void:
 		{"id": "share_stats", "label": "SHARE STATS", "values": ["OFF", "ON"], "index": int(Game.settings.get("share_stats", 1)), "hint": "SENDS YOUR FRAME RATE AND DEVICE TYPE AFTER A RACE (NOTHING PERSONAL) TO HELP TUNE THE GAME"},
 		{"id": "auto_gas", "label": "GAS", "values": ["YOU", "AUTO"], "index": int(Game.settings.get("auto_gas", 0)), "hint": "AUTO: THE CAR TAKES EACH CORNER AT A SAFE SPEED, YOU STEER (ONE THUMB). BRAKE STILL WORKS"},
 		{"id": "tilt_sens", "label": "TILT STEERING", "values": ["GENTLE", "NORMAL", "QUICK", "VERY QUICK"], "index": int(Game.settings.get("tilt_sens", 1)), "hint": "PHONES: HOW FAR YOU TILT FOR FULL LOCK (18 / 12 / 9 / 6 DEGREES)"},
-		{"id": "radio", "label": "RADIO VOICE", "values": ["OFF", "ON"], "index": 1 if Game.radio_voice else 0, "hint": "SPOKEN SPOTTER, CREW CHIEF AND TV BOOTH CALLS"},
-		{"id": "commentary", "label": "COMMENTARY", "values": ["OFF", "ON"], "index": int(Game.settings.get("commentary", 1)), "hint": "THE TV BOOTH: PLAY-BY-PLAY AND ANALYST (SPOKEN WITH RADIO VOICE ON)"},
+		{"id": "radio", "label": "CREW CHIEF VOICE", "values": ["OFF", "ON"], "index": 1 if Game.radio_voice else 0, "hint": "THE CREW CHIEF'S CALLS, SPOKEN"},
+		{"id": "commentary", "label": "COMMENTARY", "values": ["OFF", "ON"], "index": int(Game.settings.get("commentary", 1)), "hint": "THE TV BOOTH'S PLAY-BY-PLAY AND ANALYST LINES, ON SCREEN"},
 		{"id": "vsync", "label": "VSYNC", "values": ["OFF", "ON"], "index": 1 if Game.vsync else 0, "hint": "OFF: LOWEST INPUT DELAY, MAY TEAR"},
 		{"id": "scan", "label": "SCANLINES (1999)", "values": ["OFF", "ON"], "index": 1 if Game.scanlines else 0},
 		{"id": "account", "label": "ACCOUNT + NEW PHONE", "hint": "YOUR SAVED GAME ONLINE, AND MOVING IT TO A NEW PHONE"},

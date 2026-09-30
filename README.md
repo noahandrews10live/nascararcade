@@ -124,7 +124,7 @@ stand-in for the server.
 
 - **An opening.** The game starts with a race-day intro: a helicopter sweep over the speedway, the field thundering past the apron, a jet flyover and the title, all over a synthesised anthem. Press anything to skip it.
 - **The showroom.** Car select and the Paint Shop put your car on a turntable in a lit studio. It rolls in in grey primer, the paint sweeps on and the engine blips.
-- **A TV broadcast.** A running-order ticker, position bugs and battle graphics for close fights. Two booth voices (text-to-speech, the most natural voices your device has; can be turned off in Options) welcome you to the track and call the start, the lead changes, battles, wrecks, stage winners, ten and five to go, the gap at the front, your charge through the field, the leader pitting, the white flag and the finish, with the analyst filling the quiet moments. Lines don't repeat back to back.
+- **A TV broadcast.** A running-order ticker, position bugs and battle graphics for close fights. An on-screen TV booth (turn it off in Options: COMMENTARY) welcomes you to the track and calls the start, the lead changes, battles, wrecks, stage winners, ten and five to go, the gap at the front, your charge through the field, the leader pitting, the white flag and the finish, with the analyst filling the quiet moments. Lines don't repeat back to back.
 - **Music.** A live-synthesised score with a driven guitar, brass stabs and claps: the anthem, a menu groove, a tense pulse under caution, a qualifying groove, the last-lap build, the victory fanfare and a wind-down behind the results. Races themselves run without music, like on TV.
 - **People.** Pit crews, the flagman and the victory lane crowd are jointed figures in team firesuits and helmets or caps. The crew vault the wall, walk to the car, kneel at the wheels and face the work; in victory lane they jump and wave while the winner stands on the roof with their arms up.
 - **Paint schemes and decals.** Seven schemes across the field, the sponsor big on the rear quarter panels and the hood, a row of contingency decals behind the front wheels and a chrome badge on the nose.
@@ -258,7 +258,7 @@ stand-in for the server.
 - **Crew chief.**
   - The garage has wedge, springs, sway bar, bump stops, stagger, pressures per side, brake bias and gearing. Setup sheets save per track, and you can share them as codes.
   - The telemetry overlay (T) shows tread temperatures across each tyre, pressures, wear, loads, shock travel, the air around you, water temperature, a live delta to your best lap, and a speed trace.
-  - A radio voice (the system's text-to-speech) gives the spotter's and crew chief's calls.
+  - The crew chief's calls are spoken (the system's text-to-speech; Options: CREW CHIEF VOICE). The spotter's calls are on screen only.
 - **Broadcast director.**
   - Replays cut between incidents, battles and the leader, with TV, chase, roof, blimp and helicopter shots.
   - Highlights (H on the results) show every spin, flip, big hit and lead change in slow motion.
