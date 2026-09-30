@@ -788,7 +788,7 @@ func _integrate(h: float) -> void:
 		cb = u / spd
 		sb = vy / spd
 	var dmg_aero: float = damage.front + damage.rear
-	var drag: float = q_air * cda * drag_mult * (1.0 + 0.35 * dmg_aero) * (1.0 + 1.6 * sb * sb)
+	var drag: float = q_air * cda * drag_mult * (1.0 + 0.25 * dmg_aero) * (1.0 + 1.6 * sb * sb)
 	var fa_x: float = -drag * cb
 	var fa_y: float = -drag * sb - q_air * AERO_SIDE * sb
 	var ride: float = clamp(1.0 - 2.5 * chassis_z, 0.9, 1.2) # lower = more downforce
@@ -1163,7 +1163,7 @@ func _integrate_tumble(h: float) -> void:
 			scraping = true
 			if -vnw > 3.0:
 				wall_hit = max(wall_hit, -vnw)
-				add_damage(fw * h * 0.5, Vector2(lp.z * -1.0, lp.x))
+				add_damage(fw * h * 0.5, Vector2(lp.z * -1.0, lp.x), 0.0)
 	# Integrate the free body.
 	t_vel += force / MASS * h
 	t_pos += t_vel * h
@@ -1288,10 +1288,16 @@ func inv_mass_along(n: Vector2, rp: Vector2) -> float:
 	return 1.0 / MASS + c * c / IZ
 
 
-func add_damage(j: float, rp_track: Vector2) -> void:
+## Damage from an impulse `j` at a contact point. A hit's size is the speed it
+## changes the car by: rubs, bump drafting and scraping along the wall (under
+## `min_dv`, about 4.5 mph) leave nothing lasting; real hits dent the car.
+const DAMAGE_MIN_DV := 2.0 # m/s
+const DAMAGE_PER_DV := 1.0 / 70.0 # per m/s beyond that
+func add_damage(j: float, rp_track: Vector2, min_dv := DAMAGE_MIN_DV) -> void:
 	var rb: Vector2 = track_to_body(rp_track)
-	var amount: float = j / (MASS * 55.0) * damage_mult
-	if amount < 0.01:
+	var dv: float = j / MASS
+	var amount: float = max(dv - min_dv, 0.0) * DAMAGE_PER_DV * damage_mult
+	if amount < 0.005:
 		return
 	if abs(rb.x) > 1.2:
 		var key := "front" if rb.x > 0.0 else "rear"

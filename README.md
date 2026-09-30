@@ -215,7 +215,7 @@ stand-in for the server.
   - A nose into the right rear, off to the side, hooks the car ahead into a spin, even at a few mph.
   - Square bumper-to-bumper bump drafting pushes the car ahead with next to no twist or damage.
   - Pack wrecks collect several cars.
-  - Damage reduces aero, power and alignment, and heavy damage retires the car.
+  - Rubs, taps and scraping the wall (under about 4.5 mph of impact) leave no lasting damage; real hits do. Damage reduces aero, power and alignment, and heavy damage retires the car (`tests/damage_bench.gd` shows what hits cost).
 - **Race rules.**
   - **When the yellow flies:**
     - A wreck: a car out, a heavily damaged car, or three or more cars spinning.
