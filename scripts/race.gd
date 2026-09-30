@@ -1151,9 +1151,9 @@ func _debris_tick(delta: float) -> void:
 	if control and control.enabled and control.cautions_enabled and control.flag == control.Flag.GREEN:
 		var on_track := 0
 		for dd in debris:
-			if dd.age > 12.0:
+			if dd.age > 6.0:
 				on_track += 1
-		if on_track >= 5:
+		if on_track >= 3:
 			control.throw_caution("DEBRIS", null)
 
 

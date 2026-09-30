@@ -171,11 +171,18 @@ func checkered() -> void:
 	flag_changed.emit("CHECKERED")
 
 
-## Watches for incidents under green, the way race control does: a wreck (a car
-## out, a heavily damaged car, three or more cars spinning) brings out the yellow;
-## so does a car stopped on the racing surface. Cars that spin, gather it up and
-## drive on don't (road courses only go yellow for a car that's out or stuck on
-## the track).
+## Watches for incidents under green, the way race control does on an oval:
+##   - a wreck: a car out, a heavily damaged car, three or more cars spinning;
+##   - a car that gets turned around (past about 80 degrees), even if it drives
+##     off again;
+##   - a hard hit on the wall (it leaves debris and a wounded car);
+##   - a car stopped anywhere off pit road (the racing surface, the apron, the
+##     grass), or crawling round well off the pace after an incident;
+##   - a pile of debris on the racing surface (race.gd).
+## A slide that's caught doesn't. Road courses only go yellow for a car that's out,
+## stopped on the track or stuck off it.
+const TURNED_AROUND := 1.4 # rad
+const HARD_WALL_HIT := 11.0 # m/s into the wall
 func _green_tick(delta: float) -> void:
 	_green_since += delta
 	if not cautions_enabled:
@@ -185,45 +192,59 @@ func _green_tick(delta: float) -> void:
 	for c in race.cars:
 		if c.spinning and not c.towed and c.pit_state == Pit.NONE:
 			spinning_now += 1
+	var lead := leader()
+	var pack_speed: float = max(abs(lead.v), 20.0)
 	for c in race.cars:
 		if c.towed or c.finished or c.pit_state != Pit.NONE:
 			continue
 		# On the racing surface (not down on the apron, the grass or in the infield).
 		var on_surface: bool = c.d > track.inner_edge() - 0.5 and not c.on_grass
+		var near_pits: bool = track.in_pit_roadway(c.s()) and c.d < track.inner_edge()
 		var st: Dictionary = _incident_timers.get(c, {})
 		var reason := ""
 		if c.out:
 			st.t = st.get("t", 0.0) + delta
 			if st.t > 1.0:
 				reason = "ACCIDENT"
+		elif not road and c.wall_hit > HARD_WALL_HIT and _green_since > 3.0:
+			reason = "CAR IN THE WALL"
 		elif c.spinning or st.has("spun"):
 			st.spun = true
 			st.t = st.get("t", 0.0) + delta
-			if c.speed() < 10.0 and on_surface:
+			st.yaw = max(float(st.get("yaw", 0.0)), abs(c.yaw))
+			if c.speed() < 10.0 and (on_surface or not road) and not near_pits:
 				st.stop = st.get("stop", 0.0) + delta
+			if c.speed() < pack_speed * 0.55:
+				st.slow = st.get("slow", 0.0) + delta
 			if not road and st.t > 0.8 and (c.total_damage() > 0.3 or spinning_now >= 3):
 				reason = "ACCIDENT"
+			elif not road and st.yaw > TURNED_AROUND and st.t > 1.0:
+				reason = "SPIN"
 			elif st.get("stop", 0.0) > (4.0 if road else 1.5):
 				reason = "SPIN"
-			elif not c.spinning and c.speed() > 15.0 and st.t > 1.0:
+			elif not road and st.get("slow", 0.0) > 6.0:
+				reason = "SLOW CAR"
+			elif not c.spinning and c.speed() > max(15.0, pack_speed * (0.0 if road else 0.55)) and st.t > 1.0:
 				_incident_timers.erase(c) # gathered it up and kept going
 				if c.is_player or randf() < 0.3:
 					message.emit("#%s SPUN AND KEPT IT GOING" % c.team.num, "spotter")
 				continue
-			elif st.t > 10.0:
+			elif st.t > (10.0 if road else 12.0):
 				_incident_timers.erase(c)
 				continue
-		elif c.v < 6.0 and _green_since > 6.0 and not c.pace_mode and on_surface:
+		elif c.v < 6.0 and _green_since > 6.0 and not c.pace_mode and not near_pits and (on_surface or not road or c.on_grass):
+			# Stopped: on the track, or (ovals) anywhere off pit road; stuck in the
+			# grass on a road course.
 			st.stop = st.get("stop", 0.0) + delta
-			if st.stop > (6.0 if road else 3.0):
-				reason = "STALLED CAR"
+			if st.stop > (6.0 if road and on_surface else (12.0 if road else 3.0)):
+				reason = "STALLED CAR" if on_surface else "CAR STOPPED"
 		else:
 			_incident_timers.erase(c)
 			continue
 		_incident_timers[c] = st
 		if reason != "":
 			if OS.is_debug_build() and OS.get_environment("RC_DEBUG") != "":
-				print("caution car #%s spin=%s out=%s v=%.1f dmg=%.2f d=%.1f s=%.0f" % [c.team.num, c.spinning, c.out, c.v, c.total_damage(), c.d, c.s()])
+				print("caution %s car #%s spin=%s out=%s v=%.1f dmg=%.2f d=%.1f s=%.0f yaw=%.2f" % [reason, c.team.num, c.spinning, c.out, c.v, c.total_damage(), c.d, c.s(), c.yaw])
 			throw_caution(reason, c)
 			return
 
