@@ -15,6 +15,7 @@ from urllib.parse import urlparse, parse_qsl
 
 TRACK_M = [3444, 2430, 869, 4216, 3685, 2591, 1996, 853, 2028, 4522, 5198]
 players, laps, events, friends, sessions = {}, {}, {}, set(), []
+reports = []
 saves, transfers = {}, {}  # player id -> {"data", "updated_at"}; code -> player id
 import time
 
@@ -83,6 +84,11 @@ def act(body):
         friends.add((me["id"], f["id"]))
         friends.add((f["id"], me["id"]))
         return 200, {"ok": True, "friend": public(f)}
+    if a == "report":
+        if len(body.get("image", "")) > 300000 or len(json.dumps(body.get("state", {}))) > 100000:
+            return 413, {"error": "report too big"}
+        reports.append(body)
+        return 200, {"ok": True, "ref": len(reports)}
     if a == "session":
         sessions.append(body)
         return 200, {"ok": True}
@@ -163,7 +169,7 @@ class H(BaseHTTPRequestHandler):
     def do_GET(self):
         u = urlparse(self.path)
         if u.path == "/debug/state":
-            self._send(200, {"players": len(players), "laps": len(laps), "events": len(events), "friends": len(friends), "sessions": len(sessions)})
+            self._send(200, {"players": len(players), "laps": len(laps), "events": len(events), "friends": len(friends), "sessions": len(sessions), "reports": len(reports), "last_report": reports[-1] if reports else None})
         elif u.path.startswith("/rest/v1/"):
             self._send(*query(u.path[len("/rest/v1/"):], u.query))
         else:

@@ -55,6 +55,9 @@ func _run() -> void:
 	main._return_hub()
 	_check(await _race_to_results(), "season finale reaches results")
 	main._after_season_race()
+	if main.state == main.State.MENU and main.menu_kind == "milestone":
+		print("   milestones: ", main.menu.rows.map(func(r): return r.label))
+		main._on_menu_activated("ms_go") # a milestone first (e.g. a first podium)
 	_check(main.state == main.State.STANDINGS, "final standings shown")
 	_check(game.career.year == 2 and game.season.round == 0 and game.career.history.size() == 1, "rolled into year 2 (last season: %s)" % game.ordinal(game.career.history[0].pos))
 	main._enter_career_stats()

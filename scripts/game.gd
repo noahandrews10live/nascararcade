@@ -824,6 +824,8 @@ const FIELDS := [20, 25]
 ## reference machine), aiming to leave room in a 60 fps frame for drawing.
 const PERF_FIXED_MS := 2.5
 const PERF_CAR_MS := 0.13
+## Shown with problem reports (and in OPTIONS).
+const VERSION := "1.5 (2026-10-02)"
 const PERF_BUDGET_MS := 9.0
 const WEEKENDS := ["RACE ONLY", "QUALIFY + RACE", "PRACTICE + QUALIFY + RACE"]
 var settings := {

@@ -69,6 +69,7 @@ var screen: Control
 var pause_layer: CanvasLayer
 ## The pause screen's keyboard keys (the touch controls show buttons instead).
 var pause_keys: Label
+var pause_status: Label # where you are and how the car is, under PAUSED
 var scan_rect: ColorRect
 var preview_car: Node3D
 
@@ -268,7 +269,12 @@ func _ready() -> void:
 	_resume_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	_resume_label.visible = false
 	ui_layer.add_child(_resume_label)
-	pause_keys = Game.make_label("ESC  RESUME        Q  QUIT / END SESSION", 18, Color.WHITE, 5)
+	pause_status = Game.make_label("", 15, Color(0.75, 0.9, 1.0), 5)
+	pause_status.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	pause_status.size = Vector2(640, 24)
+	pause_status.position = Vector2(0, 136)
+	pause_frame.add_child(pause_status)
+	pause_keys = Game.make_label("ESC  RESUME      Q  QUIT / END SESSION      F8  REPORT A PROBLEM", 16, Color.WHITE, 5)
 	pause_keys.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	pause_keys.size = Vector2(640, 30)
 	pause_keys.position = Vector2(0, 250)
@@ -1502,6 +1508,14 @@ func _on_finished(car: Node3D, place: int) -> void:
 # --- main loop ------------------------------------------------------------------
 
 func _unhandled_input(event: InputEvent) -> void:
+	if report and is_instance_valid(report):
+		# The problem report has the keys (its text box takes the typing).
+		if event.is_action_pressed("pause") or event.is_action_pressed("back"):
+			report.close()
+		return
+	if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_F8:
+		open_report()
+		return
 	if editor and is_instance_valid(editor) and editor.visible and state == State.MENU:
 		editor.handle(event)
 		return
@@ -2189,12 +2203,16 @@ func _on_pit_call(info: Dictionary) -> void:
 	pit_menu.top = 250
 	pit_menu.width = 540
 	ui_root.add_child(pit_menu)
+	var adv_i: int = max(options.find(info.advice), 0)
+	var adv_est: int = int(info.estimate.get(info.advice, 0))
 	pit_menu.build("CAUTION - %s" % String(info.reason), [
-		{"id": "plan", "label": "PIT CALL", "values": names, "index": max(options.find(info.advice), 0)},
+		# One tap for the usual answer.
+		{"id": "advice", "label": "TAKE THE CREW CHIEF'S CALL: %s" % String(info.names[adv_i]), "hint": "ONE TAP.  RESTART ABOUT %s" % Game.ordinal(adv_est) if adv_est > 0 else "ONE TAP"},
+		{"id": "plan", "label": "PIT CALL", "values": names, "index": adv_i},
 		{"id": "chassis", "label": "CHASSIS", "values": ["NO CHANGE", "TIGHTEN (ROUND OF WEDGE IN)", "LOOSEN (ROUND OF WEDGE OUT)"], "index": 0,
 			"hint": "TIGHT: THE FRONT PUSHES UP THE TRACK.  LOOSE: THE REAR WANTS TO COME AROUND"},
 		{"id": "go", "label": "CONFIRM", "hint": "START TO SEND IT"},
-	])
+	], 1)
 	var lines := [
 		"RUNNING %s OF %d  -  %d LAPS TO GO" % [Game.ordinal(int(info.position)), int(info.field), int(info.laps_left)],
 		"TIRES %d%% WORN (GRIP %d%%)   FUEL %d LAPS   DAMAGE %s" % [int(round(float(info.wear) * 100.0)), int(round(float(info.grip) * 100.0)), int(info.fuel_laps), "NONE" if float(info.damage) < 0.02 else ("LIGHT" if float(info.damage) < 0.1 else "HEAVY")],
@@ -2208,7 +2226,11 @@ func _on_pit_call(info: Dictionary) -> void:
 		pit_menu.add_child(l)
 	_pit_hint()
 	pit_menu.changed.connect(func(_id, _i): _pit_hint())
-	pit_menu.activated.connect(func(_id): _close_pit_menu())
+	pit_menu.activated.connect(func(id):
+		if id == "advice":
+			pit_menu.set_value("plan", adv_i)
+			pit_menu.set_value("chassis", 0)
+		_close_pit_menu())
 
 
 ## The pit call row's hint: where that choice would put you for the restart.
@@ -2218,7 +2240,7 @@ func _pit_hint() -> void:
 	var est: int = int(_pit_info.estimate.get(o, 0))
 	var now: int = int(_pit_info.position)
 	var diff := now - est
-	pit_menu.rows[0].hint = "RESTART ABOUT %s %s    * = CREW CHIEF'S CALL" % [Game.ordinal(est), ("(+%d)" % diff) if diff > 0 else (("(%d)" % diff) if diff < 0 else "(SAME)")]
+	pit_menu.rows[1].hint = "RESTART ABOUT %s %s    * = CREW CHIEF'S CALL" % [Game.ordinal(est), ("(+%d)" % diff) if diff > 0 else (("(%d)" % diff) if diff < 0 else "(SAME)")]
 	pit_menu._refresh()
 
 
@@ -2367,6 +2389,96 @@ func _notification(what: int) -> void:
 			auto_pause()
 		NOTIFICATION_APPLICATION_FOCUS_IN, NOTIFICATION_APPLICATION_RESUMED, NOTIFICATION_WM_WINDOW_FOCUS_IN:
 			AudioServer.set_bus_mute(0, false)
+
+
+## "LAP 12 OF 60  -  8TH  -  TIRES GOOD  -  FUEL 14 LAPS" (just the lap and
+## place outside full-rules races).
+func _pause_status_text() -> String:
+	var p: Node3D = race.player
+	var bits: Array = ["LAP %d OF %d" % [mini(p.lap() + 1, race.laps), race.laps], Game.ordinal(race.position_of(p))]
+	if race.control:
+		var worst := 0.0
+		for i in 4:
+			worst = max(worst, CrewWatch.tyre_health(p, i))
+		bits.append("TIRES " + ("GOOD" if worst < 0.34 else ("WATCH THEM" if worst < 0.7 else "IN TROUBLE")))
+		var per_lap: float = track.length / 1000.0 * 0.62 * p.burn_scale
+		bits.append("FUEL %d LAPS" % int(p.fuel / max(per_lap, 0.001)))
+	return "  -  ".join(bits)
+
+
+## REPORT A PROBLEM: a screenshot of the moment (without the pause screen over
+## it), the state of the game, then the report screen on top of everything.
+var report: Control
+var _report_layer: CanvasLayer
+var _reporting := false
+
+
+func open_report() -> void:
+	if _reporting or (report and is_instance_valid(report)):
+		return
+	_reporting = true
+	var in_race: bool = state in [State.COUNTDOWN, State.RACE, State.FINISHED] and race != null
+	if in_race and not paused and mode != "online":
+		paused = true # hold the race while you write
+	var pl_vis: bool = pause_layer.visible
+	var t_vis: bool = touch.visible
+	var img: Image = null
+	if DisplayServer.get_name() != "headless": # (nothing is drawn headless)
+		pause_layer.visible = false
+		touch.visible = false
+		await RenderingServer.frame_post_draw
+		img = get_viewport().get_texture().get_image()
+	pause_layer.visible = pl_vis or in_race
+	touch.visible = t_vis
+	if img and not img.is_empty() and img.get_width() > 480:
+		img.resize(480, int(round(img.get_height() * 480.0 / img.get_width())), Image.INTERPOLATE_BILINEAR)
+	if _report_layer == null:
+		_report_layer = CanvasLayer.new()
+		_report_layer.layer = 7 # above the pause screen and the touch buttons
+		add_child(_report_layer)
+	var frame := Game.center_frame(Control.new())
+	_report_layer.add_child(frame)
+	report = load("res://scripts/report.gd").new()
+	frame.add_child(report)
+	report.setup(img, report_state(), cloud)
+	report.closed.connect(func():
+		frame.queue_free()
+		report = null)
+	_reporting = false
+
+
+## Everything that helps see a problem again: where you are in the game, the
+## race (track, lap, your car's state, the recorder's summary and the crew
+## chief's calls), the settings and the device. No names, nothing personal.
+func report_state() -> Dictionary:
+	var st := {
+		"game_state": State.keys()[state], "mode": mode, "session": session, "menu": menu_kind,
+		"track": Game.selected_track, "track_name": String(Game.tracks[Game.selected_track].name) if Game.selected_track < Game.tracks.size() else "",
+		"settings": Game.settings.duplicate(), "setup": Game.setup.duplicate(),
+		"assists": Game.assists, "assist_level": Game.assist_level, "modern": Game.modern, "quality": Game.quality,
+		"device": {"os": OS.get_name(), "model": OS.get_model_name(), "touch": Game.touch_active,
+			"screen": str(DisplayServer.window_get_size()), "renderer": RenderingServer.get_video_adapter_name(),
+			"fps": Engine.get_frames_per_second()},
+		"version": Game.VERSION,
+	}
+	if race and race.player and state in [State.COUNTDOWN, State.RACE, State.FINISHED, State.RESULTS, State.DEBRIEF]:
+		var p: Node3D = race.player
+		var flag := ""
+		if race.control:
+			flag = race.control.Flag.keys()[race.control.flag]
+		st.race = {
+			"time": race.time, "laps": race.laps, "lap": mini(p.lap() + 1, race.laps), "place": race.position_of(p), "field": race.cars.size(),
+			"flag": flag, "speed_mph": p.speed() * Game.MPS_TO_MPH, "s": p.s(), "d": p.d, "where": track.place_name(p.s()) if track.has_method("place_name") else "",
+			"fuel": p.fuel, "tyre_temp": Array(p.tyre_temp), "carcass": Array(p.carcass_temp), "wear": Array(p.tyre_wear4), "air": Array(p.tyre_air),
+			"damage": p.damage.duplicate(), "engine_temp": p.engine_temp, "spinning": p.spinning, "pit_state": p.pit_state,
+		}
+		if race_log and is_instance_valid(race_log):
+			var sm: Dictionary = race_log.summary()
+			sm.laps = sm.laps.slice(maxi(sm.laps.size() - 40, 0)) # the last 40 laps is plenty
+			st.race.log = sm
+		if crew_watch and is_instance_valid(crew_watch):
+			st.race.crew_calls = crew_watch.log.slice(maxi(crew_watch.log.size() - 20, 0))
+	return st
 
 
 ## Pauses a race in progress (not online: the others race on), e.g. when the
@@ -2644,6 +2756,8 @@ func _apply_resume() -> void:
 
 
 func _process(delta: float) -> void:
+	if pause_layer.visible and race and race.player and pause_status:
+		pause_status.text = _pause_status_text()
 	_update_resume(delta)
 	_maybe_checkpoint()
 	_update_battery(delta)
@@ -3087,10 +3201,14 @@ func _enter_options() -> void:
 		{"id": "vsync", "label": "VSYNC", "values": ["OFF", "ON"], "index": 1 if Game.vsync else 0, "hint": "OFF: LOWEST INPUT DELAY, MAY TEAR"},
 		{"id": "scan", "label": "SCANLINES (1999)", "values": ["OFF", "ON"], "index": 1 if Game.scanlines else 0},
 		{"id": "account", "label": "ACCOUNT + NEW PHONE", "hint": "YOUR SAVED GAME ONLINE, AND MOVING IT TO A NEW PHONE"},
+		{"id": "report", "label": "REPORT A PROBLEM", "hint": "TELL US WHAT WENT WRONG, WITH A SCREENSHOT (OR F8 / PAUSE IN A RACE).  VERSION " + Game.VERSION},
 		{"id": "reset", "label": "RESET LAP RECORDS"},
 		{"id": "back", "label": "DONE"},
 	]
 	_open_menu("options", "OPTIONS", rows, rows.size() - 1)
+	var sp: Control = load("res://scripts/steer_preview.gd").new()
+	sp.main = self
+	screen.add_child(sp)
 
 
 func _on_menu_changed(id: String, idx: int) -> void:
@@ -3309,6 +3427,8 @@ func _on_menu_activated(id: String) -> void:
 			_enter_mode_select()
 		"account":
 			_enter_account()
+		"report":
+			open_report()
 		"reset":
 			Game.records = ConfigFile.new()
 			Game.records.save(Game.RECORDS_PATH)

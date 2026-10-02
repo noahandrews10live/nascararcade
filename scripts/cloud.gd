@@ -196,6 +196,7 @@ func sync(done := Callable()) -> void:
 			_save_identity()
 		else:
 			push_save()
+		send_pending() # problem reports made while offline
 		if done.is_valid():
 			done.call(true))
 
@@ -377,3 +378,61 @@ func submit_session(stats: Dictionary) -> void:
 	if int(Game.settings.get("share_stats", 1)) == 0:
 		return
 	_act("session", stats)
+
+
+# --- problem reports ------------------------------------------------------------------
+
+## Sends a problem report ({note, tags, state, image (base64 JPEG), version}).
+## It's kept on the device first (user://reports/), so one made offline goes up
+## the next time the game is online. `done` gets (ok, ref).
+const REPORTS_DIR := "user://reports"
+
+
+func send_report(report: Dictionary, done := Callable()) -> String:
+	DirAccess.make_dir_recursive_absolute(REPORTS_DIR)
+	var name := "report_%d_%04d.json" % [int(Time.get_unix_time_from_system()), randi() % 10000]
+	var path := REPORTS_DIR.path_join(name)
+	var f := FileAccess.open(path, FileAccess.WRITE)
+	if f:
+		f.store_string(JSON.stringify(report))
+		f.close()
+	_send_saved(path, done)
+	return path
+
+
+func _send_saved(path: String, done := Callable()) -> void:
+	var text := FileAccess.get_file_as_string(path)
+	var report = JSON.parse_string(text) if text != "" else null
+	if not report is Dictionary:
+		if done.is_valid():
+			done.call(false, "")
+		return
+	_act("report", report, func(ok: bool, data):
+		if ok:
+			# Sent: keep a small note of it, not the screenshot.
+			DirAccess.remove_absolute(ProjectSettings.globalize_path(path))
+			var log := ConfigFile.new()
+			log.load(REPORTS_DIR.path_join("sent.cfg"))
+			var ref := str(data.get("ref", "")) if data is Dictionary else ""
+			log.set_value("sent", path.get_file(), ref)
+			log.save(REPORTS_DIR.path_join("sent.cfg"))
+		if done.is_valid():
+			done.call(ok, str(data.get("ref", "")) if ok and data is Dictionary else ""))
+
+
+## Reports made while offline, still waiting to go.
+func pending_reports() -> PackedStringArray:
+	var out := PackedStringArray()
+	var d := DirAccess.open(REPORTS_DIR)
+	if d == null:
+		return out
+	for f in d.get_files():
+		if f.begins_with("report_") and f.ends_with(".json"):
+			out.append(REPORTS_DIR.path_join(f))
+	return out
+
+
+func send_pending() -> void:
+	var p := pending_reports()
+	for i in mini(p.size(), 3):
+		_send_saved(p[i])

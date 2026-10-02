@@ -134,18 +134,22 @@ func _layout() -> void:
 		_buttons.append([Rect2(x, y + (bh + gap) * 2.0, bw, bh), "CLIP", "clip", "tap"])
 		if main.race.control:
 			_buttons.append([Rect2(x, y + (bh + gap) * 3.0, bw, bh), "PIT", "pit", "tap"])
-	elif main and main.paused and main.pit_menu == null:
-		# The pause screen: just RESUME and QUIT, under "PAUSED".
+	elif main and main.paused and main.pit_menu == null and not (main.report and is_instance_valid(main.report)):
+		# The pause screen: a big RESUME, QUIT, and under them steering and
+		# REPORT A PROBLEM.
 		var c := sr.get_center()
-		var w := 120.0 * k
-		var h := 46.0 * k
+		var w := 150.0 * k
+		var h := 56.0 * k
 		_buttons.append([Rect2(c.x - w - 10.0 * k, c.y + 16.0, w, h), "RESUME", "pause", "tap"])
 		_buttons.append([Rect2(c.x + 10.0 * k, c.y + 16.0, w, h), "QUIT", "quit_race", "tap"])
 		# Steering: tilt or drag, and re-centre the tilt.
 		var y2 := c.y + 16.0 + h + 12.0 * k
-		_buttons.append([Rect2(c.x - w - 10.0 * k, y2, w, h * 0.8), "TILT STEER" if tilt else "DRAG STEER", "_toggle_tilt", "tap"])
+		var w3 := (w * 2.0 + 20.0 * k - 16.0 * k) / 3.0
+		var x3 := c.x - w - 10.0 * k
+		_buttons.append([Rect2(x3, y2, w3, h * 0.75), "TILT STEER" if tilt else "DRAG STEER", "_toggle_tilt", "tap"])
 		if tilt and _tilt_ok:
-			_buttons.append([Rect2(c.x + 10.0 * k, y2, w, h * 0.8), "CENTRE", "_recenter", "tap"])
+			_buttons.append([Rect2(x3 + w3 + 8.0 * k, y2, w3, h * 0.75), "CENTRE", "_recenter", "tap"])
+		_buttons.append([Rect2(x3 + (w3 + 8.0 * k) * 2.0, y2, w3, h * 0.75), "REPORT A PROBLEM", "_report", "tap"])
 	elif main:
 		# Menus are touched directly (cards, tiles); a BACK button top left, and
 		# on the course and car pickers < > to browse and GO to choose.
@@ -219,6 +223,8 @@ func _input(event: InputEvent) -> void:
 
 
 func _touch(event: InputEvent) -> void:
+	if main and main.report and is_instance_valid(main.report):
+		return # the problem report has the screen (its own buttons and text box)
 	var p: Vector2 = event.position
 	var idx: int = event.index
 	if event is InputEventScreenTouch:
@@ -261,6 +267,11 @@ func _tap(action) -> void:
 		return
 	_send(action, 1.0)
 	_release.call_deferred(action)
+
+
+func _report() -> void:
+	if main:
+		main.open_report()
 
 
 func _release(action: String) -> void:

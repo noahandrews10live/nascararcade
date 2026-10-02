@@ -2,7 +2,7 @@
 // secret (only its hash is stored); each later call proves who it is with it.
 // Lap times are checked against what the track allows before they count.
 //   POST {action: "register" | "profile" | "lap" | "event" | "friend" | "session"
-//                | "save" | "load" | "transfer_code" | "claim", ...}
+//                | "save" | "load" | "transfer_code" | "claim" | "report", ...}
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
 
@@ -22,6 +22,11 @@ const CODE_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 // A saved game: a few small config files as text. Plenty of room.
 const MAX_SAVE_BYTES = 256_000;
 const TRANSFER_HOURS = 24;
+// Problem reports: a small screenshot and the race state, a few a day each.
+const MAX_REPORT_IMAGE = 300_000; // base64 characters
+const MAX_REPORT_STATE = 100_000; // JSON characters
+const REPORTS_PER_DAY = 20;
+const REPORT_TAGS = ["HANDLING", "CONTROLS", "GRAPHICS", "CRASH", "RULES", "MENUS", "SOUND", "OTHER"];
 
 function reply(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { ...CORS, "Content-Type": "application/json" } });
@@ -165,6 +170,25 @@ Deno.serve(async (req: Request) => {
     case "load": {
       const { data: s } = await db.from("saves").select("data, updated_at").eq("player_id", me.id).maybeSingle();
       return reply({ ok: true, save: s?.data ?? null, saved_at: s?.updated_at ?? null });
+    }
+    case "report": {
+      const since = new Date(Date.now() - 24 * 3600_000).toISOString();
+      const { count } = await db.from("reports").select("id", { count: "exact", head: true })
+        .eq("player_id", me.id).gte("created_at", since);
+      if ((count ?? 0) >= REPORTS_PER_DAY) return reply({ error: "too many reports today" }, 429);
+      const state = typeof body.state === "object" && body.state && !Array.isArray(body.state) ? body.state : {};
+      const stateText = JSON.stringify(state);
+      if (stateText.length > MAX_REPORT_STATE) return reply({ error: "report too big" }, 413);
+      let image = typeof body.image === "string" ? body.image : "";
+      if (image.length > MAX_REPORT_IMAGE || !/^[A-Za-z0-9+/=]*$/.test(image)) image = "";
+      const tags = Array.isArray(body.tags) ? (body.tags as unknown[]).map(String).filter((t) => REPORT_TAGS.includes(t)).slice(0, 4) : [];
+      const { data: r, error } = await db.from("reports").insert({
+        player_id: me.id, version: String(body.version ?? "").slice(0, 40),
+        note: String(body.note ?? "").slice(0, 600), tags, state, image: image || null,
+        bytes: stateText.length + image.length,
+      }).select("id").single();
+      if (error || !r) return reply({ error: "couldn't save the report" }, 500);
+      return reply({ ok: true, ref: r.id });
     }
     case "transfer_code": {
       await db.from("transfers").delete().eq("player_id", me.id);
