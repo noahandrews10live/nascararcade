@@ -44,6 +44,7 @@ SPECIAL="net_test"
 run_one() {
 	local kind=$1 name=$2 arg=${3:-}
 	local tag=$name${arg:+_$arg}
+	tag=${tag//\//of}
 	local home="$OUT/home/$tag"
 	mkdir -p "$home"
 	local log="$OUT/$tag.txt"
@@ -55,6 +56,7 @@ run_one() {
 	case $kind in
 		plain)
 			[[ " $TOUCH_TESTS " == *" $name "* ]] && env+=(ST_TOUCH=1)
+			[ -n "$arg" ] && env+=(PART="$arg")
 			# (Output capped at 20 MB: a test stuck printing errors stops there.)
 			env "${env[@]}" timeout 1500 "$GODOT" --headless --fixed-fps 60 -s "tests/$name.gd" 2>&1 | head -c 20000000 > "$log"
 			code=${PIPESTATUS[0]}
@@ -120,6 +122,10 @@ jobs_list() {
 			echo "net net_test relay"
 		elif [[ " $CLOUD_TESTS " == *" $n "* ]]; then
 			echo "cloud $n"
+		elif [ "$n" = replica_test ]; then
+			for k in 0 1 2 3; do
+				echo "plain replica_test $k/4" # 29 tracks: four at a time
+			done
 		elif [[ " $RENDER_TESTS " == *" $n "* ]]; then
 			for t in $(seq 0 39); do
 				echo "render $n $t" # a track each: one renders slowly

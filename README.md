@@ -213,7 +213,7 @@ stand-in for the server.
 - **Ghost laps.** Your best lap at each track is saved and driven by a see-through car in practice, qualifying and time challenges.
 - **Clips.** F9 (or the CLIP button on touch) saves the last 15 seconds as a video on the web build: the share sheet on phones, a download on computers, and a save prompt when the game is played on claude.ai.
 - **Racing AI.** The field drives a proper racing line (wide on entry, apex, out on exit) nose to tail when strung out, and leaves it to race side by side or to set up a pass. An optional catch-up setting (Race Setup) keeps the field close. `tests/line_field_test.gd` runs 25-car races on the flat tracks and checks line use, passing, crashes and pace.
-- **The course map** sits right under your position, top right: every car as a dot in its colours, you flashing on top, and the leader and the cars either side of you numbered.
+- **The course map** sits top left, beside the lap, lap time and best lap: every car as a dot in its colours, you flashing on top, and the leader and the cars either side of you numbered. **Your car's state** (damage, tyres, fuel, water temperature) sits top right, under your position.
 
 ## Racing: how it models 2026 Next Gen racing
 

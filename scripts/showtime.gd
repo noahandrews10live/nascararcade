@@ -184,16 +184,22 @@ func _layout(sr: Rect2) -> void:
 	_ticker.position = Vector2(sr.position.x, sr.end.y - 24)
 	_ticker.size = Vector2(sr.size.x, 20)
 	_ticker.clip_text = true
-	# Captions stay in the middle, clear of the course map and the buttons
-	# beside it (top right), wrapping onto two lines on a narrow screen.
+	# Captions stay in the middle, clear of the course map (top left), the car's
+	# state and the buttons beside it (top right), wrapping onto two lines on a
+	# narrow screen.
 	var inset := 0.0
 	if main.hud and sr.size.y < sr.size.x:
-		inset = max(0.0, sr.size.x - main.hud.map_rect().position.x + 70.0)
+		# (Clear of the car's state top right, and the map top left.)
+		inset = max(0.0, sr.size.x - main.hud.status_rect().position.x + 70.0)
+	# Below the map (top left).
+	var cap_y: float = sr.size.y * 0.2
+	if main.hud and main.hud.visible:
+		cap_y = max(cap_y, main.hud.map_rect().end.y + 6.0)
 	for l: Label in [_bug, _battle]:
 		l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	_bug.position = Vector2(sr.position.x + inset, sr.position.y + sr.size.y * 0.2)
+	_bug.position = Vector2(sr.position.x + inset, sr.position.y + cap_y)
 	_bug.size = Vector2(sr.size.x - inset * 2.0, 30)
-	_battle.position = Vector2(sr.position.x + inset, sr.position.y + sr.size.y * 0.27)
+	_battle.position = Vector2(sr.position.x + inset, sr.position.y + cap_y + sr.size.y * 0.07)
 	_battle.size = Vector2(sr.size.x - inset * 2.0, 24)
 	_replay_bug.position = sr.position + Vector2(14, 12)
 	_booth.position = Vector2(sr.position.x + sr.size.x * 0.2, sr.end.y - 70)

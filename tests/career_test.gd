@@ -47,7 +47,9 @@ func _run() -> void:
 	var p: Node3D = main.race.player
 	# A new career car matches the field; the engine level bought above adds to it.
 	var base_power: float = float(game.tracks[game.selected_track].get("hp", 670)) * 745.7 * float(game.teams[0].get("speed", 1.0))
-	_check(p.power > base_power * 1.005 and p.power <= base_power * game.upgrade_mult("engine", 1) + 1.0, "the engine upgrade adds its horsepower (%.0f vs %.0f hp stock)" % [p.power / 745.7, base_power / 745.7])
+	var lvl: int = int(game.career.upgrades.engine) # (the overspend check above may have bought a second level)
+	var pack: bool = main.track.cfg.has("pack_gap")
+	_check(p.power > base_power * 1.005 and absf(p.power - base_power * game.upgrade_mult("engine", lvl, pack)) < 1.0, "the engine upgrade adds its horsepower (%.0f vs %.0f hp stock)" % [p.power / 745.7, base_power / 745.7])
 	main._after_season_race()
 	_check(game.career.money > money0 and game.career.stats.starts == 1, "earned money and logged a start (%s)" % game.career.last)
 	# Jump to the last race of the season.

@@ -116,7 +116,7 @@ func _run() -> void:
 	var db: Array = (await _await_cb(func(cb): cloud.event_board(game.daily_event_key(), cb)))[0]
 	_check(db.size() == 1 and int(db[0].score) == 3012540, "the daily board has today's result (place, then time)")
 	var wk: Dictionary = game.weekly_event()
-	_check(String(wk.key).begins_with("weekly-") and int(wk.track) >= 0 and int(wk.track) < 11, "this week's time trial: %s (%s)" % [wk.name, wk.key])
+	_check(String(wk.key).begins_with("weekly-") and int(wk.track) >= 0 and int(wk.track) < game.ORIGINAL_TRACKS + 29, "this week's time trial: %s (%s)" % [wk.name, wk.key])
 	# XP and levels.
 	var lv0: int = game.level()
 	var aw: Dictionary = game.award_race(1, 20, 30, true)

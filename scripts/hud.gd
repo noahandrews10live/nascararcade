@@ -117,13 +117,16 @@ func _layout() -> void:
 	# On narrow screens the gauges at the bottom reach the middle: go above them.
 	# (Above the TV booth's captions, which sit at the bottom.)
 	l_spot.position = Vector2(0, H - (112.0 if W >= 820.0 else 132.0))
-	l_flag.position = Vector2(W * 0.5 - 120, 4 + top)
+	var br := _banner_rect()
+	l_flag.size = br.size
+	l_flag.position = br.position
 	l_sub.size = Vector2(W - 40.0, 30)
 	l_sub.position = Vector2(20, H * 0.46)
 	if l_crew:
-		var cw: float = clamp(W - 300.0, 300.0, 460.0)
+		var band := top_band()
+		var cw: float = clamp(band.y - band.x, 200.0, 460.0)
 		l_crew.size = Vector2(cw, 0)
-		l_crew.position = Vector2((W - cw) * 0.5, 58 + top)
+		l_crew.position = Vector2(max((band.x + band.y - cw) * 0.5, band.x), 58 + top)
 
 
 func _place(l: Label, p: Vector2, corner: int) -> void:
@@ -365,13 +368,15 @@ func _draw() -> void:
 	if control:
 		var fc: Color = [Color(0.1, 0.8, 0.2), Color(1.0, 0.85, 0.05), Color(0.95, 0.95, 0.95), Color(0.9, 0.9, 0.9)][control.flag]
 		if not ticker_on:
-			draw_rect(Rect2(W * 0.5 - 120, 4 + top, 240, 24), fc)
+			draw_rect(_banner_rect(), fc)
 		if control.flag == control.Flag.CHECKERED:
 			for i in 24:
 				for j in 2:
 					if (i + j) % 2 == 0:
 						if not ticker_on:
-							draw_rect(Rect2(W * 0.5 - 120 + i * 10, 4 + top + j * 12, 10, 12), Color(0.05, 0.05, 0.05))
+							var br := _banner_rect()
+							if i * 10 < br.size.x:
+								draw_rect(Rect2(br.position.x + i * 10, br.position.y + j * 12, 10, 12), Color(0.05, 0.05, 0.05))
 	# Tachometer arc (LED segments)
 	var center := Vector2(W - 65, H - 55)
 	var radius := 58.0
@@ -407,14 +412,16 @@ func _draw() -> void:
 		draw_colored_polygon(PackedVector2Array([Vector2(ax + 6 * side_dir, ay), Vector2(ax - 4 * side_dir, ay - 6), Vector2(ax - 4 * side_dir, ay + 6)]), Color(0.4, 1.0, 0.4))
 	# Time of day, track temperature and the weather.
 	if race.weather and control:
-		draw_string(Game.arcade_font, Vector2(W * 0.5 - 120, 44 + top), race.weather.summary(), HORIZONTAL_ALIGNMENT_CENTER, 240, 10, Color(0.85, 0.9, 1.0))
+		var wr := _banner_rect()
+		draw_string(Game.arcade_font, Vector2(wr.position.x, 44 + top), race.weather.summary(), HORIZONTAL_ALIGNMENT_CENTER, wr.size.x, 10, Color(0.85, 0.9, 1.0))
 	if l_crew.visible:
 		var r := Rect2(l_crew.position - Vector2(8, 3), l_crew.size + Vector2(16, 6))
 		r.size.y = max(r.size.y, l_crew.get_minimum_size().y + 6.0)
 		draw_rect(r, Color(0.05, 0.05, 0.1, 0.72))
 		draw_rect(Rect2(r.position, Vector2(3, r.size.y)), l_crew.label_settings.font_color)
 	# Car condition: damage by corner, tyres and fuel.
-	var cc := Vector2(16, H - 104)
+	# Car condition, top right under your position (where the map used to be).
+	var cc := status_rect().position + Vector2(4, 4)
 	var dmg: Dictionary = p.damage
 	var dc := func(x: float) -> Color:
 		return Color(0.3, 1.0, 0.4).lerp(Color(1.0, 0.85, 0.2), clamp(x * 2.0, 0.0, 1.0)).lerp(Color(1.0, 0.2, 0.15), clamp(x * 2.0 - 1.0, 0.0, 1.0))
@@ -457,11 +464,33 @@ func _draw() -> void:
 	_draw_map(p)
 
 
-## The course map, right under your position: every car on it, you flashing on
-## top, with the leader and the cars either side of you numbered.
+## The course map, top left beside the lap, lap time and best lap: every car on
+## it, you flashing on top, with the leader and the cars either side of you
+## numbered.
+const LAP_BLOCK_W := 150.0
+
+
 func map_rect() -> Rect2:
-	var mm: float = clamp(H * 0.26, 64.0, 120.0)
-	return Rect2(W - 14.0 - mm, 92.0 + top, mm, mm)
+	var mm: float = clamp(H * 0.24, 64.0, 116.0)
+	return Rect2(LAP_BLOCK_W, 8.0 + top, mm, mm)
+
+
+## The car's state (damage, tyres, fuel, water temperature), top right under
+## your position.
+func status_rect() -> Rect2:
+	return Rect2(W - 14.0 - 82.0, 96.0 + top, 82.0, 106.0)
+
+
+## The free stretch across the top between the map and your position: the flag
+## banner, the weather line and the crew chief's calls are centred in it.
+func top_band() -> Vector2:
+	return Vector2(map_rect().end.x + 10.0, W - 140.0)
+
+
+func _banner_rect() -> Rect2:
+	var b := top_band()
+	var bw: float = min(240.0, b.y - b.x)
+	return Rect2((b.x + b.y) * 0.5 - bw * 0.5, 4.0 + top, bw, 24.0)
 
 
 var high_contrast: bool:

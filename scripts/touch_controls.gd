@@ -121,12 +121,12 @@ func _layout() -> void:
 		else:
 			_buttons.append([Rect2(gas_c - Vector2.ONE * pr, Vector2.ONE * pr * 2.0), "GAS", "accelerate", "gas"])
 			_buttons.append([Rect2(brake_c - Vector2.ONE * pr, Vector2.ONE * pr * 2.0), "BRAKE", "brake", "brake"])
-		# Small buttons beside the course map (which sits under the position
+		# Small buttons beside the car's state (which sits under the position
 		# readout, top right).
 		var bw := 48.0 * k
 		var bh := 34.0 * k
 		var gap := 6.0 * k
-		var mr: Rect2 = main.hud.map_rect() if main.hud else Rect2(sr.size.x - 134.0, 92.0, 120.0, 120.0)
+		var mr: Rect2 = main.hud.status_rect() if main.hud else Rect2(sr.size.x - 96.0, 96.0, 82.0, 106.0)
 		var x: float = L + mr.position.x - 12.0 - bw
 		var y: float = T + mr.position.y - 5.0
 		_buttons.append([Rect2(x, y, bw, bh), "II", "pause", "tap"])

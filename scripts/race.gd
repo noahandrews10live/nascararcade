@@ -1180,6 +1180,8 @@ func _fuel_short(c: Node3D) -> bool:
 	var per_lap: float = track.length / 1000.0 * 0.62 * c.burn_scale
 	if per_lap <= 0.0:
 		return false
+	if c.fuel <= 0.0 or c.speed() < 10.0:
+		return false # already dry (or stopped): too late for a stop
 	var fuel_laps: float = c.fuel / per_lap
 	return fuel_laps < 2.0 and float(laps - c.lap()) > fuel_laps
 

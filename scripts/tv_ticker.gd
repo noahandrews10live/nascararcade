@@ -218,7 +218,7 @@ func _draw() -> void:
 		var names: Array = _stage_board[1]
 		var bw := 190.0
 		var bx: float = W - bw - 10.0
-		var by: float = hud.map_rect().end.y + 8.0
+		var by: float = hud.status_rect().end.y + 8.0
 		var row: float = clampf((hud.H - 150.0 - by - 24.0) / max(names.size(), 1), 9.0, 13.0)
 		var bh: float = 22.0 + names.size() * row
 		var a: float = clamp(_stage_t, 0.0, 1.0)

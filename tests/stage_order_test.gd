@@ -121,6 +121,7 @@ func _run() -> void:
 		n += 1
 	await _frames(2)
 	_check(ctl.one_to_go, "full caution: ONE TO GO (%.0f s)" % (n / 60.0))
+	print("   at one to go: order %d, lead lap %d, pit states %s, leader #%s" % [main.race.order.size(), _lead_lap(ctl).size(), str(main.race.order.map(func(c): return c.pit_state)), main.race.order[0].team.num])
 	order = _nums(_lead_lap(ctl).filter(func(c): return c.pit_state == 0))
 	want = frozen.filter(func(x): return order.has(x))
 	print("   stage order %s\n   lined up    %s" % [str(want.slice(0, 10)), str(order.slice(0, 10))])

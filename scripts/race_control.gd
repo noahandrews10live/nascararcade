@@ -489,6 +489,10 @@ func _caution_tick(delta: float) -> void:
 				message.emit("PIT ROAD IS OPEN", "pit")
 				_ai_pit_decisions()
 			_free_pass()
+		if stage_break and caution_laps >= 1 and race.cars.any(func(c): return c.pit_state != Pit.NONE and not c.out and not c.towed):
+			# A stage break waits for every car to be back from its free stop
+			# before lining them up in the stage's order.
+			caution_needed_laps = max(caution_needed_laps, caution_laps + 2)
 		if caution_laps == caution_needed_laps - 1:
 			one_to_go = true
 			message.emit("ONE TO GO", "flag")

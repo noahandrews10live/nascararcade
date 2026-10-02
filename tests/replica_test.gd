@@ -36,9 +36,15 @@ func _run() -> void:
 	var first: int = game.ORIGINAL_TRACKS
 	_check(game.tracks.size() >= first + R.TRACKS.size() and R.TRACKS.size() == 29, "29 replicas after the 11 originals (%d tracks)" % game.tracks.size())
 	var only := OS.get_environment("ONLY")
+	# PART=k/n: every n-th replica from k (the runner splits it four ways).
+	var part := OS.get_environment("PART")
+	var pk := int(part.get_slice("/", 0)) if part != "" else 0
+	var pn := int(part.get_slice("/", 1)) if part != "" else 1
 	var speeds := []
 	for k in R.TRACKS.size():
 		if only != "" and int(only) != k:
+			continue
+		if k % pn != pk:
 			continue
 		var idx: int = first + k
 		var cfg: Dictionary = game.tracks[idx]
@@ -78,6 +84,10 @@ func _run() -> void:
 		await _frames(2)
 	for l in speeds:
 		print("   ", l)
+	if pk != 0:
+		print("FAILURES: ", failures)
+		quit(1 if failures > 0 else 0)
+		return
 	_check(main.tracks.size() <= main.MAX_BUILT_TRACKS, "only %d tracks kept built" % main.tracks.size())
 	# The picker: browse within the group, jump between groups.
 	main._use_track(first)
