@@ -80,6 +80,9 @@ func _run() -> void:
 	var game: Node = root.get_node("Game")
 	game.settings["tutorial_done"] = 0
 	game.settings["auto_gas"] = 0
+	game.settings["touch_tilt"] = false # drag steering: no motion sensor in a test
+	main.touch.tilt = false
+	game.settings["weather"] = 0 # (not whatever another test left saved)
 	await _frames(30)
 	main.showtime.skip_intro()
 	await _frames(10)
@@ -143,7 +146,9 @@ func _run() -> void:
 	main._enter_mode_select()
 	await _frames(4)
 	game.settings["auto_gas"] = 1
+	seed(22) # QUICK RACE picks a random track: make it the same one every run
 	await _tap_frame((main._tiles[0][0] as Rect2).get_center())
+	print("   quick race at ", game.tracks[game.selected_track].name)
 	_check(main.state == main.State.COUNTDOWN, "the QUICK RACE tile goes straight to the grid")
 	_check(main.tutorial.active and main.tutorial.visible, "the first race on a phone teaches")
 	_check(main.tutorial._text.text.begins_with("STEER"), "it starts with steering")
@@ -166,5 +171,8 @@ func _run() -> void:
 	main.tutorial.finish()
 	_check(int(game.settings.get("tutorial_done", 0)) == 1, "the tutorial is remembered as done")
 	game.settings["auto_gas"] = 0
+	game.settings["touch_tilt"] = false # drag steering: no motion sensor in a test
+	main.touch.tilt = false
+	game.settings["weather"] = 0 # (not whatever another test left saved)
 	print("FAILURES: ", failures)
 	quit(1 if failures > 0 else 0)
