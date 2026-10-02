@@ -246,14 +246,27 @@ func go_green() -> void:
 
 func tick(delta: float) -> void:
 	time += delta if running else 0.0
+	var t0 := Time.get_ticks_usec()
 	_record(delta)
+	Game.pt("race.record", t0)
+	t0 = Time.get_ticks_usec()
 	_build_neighbors()
+	Game.pt("race.neighbors", t0)
+	t0 = Time.get_ticks_usec()
 	_update_detail()
 	if weather and running:
 		weather.tick(delta)
+	Game.pt("race.detail+weather", t0)
+	t0 = Time.get_ticks_usec()
 	if control:
 		control.tick(delta)
+	Game.pt("race.control", t0)
+	t0 = Time.get_ticks_usec()
 	_aero(delta)
+	Game.pt("race.aero", t0)
+	t0 = Time.get_ticks_usec()
+	var t_ai := 0
+	var t_step := 0
 	_tick_count += 1
 	var ai_turn := _tick_count % 2
 	for ci in cars.size():
@@ -263,7 +276,9 @@ func tick(delta: float) -> void:
 		# The AI thinks at 30 Hz (half the field each tick); cars in the pit box
 		# every tick so the stop timer runs at full speed.
 		if c.ai and running and (ci % 2 == ai_turn or c.pit_state == 3 or c.is_player):
+			var ta := Time.get_ticks_usec()
 			_drive_ai(c, delta if (c.pit_state == 3 or c.is_player) else delta * 2.0)
+			t_ai += Time.get_ticks_usec() - ta
 		if arcade and player and c != player and running and not player.finished:
 			var gap: float = c.dist - player.dist
 			var target := 1.0
@@ -278,7 +293,15 @@ func tick(delta: float) -> void:
 			continue
 		var was_out: bool = c.out
 		var was_spin: bool = c.spinning
-		c.step(delta)
+		var ts := Time.get_ticks_usec()
+		var span: int = _span_for(c)
+		c.tick_span = span
+		if Game.prof_on and span == 2:
+			Game.prof["race.cars_every_other_tick"] = int(Game.prof.get("race.cars_every_other_tick", 0)) + 1000
+		if span == 2 and (ci + _tick_count) % 2 != 0:
+			continue # its half of the field steps next tick
+		c.step(delta * span)
+		t_step += Time.get_ticks_usec() - ts
 		skids.track_car(c)
 		if c.wall_hit > 2.0:
 			wear.scuff(c)
@@ -316,7 +339,14 @@ func tick(delta: float) -> void:
 		elif c.spinning and not was_spin:
 			incident.emit(c, "spin")
 			highlights.append({"t": rec_clock, "car": ci, "kind": "FLIP" if c.tumbling else "SPIN"})
+	if Game.prof_on:
+		Game.prof["race.cars(all)"] = int(Game.prof.get("race.cars(all)", 0)) + Time.get_ticks_usec() - t0
+		Game.prof["race.cars.ai"] = int(Game.prof.get("race.cars.ai", 0)) + t_ai
+		Game.prof["race.cars.step"] = int(Game.prof.get("race.cars.step", 0)) + t_step
+	t0 = Time.get_ticks_usec()
 	_collide()
+	Game.pt("race.collide", t0)
+	t0 = Time.get_ticks_usec()
 	wear.track_cars(cars, delta)
 	if not debris.is_empty():
 		_debris_tick(delta)
@@ -355,6 +385,7 @@ func tick(delta: float) -> void:
 						c.ai = true # autopilot for the cool-down lap
 					car_finished.emit(c, finish_count)
 	_update_order()
+	Game.pt("race.wear+laps+order", t0)
 
 
 func _record(delta: float) -> void:
@@ -457,6 +488,44 @@ const NB_MAX_BEHIND := 8
 
 var _nb_cars: Array = []
 var _nb_s := PackedFloat32Array()
+
+
+## The physics governor (main.gd raises it when this device can't simulate the
+## race in real time, and remembers it for the next race):
+##   0  every car steps every tick;
+##   1  AI cars more than 40 m from a player step every other tick (half the
+##      field each tick) with twice the time and twice the sub-steps, so they
+##      integrate at the same rate; drawn across both ticks, so just as smooth;
+##   2  every AI car does, and your own car integrates at 120 Hz, not 240.
+## (Integrating at 30 Hz instead was tried: it changes the cars' pace by 2%.)
+## A car that is crashing, sliding, banging doors, in the pits or being shown
+## close up always steps every tick.
+var sim_level := 0
+const NEAR_FULL := 40.0 # m: inside this a car gets every tick at level 1
+const MAX_SIM_LEVEL := 2
+
+
+func _span_for(c: Node3D) -> int:
+	if sim_level <= 0 or c.is_player or c.remote or c.tumbling or c.pit_state != 0 or c.slide > 0.3 or c.bump > 0.5 or c.spinning:
+		return 1
+	if sim_level == 1:
+		var L: float = track.length
+		for p in [player, player2]:
+			if p != null:
+				var gap: float = abs(fposmod(c.dist - p.dist + L * 0.5, L) - L * 0.5)
+				# (a little hysteresis, so a car on the edge doesn't flip back and forth)
+				if gap < (NEAR_FULL + 10.0 if c.tick_span == 1 else NEAR_FULL):
+					return 1
+	return 2
+
+
+func set_sim_level(level: int) -> void:
+	sim_level = clampi(level, 0, MAX_SIM_LEVEL)
+	for c in cars:
+		if c.is_player:
+			c.player_steps = 2 if sim_level >= 2 else 4
+		if sim_level == 0:
+			c.tick_span = 1
 
 
 ## Cars well away from a player run their physics at a lower rate.

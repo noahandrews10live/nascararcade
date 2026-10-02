@@ -797,6 +797,9 @@ const QUALITY_NAMES := ["AUTO", "LOW", "MEDIUM", "HIGH", "ULTRA"]
 var quality := 0
 ## The level AUTO is currently running at (adjusted from measured frame times).
 var auto_quality := 2 if OS.has_feature("web") else 3
+## The physics governor's level (race.gd's sim_level), learned on this device and
+## kept for the next race: phones and browsers start at 1.
+var sim_level := 1 if (OS.has_feature("web") or OS.has_feature("mobile")) else 0
 ## Blend car positions between physics steps so motion is smooth at any refresh rate.
 var smoothing := true
 var vsync := true
@@ -1008,6 +1011,7 @@ func load_settings() -> void:
 		scanlines = cf.get_value("video", "scanlines", scanlines)
 		quality = cf.get_value("video", "quality", quality)
 		auto_quality = cf.get_value("video", "auto_quality", auto_quality)
+		sim_level = int(cf.get_value("video", "sim_level", sim_level))
 		smoothing = cf.get_value("video", "smoothing", smoothing)
 		vsync = cf.get_value("video", "vsync", vsync)
 		motion_blur = cf.get_value("video", "motion_blur", motion_blur)
@@ -1130,6 +1134,7 @@ func save_settings() -> void:
 	cf.set_value("video", "scanlines", scanlines)
 	cf.set_value("video", "quality", quality)
 	cf.set_value("video", "auto_quality", auto_quality)
+	cf.set_value("video", "sim_level", sim_level)
 	cf.set_value("video", "smoothing", smoothing)
 	cf.set_value("video", "vsync", vsync)
 	cf.set_value("video", "motion_blur", motion_blur)
@@ -1369,6 +1374,17 @@ func _fill_teams() -> void:
 
 
 ## Effective quality level 1..4 (LOW..ULTRA).
+## A profiler for the game's own per-frame work (ST_PROF=1; tests/prof_bench.gd):
+## microseconds per named section, added up. Off, it costs one branch.
+var prof_on := OS.get_environment("ST_PROF") != ""
+var prof := {}
+
+
+func pt(name: String, t0: int) -> void:
+	if prof_on:
+		prof[name] = int(prof.get(name, 0)) + Time.get_ticks_usec() - t0
+
+
 ## How much sky fill the renderer gets (see main's environment): desktop's SSAO
 ## shades it; the others have no SSAO and need less.
 func ambient_scale() -> float:

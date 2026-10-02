@@ -188,6 +188,8 @@ var _tr_prev := Transform3D()
 var _tr_cur := Transform3D()
 var _has_tr := false
 var _tr_frame := 0
+var tick_span := 1 # physics ticks between this car's steps (see race.gd's sim_level)
+var player_steps := 4 # sub-steps per tick for a player's car (2 from the governor's level 2)
 var nb: Array = [] # neighbours [car, gap, ...] from race.gd
 # Chassis state: heave (m, + = up), pitch (rad, + = nose up), roll (rad, + = right
 # side up) and their rates, relative to the static ride on the track surface.
@@ -729,8 +731,11 @@ func step(delta: float) -> void:
 		brake = 1.0
 		steer_in = 0.0
 
+	var tq := Time.get_ticks_usec()
 	_update_static_loads()
 	_update_tyres_before()
+	Game.pt("car.tyres_before", tq)
+	tq = Time.get_ticks_usec()
 	_track_grip = track.grip_at(ss, d)
 	_wet = track.wet_at(d)
 	if tyre_compound == "wet":
@@ -738,10 +743,23 @@ func step(delta: float) -> void:
 	else:
 		_track_grip *= 1.0 - 0.42 * _wet # slicks aquaplane
 	# Your car integrates at 240 Hz, cars around you at 120 Hz, distant ones at 60 Hz.
-	var steps: int = 4 if is_player else (1 if far_away and slide < 0.2 and bump < 1.0 else 2)
+	# A car the governor steps every other tick integrates at 60 Hz too (the rate
+	# distant cars always use).
+	var mult: int = maxi(1, roundi(delta * 60.0))
+	var steps: int
+	if is_player:
+		steps = player_steps * mult
+	elif mult > 1:
+		steps = mult
+	else:
+		steps = 1 if far_away and slide < 0.2 and bump < 1.0 else 2
 	var h := delta / steps
 	if not is_player:
 		_sample_road(ss, delta)
+	Game.pt("car.grip+road", tq)
+	tq = Time.get_ticks_usec()
+	if Game.prof_on:
+		Game.prof["car.substeps"] = int(Game.prof.get("car.substeps", 0)) + steps
 	for _i in steps:
 		_integrate(h)
 		if abs(chassis_roll) > 0.5 or abs(chassis_pitch) > 0.4 or (airborne and chassis_z > 0.3):
@@ -751,16 +769,23 @@ func step(delta: float) -> void:
 			spinning = true
 			_update_visual(delta)
 			return
+	Game.pt("car.integrate", tq)
+	tq = Time.get_ticks_usec()
 	_walls()
+	Game.pt("car.walls", tq)
+	tq = Time.get_ticks_usec()
 	# Tyres heat up and wear from the work they do; fuel burns with throttle.
 	var travelled: float = abs(v) * delta
 	_update_tyres_after(delta, travelled)
+	Game.pt("car.tyres_after", tq)
+	tq = Time.get_ticks_usec()
 	fuel = max(0.0, fuel - travelled / 1000.0 * 0.62 * (0.3 + 0.7 * throttle) * burn_scale)
 	spinning = abs(yaw) > 0.6 and speed() > 8.0
 	if total_damage() > 0.72 and not out:
 		out = true
 		out_reason = "ACCIDENT"
 	_update_visual(delta)
+	Game.pt("car.visual", tq)
 
 
 ## Full model: four tyres with their own loads, a spool rear axle with stagger, and
@@ -1388,12 +1413,16 @@ func sync_visual(snap := true) -> void:
 
 ## Called every rendered frame: places the car between its last two physics
 ## positions, so motion is smooth at any refresh rate (physics runs at 60 Hz).
+## A car the physics governor steps every other tick (tick_span 2) is drawn across
+## both ticks, so it moves as smoothly as the rest.
 func interpolate(f: float) -> void:
 	if not _has_tr:
 		return
-	# Not moved on the latest physics frame (paused, parked): sit still.
-	if _tr_frame != Engine.get_physics_frames():
-		f = 1.0
+	var since: int = Engine.get_physics_frames() - _tr_frame
+	if since >= tick_span:
+		f = 1.0 # not moved since (paused, parked): sit still
+	else:
+		f = (float(since) + f) / float(tick_span)
 	global_transform = _tr_prev.interpolate_with(_tr_cur, f)
 
 

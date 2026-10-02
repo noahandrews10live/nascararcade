@@ -194,8 +194,12 @@ var challenge_result := ""
 
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
-	# Never let a slow frame snowball into several catch-up physics ticks (input lag).
-	Engine.max_physics_steps_per_frame = 2
+	# The race runs in real time: a slow frame is followed by up to eight physics
+	# ticks to catch up, so the clock keeps up down to 7.5 fps (with only two,
+	# anything under 30 fps ran in slow motion: the clock crawled and the cars
+	# looked slower than the speedometer). If the device can't afford the physics,
+	# the governor (_sim_governor) makes it cheaper rather than let the clock lag.
+	Engine.max_physics_steps_per_frame = 8
 	# GPU frame time feeds the AUTO quality setting.
 	RenderingServer.viewport_set_measure_render_time(get_viewport().get_viewport_rid(), true)
 	rng.randomize()
@@ -842,6 +846,71 @@ var _aq_cool := 0.0
 var _aq_good := 0.0
 
 
+## The physics governor: is the race keeping real time? Every two seconds of
+## racing, compare the race clock with the wall clock. Falling behind (this device
+## can't simulate the field at 60 Hz) moves race.sim_level up a step; plenty of
+## room for a while moves it back down. The level is kept for the next race.
+var _gov_real0 := 0
+var _gov_race0 := 0.0
+var _gov_busy := 0.0
+var _gov_frames := 0
+var _gov_easy := 0
+var _gov_cool := 0.0
+
+
+## Headless runs (the tests: their time isn't real time) have no governor, so
+## their physics stays the same on every machine.
+var _fixed_fps: bool = DisplayServer.get_name() == "headless"
+
+
+func _gov_reset() -> void:
+	_gov_real0 = 0
+	_gov_busy = 0.0
+	_gov_frames = 0
+
+
+func _sim_governor() -> void:
+	if race == null or state != State.RACE or paused or not race.running or Engine.time_scale != 1.0 or showtime.replay_active or (pit_show and pit_show.showing) or _fixed_fps:
+		_gov_reset()
+		return
+	var now := Time.get_ticks_usec()
+	if _gov_real0 == 0:
+		_gov_real0 = now
+		_gov_race0 = race.time
+		return
+	_gov_busy += frame_timer.busy_ms
+	_gov_frames += 1
+	var real_s: float = (now - _gov_real0) / 1000000.0
+	if real_s < 2.0:
+		return
+	var ratio: float = (race.time - _gov_race0) / real_s
+	var busy: float = _gov_busy / maxi(_gov_frames, 1)
+	var fps: float = _gov_frames / real_s
+	_gov_real0 = now
+	_gov_race0 = race.time
+	_gov_busy = 0.0
+	_gov_frames = 0
+	_gov_cool = max(_gov_cool - real_s, 0.0)
+	# The game's own work as a share of the time a frame had.
+	var load: float = busy / (1000.0 / max(fps, 1.0))
+	if (ratio < 0.96 or load > 0.8) and race.sim_level < race.MAX_SIM_LEVEL and _gov_cool <= 0.0:
+		race.set_sim_level(race.sim_level + 1)
+		Game.sim_level = race.sim_level
+		Game.save_settings()
+		_gov_cool = 4.0
+		_gov_easy = 0
+	elif ratio > 0.99 and load < 0.3:
+		_gov_easy += 1
+		if _gov_easy >= 5 and race.sim_level > 0 and _gov_cool <= 0.0:
+			race.set_sim_level(race.sim_level - 1)
+			Game.sim_level = race.sim_level
+			Game.save_settings()
+			_gov_easy = 0
+			_gov_cool = 10.0
+	else:
+		_gov_easy = 0
+
+
 func _auto_quality(delta: float) -> void:
 	if not Game.modern or Game.quality != 0 or state != State.RACE or paused:
 		_aq_time = 0.0
@@ -962,6 +1031,8 @@ func _new_race(player_team: int) -> void:
 		race.arcade_setup = true
 		race.setup(track, player_team, int(track.cfg.laps), 16 if player_team >= 0 else 24)
 		race.arcade = true
+	race.set_sim_level(Game.sim_level)
+	_gov_reset()
 	race.lap_completed.connect(_on_lap)
 	if race.control:
 		race.control.pit_call.connect(_on_pit_call)
@@ -1947,15 +2018,25 @@ func _physics_process(delta: float) -> void:
 			_countdown_logic()
 		State.RACE:
 			_player_input()
+			var t0 := Time.get_ticks_usec()
 			race.tick(delta)
+			Game.pt("race.tick", t0)
+			t0 = Time.get_ticks_usec()
 			if race_log:
 				race_log.tick(delta)
+			Game.pt("race_log", t0)
+			t0 = Time.get_ticks_usec()
 			if crew_watch:
 				crew_watch.tick(delta)
+			Game.pt("crew_watch", t0)
+			t0 = Time.get_ticks_usec()
 			rewind.tick(delta)
+			Game.pt("rewind", t0)
+			t0 = Time.get_ticks_usec()
 			_draft_cue(delta)
 			if race.player:
 				ghost.record(race.player, race.time, delta)
+			Game.pt("draft_cue+ghost", t0)
 			if mode != "arcade":
 				_check_player_out(delta)
 				return
@@ -2925,8 +3006,10 @@ func _apply_resume() -> void:
 
 
 func _process(delta: float) -> void:
+	var tp := Time.get_ticks_usec()
 	if race:
 		pit_show.update(delta)
+	Game.pt("frame.pit_show", tp)
 	if pause_layer.visible and race and race.player and pause_status:
 		pause_status.text = _pause_status_text()
 	_update_resume(delta)
@@ -2935,7 +3018,9 @@ func _process(delta: float) -> void:
 	if wheel and wheel.poll_detect() and state == State.MENU and menu_kind == "wheel":
 		_enter_wheel_setup()
 	if showtime:
+		tp = Time.get_ticks_usec()
 		showtime.process(delta)
+		Game.pt("frame.showtime", tp)
 		if tutorial and tutorial.active:
 			if state in [State.COUNTDOWN, State.RACE]:
 				tutorial.update(delta)
@@ -2954,12 +3039,19 @@ func _process(delta: float) -> void:
 			_note_perf()
 	if race == null:
 		return
+	var t0 := Time.get_ticks_usec()
 	race.interpolate(Engine.get_physics_interpolation_fraction() if Game.smoothing else 1.0)
+	Game.pt("frame.interpolate", t0)
+	t0 = Time.get_ticks_usec()
 	_update_camera(delta)
 	_fit_camera_aspect()
 	_update_motion_blur()
+	Game.pt("frame.camera", t0)
+	t0 = Time.get_ticks_usec()
 	if race_day and is_instance_valid(race_day):
 		race_day.update(delta)
+	Game.pt("frame.race_day", t0)
+	t0 = Time.get_ticks_usec()
 	if rain_fx and race.weather:
 		var view := ""
 		if state in [State.COUNTDOWN, State.RACE, State.FINISHED] and not photo_mode and split_cams.is_empty():
@@ -2970,12 +3062,16 @@ func _process(delta: float) -> void:
 		var racing: bool = state in [State.COUNTDOWN, State.RACE, State.FINISHED, State.REPLAY] and not photo_mode and split_cams.is_empty()
 		var fc: Node3D = race.player if race and state != State.REPLAY else tv_target
 		atmosphere.update(delta, fc.speed() if fc and is_instance_valid(fc) else 0.0, cockpit != null and is_instance_valid(cockpit) and cockpit.visible, racing)
+	Game.pt("frame.rain+atmosphere", t0)
 	_auto_quality(delta)
+	_sim_governor()
 	if OS.has_feature("web") and Game.modern:
 		_dynamic_resolution(delta)
 		if get_window().size != _web_px:
 			_fit_web_resolution(true)
+	t0 = Time.get_ticks_usec()
 	_update_audio()
+	Game.pt("frame.audio", t0)
 	if screen:
 		var blink := int(state_time * 3.0) % 2 == 0
 		match state:
