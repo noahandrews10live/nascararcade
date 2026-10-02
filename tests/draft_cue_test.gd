@@ -64,7 +64,7 @@ func _run() -> void:
 	_check(int(seen.get("DRAFT", 0)) > 60, "in the pack the meter reads DRAFT")
 	_check(label_closing, "with the closing speed on it (DRAFT +n)")
 	_check(cues > 0 and max_close > 2.5, "PULL OUT comes up when closing fast in the tow")
-	_check(seen.size() >= 2, "and the meter changes as the air does (%d states)" % seen.size())
+	_check(beeps >= 2, "and the meter follows the air: the cue comes and goes (%d changes)" % beeps)
 	# Quiet under yellow.
 	var ctl: Node = main.race.control
 	ctl.flag = ctl.Flag.YELLOW

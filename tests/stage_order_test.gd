@@ -90,8 +90,13 @@ func _run() -> void:
 	_check(pitted >= ctl._calls.size() * 0.7, "and most crews take the free stop (%d of %d)" % [pitted, ctl._calls.size()])
 	# --- an ordinary caution still costs pitters their spots
 	await _frames(60 * 20)
-	while ctl.flag != ctl.Flag.GREEN:
+	var w := 0
+	while ctl.flag != ctl.Flag.GREEN and w < 60 * 120:
 		await physics_frame
+		w += 1
+		if w % 300 == 0:
+			print("   waiting for green: flag %d phase '%s' armed %s one_to_go %s laps %d/%d" % [ctl.flag, ctl.quick_phase, ctl.restart_armed, ctl.one_to_go, ctl.caution_laps, ctl.caution_needed_laps])
+	_check(ctl.flag == ctl.Flag.GREEN, "the stage break ends: green again")
 	await _frames(60 * 10)
 	_hand_back()
 	ctl.throw_caution("DEBRIS", null)
