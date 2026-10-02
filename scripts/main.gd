@@ -939,10 +939,7 @@ func _new_race(player_team: int) -> void:
 		race_log.begin(race)
 		race_log.moment.connect(_on_moment)
 	# REWIND: a few per race, offline (not the daily challenge's board).
-	var uses: int = [0, 3, 99][clampi(int(Game.settings.get("rewinds", 1)), 0, 2)]
-	if mode == "online" or mode == "2p" or (mode == "challenge" and challenge_idx < 0) or race.player == null:
-		uses = 0
-	rewind.begin(race, uses)
+	rewind.begin(race, rewind_uses() if race.player else 0)
 	if race.player:
 		race.incident.connect(func(c: Node3D, _kind: String):
 			if c == race.player:
@@ -2477,6 +2474,14 @@ func _notification(what: int) -> void:
 			auto_pause()
 		NOTIFICATION_APPLICATION_FOCUS_IN, NOTIFICATION_APPLICATION_RESUMED, NOTIFICATION_WM_WINDOW_FOCUS_IN:
 			AudioServer.set_bus_mute(0, false)
+
+
+## How many rewinds a race gets: the REWIND option, none online, in split
+## screen or in the daily challenge (it has a leaderboard).
+func rewind_uses() -> int:
+	if mode == "online" or mode == "2p" or (mode == "challenge" and challenge_idx < 0):
+		return 0
+	return [0, 3, 99][clampi(int(Game.settings.get("rewinds", 1)), 0, 2)]
 
 
 func _offer_rewind() -> void:

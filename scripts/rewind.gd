@@ -11,7 +11,7 @@ extends Node
 signal rewound
 
 const EVERY := 0.5
-const KEEP := 10.0
+const KEEP := 20.0
 const BACK := 5.0
 const OFFER := 7.0
 
@@ -22,6 +22,7 @@ var used := 0
 var offer_t := 0.0 # seconds the REWIND prompt stays up
 var _snaps: Array = [] # [{t, flag, cautions, cars: [...]}]
 var _t := 0.0
+var _mark := -1.0 # when the mistake happened (the race clock): rewind to before it
 
 
 func begin(r: Node3D, uses: int) -> void:
@@ -31,6 +32,7 @@ func begin(r: Node3D, uses: int) -> void:
 	offer_t = 0.0
 	_snaps.clear()
 	_t = 0.0
+	_mark = -1.0
 
 
 func available() -> bool:
@@ -38,6 +40,8 @@ func available() -> bool:
 
 
 ## Called every physics step while racing.
+## (The pit call and replays can come several seconds after the mistake, so a
+## good stretch is kept.)
 func tick(delta: float) -> void:
 	if race == null or not is_instance_valid(race) or not race.running:
 		return
@@ -54,6 +58,8 @@ func tick(delta: float) -> void:
 ## Put the REWIND prompt up (after a spin, a wall hit, a wreck).
 func offer() -> void:
 	if left > 0:
+		if offer_t <= 0.0:
+			_mark = race.time if race else -1.0
 		offer_t = OFFER
 
 
@@ -76,7 +82,10 @@ func _snapshot() -> Dictionary:
 ## The snapshot to go back to: about BACK seconds ago, under green, with your car
 ## on the track (not in the pits, not finished).
 func _target() -> Variant:
+	# Five seconds before the mistake (if there's just been one), else before now.
 	var now: float = race.time
+	if _mark >= 0.0 and now - _mark < KEEP - BACK:
+		now = _mark
 	var green: int = race.control.Flag.GREEN if race.control else 0
 	for i in range(_snaps.size() - 1, -1, -1):
 		var s: Dictionary = _snaps[i]
@@ -157,5 +166,6 @@ func rewind() -> bool:
 	left -= 1
 	used += 1
 	offer_t = 0.0
+	_mark = -1.0
 	rewound.emit()
 	return true

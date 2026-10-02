@@ -218,15 +218,16 @@ func _draw() -> void:
 		var names: Array = _stage_board[1]
 		var bw := 190.0
 		var bx: float = W - bw - 10.0
-		var by: float = hud.map_rect().end.y + 12.0
-		var bh: float = 22.0 + names.size() * 13.0
+		var by: float = hud.map_rect().end.y + 8.0
+		var row: float = clampf((hud.H - 150.0 - by - 24.0) / max(names.size(), 1), 9.0, 13.0)
+		var bh: float = 22.0 + names.size() * row
 		var a: float = clamp(_stage_t, 0.0, 1.0)
 		draw_rect(Rect2(bx, by, bw, bh), Color(0.04, 0.05, 0.09, 0.88 * a))
 		draw_rect(Rect2(bx, by, bw, 18), Color(0.85, 0.65, 0.05, a))
 		draw_string(f, Vector2(bx + 6, by + 13), "STAGE %d RESULTS" % int(_stage_board[0]), HORIZONTAL_ALIGNMENT_LEFT, bw - 12, 11, Color(0.05, 0.05, 0.05, a))
 		for i in names.size():
 			var col := Color(1.0, 0.9, 0.4, a) if String(names[i]).ends_with("(YOU)") else Color(1, 1, 1, a)
-			draw_string(f, Vector2(bx + 6, by + 31 + i * 13), "%2d  %s" % [i + 1, names[i]], HORIZONTAL_ALIGNMENT_LEFT, bw - 12, 10, col)
+			draw_string(f, Vector2(bx + 6, by + 30 + i * row), "%2d  %s" % [i + 1, names[i]], HORIZONTAL_ALIGNMENT_LEFT, bw - 12, int(min(10.0, row - 1.0)), col)
 
 
 func _cell(c: Node3D, x: float, y: float, f: Font) -> void:

@@ -115,7 +115,8 @@ func _layout() -> void:
 	l_msg.pivot_offset = Vector2(W * 0.5, 40)
 	l_spot.size = Vector2(W, 30)
 	# On narrow screens the gauges at the bottom reach the middle: go above them.
-	l_spot.position = Vector2(0, H - (88.0 if W >= 820.0 else 132.0))
+	# (Above the TV booth's captions, which sit at the bottom.)
+	l_spot.position = Vector2(0, H - (112.0 if W >= 820.0 else 132.0))
 	l_flag.position = Vector2(W * 0.5 - 120, 4 + top)
 	l_sub.size = Vector2(W - 40.0, 30)
 	l_sub.position = Vector2(20, H * 0.46)

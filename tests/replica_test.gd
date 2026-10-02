@@ -63,11 +63,13 @@ func _run() -> void:
 		var p: Node3D = main.race.player
 		var sim := 0.0
 		var best := 0.0
-		while sim < 240.0 and best == 0.0:
+		# The second lap: a flying one (the first starts from the grid).
+		var laps0 := -1
+		while sim < 300.0 and best == 0.0:
 			await physics_frame
 			sim += 1.0 / 60.0
-			if p.best_lap > 0.0:
-				best = p.best_lap
+			if p.lap() >= 2 and p.last_lap > 0.0:
+				best = p.last_lap
 		var mph: float = t.length / max(best, 0.01) * 2.237 if best > 0.0 else 0.0
 		speeds.append("%-15s %5.2f mi  lap %6.2f s  %5.1f mph" % [cfg.short, miles, best, mph])
 		_check(abs(ksum - TAU) < 0.2 and ok_len and best > 0.0 and t.front_length() > 50.0 and t.stand_length() > 40.0,

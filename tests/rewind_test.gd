@@ -71,7 +71,7 @@ func _run() -> void:
 	main.pit_menu.activated.emit("rewind")
 	await _frames(2)
 	_check(main.pit_menu == null and ctl.flag == ctl.Flag.GREEN and ctl.caution_count == cautions, "REWIND: the caution never happened")
-	_check(race.time < t0 + 6.0 and race.time > t0 - 1.0, "the clock went back (%.1f, crash at %.1f)" % [race.time, t0 + 6.0])
+	_check(race.time <= t0 + 1.01 and race.time > t0 - 1.0, "the clock went back to five seconds before the crash (%.1f, crash at %.1f)" % [race.time, t0 + 6.0])
 	_check(p.damage.front < 0.1 and abs(p.dist - (snap[p] + (race.time - t0) * p.v)) < 250.0, "your car is back where it was, undamaged")
 	_check(main.paused and main.resume_t > 0.0, "and it counts you back in")
 	_check(p.get_meta("lap_void", false), "that lap won't count as a record")
@@ -82,12 +82,13 @@ func _run() -> void:
 	# Out of uses.
 	main.rewind.left = 0
 	_check(not main.rewind.available() and not main.do_rewind(), "none left: no rewind")
-	# Online never.
-	main._enter_title()
-	await _frames(3)
-	main.mode = "online"
-	main.rewind.begin(race, 0)
-	_check(not main.rewind.available(), "not online")
-	main.mode = "race"
+	# Online never, nor in split screen or the daily challenge.
+	var m0: String = main.mode
+	var counts := []
+	for m in ["online", "2p", "race", "career"]:
+		main.mode = m
+		counts.append(main.rewind_uses())
+	main.mode = m0
+	_check(counts == [0, 0, 3, 3], "none online or in split screen; 3 in a race or a career (%s)" % str(counts))
 	print("FAILURES: ", failures)
 	quit(1 if failures > 0 else 0)

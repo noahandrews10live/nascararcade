@@ -55,7 +55,9 @@ run_one() {
 	case $kind in
 		plain)
 			[[ " $TOUCH_TESTS " == *" $name "* ]] && env+=(ST_TOUCH=1)
-			env "${env[@]}" timeout 1500 "$GODOT" --headless --fixed-fps 60 -s "tests/$name.gd" > "$log" 2>&1 || code=$?
+			# (Output capped at 20 MB: a test stuck printing errors stops there.)
+			env "${env[@]}" timeout 1500 "$GODOT" --headless --fixed-fps 60 -s "tests/$name.gd" 2>&1 | head -c 20000000 > "$log"
+			code=${PIPESTATUS[0]}
 			;;
 		cloud)
 			local port=$(( 25000 + RANDOM % 4000 ))
@@ -94,9 +96,10 @@ run_one() {
 			cat "$log.host" >> "$log"
 			;;
 		qa)
-			env "${env[@]}" TRACK=$arg timeout 2400 "$GODOT" --headless --fixed-fps 60 -s tests/full_race_qa.gd > "$log" 2>&1 || code=$?
+			env "${env[@]}" TRACK=$arg timeout 3600 "$GODOT" --headless --fixed-fps 60 -s tests/full_race_qa.gd > "$log" 2>&1 || code=$?
 			;;
 	esac
+	rm -rf "$home"/godot/app_userdata/*/logs # the game's own log files
 	local secs=$(( $(date +%s) - start ))
 	local fails=$(grep -c "^  FAIL\|SCRIPT ERROR" "$log" 2>/dev/null)
 	if [ "$code" -eq 0 ] && [ "$fails" -eq 0 ]; then
@@ -126,7 +129,9 @@ jobs_list() {
 		fi
 	done
 	if [ "$QA" = 1 ]; then
-		for t in 0 1 2 3 4 5 6 7 8 9 10; do
+		# The 11 originals and a replica of each kind (Daytona, COTA, Martinsville,
+		# Bristol, Indianapolis, Bowman Gray); QA_TRACKS="n n ..." to choose.
+		for t in ${QA_TRACKS:-0 1 2 3 4 5 6 7 8 9 10 11 13 17 18 32 39}; do
 			echo "qa full_race_qa $t"
 		done
 	fi
