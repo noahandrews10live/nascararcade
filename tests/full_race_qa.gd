@@ -58,6 +58,7 @@ func _run() -> void:
 	var sim := 0.0
 	var yellow_t := 0.0
 	var longest_yellow := 0.0
+	var rain_hold := 0.0
 	var cautions := 0
 	var was_yellow := false
 	var stopped := {} # car -> seconds stopped on track under green
@@ -79,7 +80,9 @@ func _run() -> void:
 		if yellow and not was_yellow:
 			cautions += 1
 			yellow_t = 0.0
-		if yellow:
+		if yellow and ctl.weather_hold:
+			rain_hold += 1.0 / 60.0 # rain: held under yellow until it's dry (by design)
+		elif yellow:
 			yellow_t += 1.0 / 60.0
 			longest_yellow = max(longest_yellow, yellow_t)
 		was_yellow = yellow
@@ -99,14 +102,14 @@ func _run() -> void:
 				else:
 					stopped[c] = 0.0
 	var p: Node3D = race.player
-	print("   sim %.0f s, %d cautions (longest %.0f s), %d pit calls, place %d of %d" % [sim, cautions, longest_yellow, pit_calls, race.position_of(p), race.cars.size()])
+	print("   sim %.0f s, %d cautions (longest %.0f s, %.0f s held for rain), %d pit calls, place %d of %d" % [sim, cautions, longest_yellow, rain_hold, pit_calls, race.position_of(p), race.cars.size()])
 	_check(main.state == main.State.RESULTS, "the race reaches the results")
 	_check(race.cars.all(func(c): return c.finished or c.out), "every car finished or is out")
 	var places: Array = race.order.map(func(c): return race.position_of(c))
 	_check(places == range(1, race.cars.size() + 1), "positions are 1..%d with no gaps or repeats" % race.cars.size())
 	_check(not bad_numbers, "no NaNs, nothing thrown off the world")
 	_check(worst_stop < 12.0, "no car sat stopped on track under green (worst %.1f s%s)" % [worst_stop, ", " + worst_stop_car if worst_stop_car != "" else ""])
-	_check(longest_yellow < 150.0, "every caution went back to green (longest %.0f s)" % longest_yellow)
+	_check(longest_yellow < 150.0, "every caution went back to green (longest %.0f s, not counting rain holds)" % longest_yellow)
 	_check(not dry, "your car never ran out of fuel")
 	_check(main.game_over_reason == "", "your race wasn't ended early ('%s')" % main.game_over_reason)
 	var calls: Array = main.crew_watch.log if main.crew_watch else []
