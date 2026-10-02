@@ -287,7 +287,44 @@ func _end_stage(caution := true) -> void:
 		throw_caution("STAGE %d END" % (stage - 1), null)
 
 
-func throw_caution(reason: String, who: Node3D) -> void:
+## What brought the caution out, in words: who, what and where
+## ("#24 GORDON SPUN IN TURN 2", "YOU HIT THE WALL IN TURN 4").
+var caution_detail := ""
+
+
+func caution_why(reason: String, who: Node3D, where := "") -> String:
+	if who == null:
+		match reason:
+			"DEBRIS":
+				return "DEBRIS ON TRACK" + (" IN " + where if where != "" else "")
+			_:
+				return ""
+	if where == "":
+		where = track.place_name(who.s())
+	var name: String = "YOU" if who.is_player else "#%s %s" % [who.team.num, who.team.driver.get_slice(" ", who.team.driver.get_slice_count(" ") - 1)]
+	var what := ""
+	match reason:
+		"ACCIDENT":
+			what = "WRECKED"
+		"CAR IN THE WALL":
+			what = "HIT THE WALL"
+		"SPIN":
+			what = "SPUN"
+		"SLOW CAR":
+			what = ("ARE" if who.is_player else "IS") + " CRAWLING AFTER A SPIN"
+		"STALLED CAR", "CAR STOPPED":
+			what = "STOPPED"
+		_:
+			what = reason
+	var text := "%s %s IN %s" % [name, what, where]
+	for i in 4:
+		if who.tyre_air[i] < 0.9:
+			text += " - TIRE DOWN"
+			break
+	return text
+
+
+func throw_caution(reason: String, who: Node3D, where := "") -> void:
 	if flag == Flag.YELLOW:
 		return
 	var lead := leader()
@@ -315,6 +352,9 @@ func throw_caution(reason: String, who: Node3D) -> void:
 		c.pitted_this_caution = false
 	flag_changed.emit("YELLOW")
 	message.emit("CAUTION  -  %s" % reason, "flag")
+	caution_detail = caution_why(reason, who, where)
+	if caution_detail != "":
+		message.emit(caution_detail, "why")
 	# Pace car picks up the leader.
 	pace_car.visible = true
 	pace_car.process_mode = Node.PROCESS_MODE_INHERIT

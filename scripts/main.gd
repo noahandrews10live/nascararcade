@@ -22,6 +22,7 @@ const Atmosphere := preload("res://scripts/atmosphere.gd")
 const RainFx := preload("res://scripts/rain_fx.gd")
 const RaceDay := preload("res://scripts/race_day.gd")
 const TouchControls := preload("res://scripts/touch_controls.gd")
+const CrewWatch := preload("res://scripts/crew_watch.gd")
 const Tutorial := preload("res://scripts/tutorial.gd")
 const Cloud := preload("res://scripts/cloud.gd")
 const Menu := preload("res://scripts/menu.gd")
@@ -897,6 +898,16 @@ func _new_race(player_team: int) -> void:
 		race_log = load("res://scripts/race_log.gd").new()
 		add_child(race_log)
 		race_log.begin(race)
+		race_log.moment.connect(_on_moment)
+	# The crew chief watching your car (full-rules races and practice).
+	if crew_watch and is_instance_valid(crew_watch):
+		crew_watch.queue_free()
+	crew_watch = null
+	if race.player and race.control and mode != "arcade" and mode != "online":
+		crew_watch = CrewWatch.new()
+		add_child(crew_watch)
+		crew_watch.begin(race)
+		crew_watch.warn.connect(_on_crew_warn)
 	if mode == "online":
 		net.attach(race)
 	# Time of day for every race; weather for the full-rules races.
@@ -1779,6 +1790,9 @@ func _physics_process(delta: float) -> void:
 			race.tick(delta)
 			if race_log:
 				race_log.tick(delta)
+			if crew_watch:
+				crew_watch.tick(delta)
+			_draft_cue(delta)
 			if race.player:
 				ghost.record(race.player, race.time, delta)
 			if mode != "arcade":
@@ -2243,8 +2257,58 @@ func _on_control_message(text: String, kind: String) -> void:
 			_sub(text, 3.0)
 		"spotter":
 			hud.spotter(text)
+		"why":
+			_sub(text, 4.5)
 		_:
 			_sub(text, 3.0)
+
+
+## Your own spins, wall hits and tyres, with why they happened.
+func _on_moment(e: Dictionary) -> void:
+	if state != State.RACE or String(e.get("why", "")) == "":
+		return
+	match String(e.kind):
+		"spin", "wall":
+			_sub("%s: %s" % ["SPUN" if e.kind == "spin" else "WALL", e.why], 4.0)
+
+
+## Draft sounds: a tick when you catch the tow, a double tick when you're
+## closing fast enough in it to pull out and pass.
+var _air_state := ""
+var _air_cool := 0.0
+
+
+func _draft_cue(delta: float) -> void:
+	_air_cool = max(_air_cool - delta, 0.0)
+	if race.player == null or race.player2 != null:
+		return
+	var a: Dictionary = Hud.air(race.player, race)
+	var st: String = "PULL" if a.cue else String(a.state)
+	if st != _air_state:
+		if int(Game.settings.get("draft_cue", 1)) == 1 and _air_cool <= 0.0:
+			if st == "PULL":
+				synth.beep(1320.0, 0.05, 0.18)
+				synth.beep(1760.0, 0.05, 0.18)
+				_air_cool = 2.5
+			elif st == "DRAFT" and _air_state == "":
+				synth.beep(880.0, 0.04, 0.12)
+				_air_cool = 1.5
+		_air_state = st
+
+
+## The crew chief's early warnings.
+var crew_watch: Node
+
+
+func _on_crew_warn(text: String, urgent: bool) -> void:
+	if state != State.RACE:
+		return
+	hud.crew_call(text, urgent)
+	_radio(text)
+	if urgent:
+		synth.beep(660.0, 0.15)
+		if Game.touch_active and int(Game.settings.get("haptics", 1)) != 0:
+			Input.vibrate_handheld(80, 0.6)
 
 
 func _on_flag(flag: String) -> void:
@@ -2978,6 +3042,7 @@ func _enter_options() -> void:
 		{"id": "map_contrast", "label": "MAP DOTS", "values": ["TEAM COLOURS", "HIGH CONTRAST"], "index": int(Game.settings.get("map_contrast", 0)), "hint": "HIGH CONTRAST: WHITE DOTS, THE LEADER RINGED, YOU A BLINKING SQUARE"},
 		{"id": "hand", "label": "CONTROLS", "values": ["RIGHT-HANDED", "LEFT-HANDED"], "index": int(Game.settings.get("hand", 0)), "hint": "LEFT-HANDED: PEDALS ON THE LEFT, STEER ON THE RIGHT"},
 		{"id": "battery", "label": "BATTERY SAVER", "values": ["OFF", "AUTO", "ON"], "index": int(Game.settings.get("battery", 1)), "hint": "30 FPS TO SAVE BATTERY AND HEAT.  AUTO: ON BATTERY AT 20% OR LESS"},
+		{"id": "draft_cue", "label": "DRAFT SOUNDS", "values": ["OFF", "ON"], "index": int(Game.settings.get("draft_cue", 1)), "hint": "A TICK WHEN YOU CATCH THE DRAFT, A DOUBLE TICK WHEN IT'S TIME TO PULL OUT AND PASS"},
 		{"id": "haptics", "label": "VIBRATION", "values": ["OFF", "ON"], "index": int(Game.settings.get("haptics", 1)), "hint": "PHONES: A BUZZ ON HITS AND LOCKED WHEELS"},
 		{"id": "share_stats", "label": "SHARE STATS", "values": ["OFF", "ON"], "index": int(Game.settings.get("share_stats", 1)), "hint": "SENDS YOUR FRAME RATE AND DEVICE TYPE AFTER A RACE (NOTHING PERSONAL) TO HELP TUNE THE GAME"},
 		{"id": "auto_gas", "label": "GAS", "values": ["YOU", "AUTO"], "index": int(Game.settings.get("auto_gas", 0)), "hint": "AUTO: THE CAR TAKES EACH CORNER AT A SAFE SPEED, YOU STEER (ONE THUMB). BRAKE STILL WORKS"},
@@ -3092,7 +3157,7 @@ func _on_menu_changed(id: String, idx: int) -> void:
 			elif id == "map_contrast" or id == "hand":
 				Game.settings[id] = idx
 				Game.save_settings()
-			elif id == "auto_gas" or id == "share_stats" or id == "haptics":
+			elif id == "auto_gas" or id == "share_stats" or id == "haptics" or id == "draft_cue":
 				Game.settings[id] = idx
 				Game.save_settings()
 			elif id == "vsync":

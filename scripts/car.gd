@@ -441,6 +441,17 @@ func lap_delta() -> float:
 	return lap_clock - best_trace[_trace_bucket]
 
 
+## Why tyre i failed, in a few words (for the banner and the debrief).
+func failure_cause(i: int, kind: String) -> String:
+	if kind == "blowout":
+		if carcass_temp[i] > 165.0:
+			return "IT OVERHEATED (%d C)" % int(carcass_temp[i])
+		if tyre_wear4[i] > 0.9:
+			return "IT WAS WORN OUT (%d%%)" % int(tyre_wear4[i] * 100.0)
+		return "IT TOOK A HARD HIT"
+	return "CUT BY DEBRIS OR BENT BODYWORK"
+
+
 ## A tyre starts losing air: "blowout" (gone in half a second) or "cut" (a slow
 ## leak from debris or a fender rub; the driver has a lap or two to get it in).
 func fail_tyre(i: int, kind: String) -> void:

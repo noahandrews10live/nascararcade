@@ -14,6 +14,10 @@ extends Node
 
 const SAMPLE := 0.5
 
+## A moment worth telling the driver about straight away (a spin, a wall hit, a
+## tyre, contact): the event, with `why` filled in where we can tell.
+signal moment(e: Dictionary)
+
 var race: Node3D
 var me: Node3D
 var started := false
@@ -49,6 +53,8 @@ var _was_spinning := false
 var _was_locked := false
 var _wall_cool := 0.0
 var _last_contact := {} # car -> time
+var _last_contact_by := {} # who, when: the latest real contact
+var _hist: Array = [] # the last second of driving: [{t, thr, brk, front, rear, locked, k}]
 
 
 func begin(r: Node3D) -> void:
@@ -88,6 +94,15 @@ func tick(delta: float) -> void:
 			rr += abs(me._fy_prev[i + 2]) / max(me._cap[i + 2], 1.0)
 		balance_sum += (f - rr) * 0.5
 		balance_n += 1
+	var fs := 0.0
+	var rs := 0.0
+	for i in 2:
+		fs += abs(me._fy_prev[i]) / max(me._cap[i], 1.0) * 0.5
+		rs += abs(me._fy_prev[i + 2]) / max(me._cap[i + 2], 1.0) * 0.5
+	if not me.spinning:
+		_hist.append({"t": t, "thr": me.throttle, "brk": me.brake, "front": fs, "rear": rs, "locked": me.locked_wheels != 0, "v": me.speed()})
+		while _hist.size() > 0 and t - float(_hist[0].t) > 1.2:
+			_hist.pop_front()
 	for i in 4:
 		peak_temp[i] = max(peak_temp[i], me.tyre_temp[i])
 		peak_carcass[i] = max(peak_carcass[i], me.carcass_temp[i])
@@ -101,12 +116,12 @@ func tick(delta: float) -> void:
 		wall_hits += 1
 		_wall_cool = 1.5
 		_last_incident_t = t
-		_event("wall", "Hit the wall in %s" % _where(), {"speed": me.wall_hit})
+		_event("wall", "Hit the wall in %s" % _where(), {"speed": me.wall_hit, "why": _why_wall()})
 	# A spin.
 	if me.spinning and not _was_spinning:
 		spins += 1
 		_last_incident_t = t
-		_event("spin", "Spun in %s" % _where())
+		_event("spin", "Spun in %s" % _where(), {"why": _why_spin()})
 	_was_spinning = me.spinning
 	# Pit stops.
 	var pitting: bool = me.pit_state != 0
@@ -134,6 +149,45 @@ func tick(delta: float) -> void:
 			_pos = p
 
 
+## Why you spun, from the second before it: contact, a tyre, the brakes, the
+## throttle or simply too fast for the corner.
+func _why_spin() -> String:
+	if t - float(_last_contact_by.get("t", -100.0)) < 2.0:
+		return "CONTACT WITH #%s" % _last_contact_by.who
+	for i in 4:
+		if me.tyre_air[i] < 0.9:
+			return "A TIRE WENT DOWN"
+	var h := _before(0.4)
+	if h.is_empty():
+		return ""
+	if h.locked or float(h.brk) > 0.6:
+		return "LOCKED THE REARS ON THE BRAKES - BRAKE EARLIER, IN A STRAIGHT LINE"
+	if float(h.thr) > 0.7 and float(h.rear) > float(h.front) + 0.05:
+		return "LOOSE ON THE THROTTLE - SQUEEZE IT ON OFF THE CORNER"
+	if float(h.rear) > 0.9:
+		return "THE REAR LET GO - A SMOOTHER LINE, OR A TIGHTER SETUP"
+	return "TOO FAST INTO THE CORNER - LIFT A LITTLE EARLIER"
+
+
+func _why_wall() -> String:
+	if t - float(_last_contact_by.get("t", -100.0)) < 2.0:
+		return "PUSHED THERE BY #%s" % _last_contact_by.who
+	var h := _before(0.5)
+	if h.is_empty():
+		return ""
+	if float(h.front) > float(h.rear) + 0.05 or h.locked:
+		return "THE CAR PUSHED UP - BRAKE EARLIER, LESS STEERING"
+	return "THE REAR STEPPED OUT - EASE THE THROTTLE"
+
+
+## How you were driving `ago` seconds back.
+func _before(ago: float) -> Dictionary:
+	for i in range(_hist.size() - 1, -1, -1):
+		if t - float(_hist[i].t) >= ago:
+			return _hist[i]
+	return _hist[0] if not _hist.is_empty() else {}
+
+
 func _cause() -> String:
 	var ctl = race.control
 	if _green_t < 25.0 and cautions == 0 and t < 30.0:
@@ -159,6 +213,8 @@ func _event(kind: String, text: String, extra := {}) -> void:
 	var e := {"t": t, "lap": _lap(), "kind": kind, "text": text, "where": _where(), "pos": race.position_of(me)}
 	e.merge(extra)
 	events.append(e)
+	if kind in ["spin", "wall", "tyre", "contact"]:
+		moment.emit(e)
 
 
 func _on_lap(car: Node3D, laps_done: int, lap_time: float) -> void:
@@ -195,6 +251,8 @@ func _on_contact(who_hit: Node3D, hit: Node3D, vn: float) -> void:
 		return
 	_last_contact[other] = t
 	var num: String = other.team.num
+	if vn > 2.5:
+		_last_contact_by = {"who": num, "t": t}
 	contacts[num] = int(contacts.get(num, 0)) + 1
 	if vn > 3.5:
 		_last_incident_t = t
@@ -215,7 +273,7 @@ func _on_tyre_failed(car: Node3D, wheel: int, kind: String) -> void:
 			why = "cut by debris or bent bodywork"
 		_:
 			why = kind
-	_event("tyre", "%s tyre went down: %s" % [names[wheel], why], {"wheel": wheel})
+	_event("tyre", "%s tyre went down: %s" % [names[wheel], why], {"wheel": wheel, "why": me.failure_cause(wheel, kind)})
 
 
 func _on_message(text: String, kind: String) -> void:
@@ -223,6 +281,8 @@ func _on_message(text: String, kind: String) -> void:
 		cautions += 1
 		_last_caution_t = t
 		_event("caution", text.capitalize().replace("Caution  -  ", "Caution: "))
+	elif kind == "why" and not events.is_empty() and events[-1].kind == "caution":
+		events[-1].text = "Caution: " + text
 	elif kind == "flag" and text.begins_with("GREEN"):
 		_last_caution_t = t
 	elif kind == "stage" and text.begins_with("STAGE"):

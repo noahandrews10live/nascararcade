@@ -1163,15 +1163,19 @@ func _debris_tick(delta: float) -> void:
 			if dd.age > 6.0:
 				on_track += 1
 		if on_track >= 3:
-			control.throw_caution("DEBRIS", null)
+			var oldest = debris[0]
+			for dd in debris:
+				if dd.age > oldest.age:
+					oldest = dd
+			control.throw_caution("DEBRIS", null, track.place_name(float(oldest.s)))
 
 
 func _on_tyre_failed(c: Node3D, wheel: int, kind: String) -> void:
 	var names := ["LEFT FRONT", "RIGHT FRONT", "LEFT REAR", "RIGHT REAR"]
 	if control:
 		if kind == "blowout":
-			control.message_for(c, "TIRE DOWN!  %s BLEW" % names[wheel], "pit")
+			control.message_for(c, "TIRE DOWN!  %s BLEW: %s" % [names[wheel], c.failure_cause(wheel, kind)], "pit")
 		else:
-			control.message_for(c, "%s IS GOING DOWN - PIT THIS LAP" % names[wheel], "pit")
+			control.message_for(c, "%s IS GOING DOWN - PIT THIS LAP (%s)" % [names[wheel], c.failure_cause(wheel, kind)], "pit")
 	if kind == "blowout":
 		incident.emit(c, "tyre")

@@ -708,7 +708,7 @@ var settings := {
 	# field: -1 = AUTO (see field_size), else an index into FIELDS.
 	"length": 1, "difficulty": 1, "field": -1, "auto_field": 0, "cautions": 1, "damage": 1, "wear": 1, "weather": 0,
 	"assists": 2, "manual": 0, "weekend": 1, "touch_tilt": true, "tilt_sens": 1, "res_mode": 0, "commentary": 1, "catchup": 0,
-	"auto_gas": 0, "tutorial_done": 0, "share_stats": 1, "haptics": 1, "battery": 1,
+	"auto_gas": 0, "tutorial_done": 0, "share_stats": 1, "haptics": 1, "battery": 1, "draft_cue": 1,
 	"big_text": 0, "map_contrast": 0, "hand": 0, # accessibility: larger text, high-contrast map, left-handed controls
 }
 ## Garage setup (applied to the player's car): -3..3 balance (tight..loose),

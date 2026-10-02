@@ -1,6 +1,8 @@
 extends Control
 ## In-race HUD: time, lap, position, speedo/tach, draft meter, minimap and big messages.
 
+const CrewWatch := preload("res://scripts/crew_watch.gd")
+
 var race: Node3D
 var track: Node3D
 ## Layout size in HUD units (the HUD is scaled to fit its view; split screen uses a
@@ -33,6 +35,9 @@ var l_board: Label
 var l_spot: Label
 var l_flag: Label
 var spot_time := 0.0
+var l_crew: Label
+var crew_time := 0.0
+var crew_urgent := false
 var msg_time := 0.0
 var msg_scale_t := 0.0
 var sub_time := 0.0
@@ -76,7 +81,15 @@ func _ready() -> void:
 	l_sub.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	l_sub.size = Vector2(W, 30)
 	l_sub.position = Vector2(0, H * 0.46)
+	l_sub.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	add_child(l_sub)
+	# The crew chief's calls: a bar under the flag, so they're read at a glance.
+	l_crew = Game.make_label("", 15, Color(1.0, 0.9, 0.55), 4)
+	l_crew.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	l_crew.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	l_crew.visible = false
+	add_child(l_crew)
+	_layout()
 
 
 ## corner: 0 top-left, 1 top-centre, 2 top-right, 3 bottom-right
@@ -99,8 +112,12 @@ func _layout() -> void:
 	# On narrow screens the gauges at the bottom reach the middle: go above them.
 	l_spot.position = Vector2(0, H - (88.0 if W >= 820.0 else 132.0))
 	l_flag.position = Vector2(W * 0.5 - 120, 4)
-	l_sub.size = Vector2(W, 30)
-	l_sub.position = Vector2(0, H * 0.46)
+	l_sub.size = Vector2(W - 40.0, 30)
+	l_sub.position = Vector2(20, H * 0.46)
+	if l_crew:
+		var cw: float = clamp(W - 300.0, 300.0, 460.0)
+		l_crew.size = Vector2(cw, 0)
+		l_crew.position = Vector2((W - cw) * 0.5, 58)
 
 
 func _place(l: Label, p: Vector2, corner: int) -> void:
@@ -138,7 +155,62 @@ func spotter(text: String) -> void:
 	spot_time = 1.8
 
 
+## The air around a car, for the meter and the cues: tow from the car ahead,
+## push from behind, side-draft, how fast it's closing on the car ahead (mph),
+## and whether it's time to pull out and pass (`cue`, `out_side` -1 inside / +1
+## outside: the side with room).
+static func air(p: Node3D, r: Node3D) -> Dictionary:
+	var v4: Vector4 = p.get_meta("air", Vector4.ZERO)
+	var ahead: Node3D = null
+	var gap := 1e9
+	var nbl: Array = p.nb
+	for q in range(0, nbl.size(), 2):
+		var g: float = nbl[q + 1]
+		if g > 0.0 and g < gap and abs(nbl[q].d - p.d) < 2.0:
+			gap = g
+			ahead = nbl[q]
+	var closing := 0.0
+	if ahead:
+		closing = (p.v - ahead.v) * 2.237
+	var state := ""
+	if v4.z > 0.35:
+		state = "SIDE DRAFT"
+	elif p.draft > 0.35:
+		state = "DRAFT"
+	elif v4.y > 0.4:
+		state = "PUSH"
+	var yellow: bool = r.control != null and r.control.flag == r.control.Flag.YELLOW
+	var cue: bool = not yellow and ahead != null and p.draft > 0.55 and closing > 2.5 and gap < 16.0
+	var out_side := 1
+	if cue:
+		# Pull to whichever side has room: no car alongside there.
+		var room_in := true
+		var room_out := true
+		for q in range(0, nbl.size(), 2):
+			var o: Node3D = nbl[q]
+			if abs(float(nbl[q + 1])) < 8.0 and o != ahead:
+				if o.d < p.d and p.d - o.d < 4.5:
+					room_in = false
+				elif o.d > p.d and o.d - p.d < 4.5:
+					room_out = false
+		if not room_in and not room_out:
+			cue = false
+		out_side = 1 if room_out else -1
+	return {"tow": v4.x, "push": v4.y, "side": v4.z, "wall": v4.w, "closing": closing, "gap": gap, "state": state, "cue": cue, "out_side": out_side}
+
+
+## A call from the crew chief (urgent ones in red, and they blink).
+func crew_call(text: String, urgent := false) -> void:
+	l_crew.text = "CREW CHIEF:  " + text
+	l_crew.label_settings.font_color = Color(1.0, 0.45, 0.35) if urgent else Color(1.0, 0.9, 0.55)
+	crew_time = 7.0 if urgent else 5.0
+	crew_urgent = urgent
+
+
 func clear_messages() -> void:
+	crew_time = 0.0
+	if l_crew:
+		l_crew.visible = false
 	msg_time = 0.0
 	sub_time = 0.0
 	l_msg.text = ""
@@ -169,6 +241,11 @@ func _process(delta: float) -> void:
 		l_sub.visible = int(blink * 4.0) % 2 == 0 or sub_time > 1.0
 	else:
 		l_sub.visible = false
+	if crew_time > 0.0:
+		crew_time -= delta
+		l_crew.visible = not crew_urgent or crew_time < 4.0 or int(blink * 4.0) % 2 == 0
+	elif l_crew.visible:
+		l_crew.visible = false
 	if spot_time > 0.0:
 		spot_time -= delta
 		l_spot.visible = true
@@ -209,7 +286,15 @@ func _process(delta: float) -> void:
 	l_pos_of.text = "OF %d" % race.cars.size()
 	l_speed.text = "%d" % int(p.speed() * Game.MPS_TO_MPH)
 	l_gear.text = "R" if p.v < -0.1 else str(p.gear)
-	l_draft.visible = p.draft > 0.35 and int(blink * 6.0) % 2 == 0
+	var a := air(p, race)
+	l_draft.visible = a.state != "" or a.cue
+	if a.cue:
+		l_draft.text = "PULL OUT!"
+		l_draft.label_settings.font_color = Color(0.4, 1.0, 0.4)
+		l_draft.visible = int(blink * 6.0) % 2 == 0
+	elif a.state != "":
+		l_draft.text = String(a.state) + ("  +%d MPH" % int(a.closing) if a.state == "DRAFT" and a.closing >= 1.0 else "")
+		l_draft.label_settings.font_color = {"DRAFT": Color(0.3, 1.0, 1.0), "PUSH": Color(1.0, 0.8, 0.25), "SIDE DRAFT": Color(1.0, 0.4, 0.3)}[a.state]
 	# mini leaderboard of the top 5
 	var lines := PackedStringArray()
 	var show: Array[int] = []
@@ -257,13 +342,34 @@ func _draw() -> void:
 		if t > frac:
 			col = Color(0.15, 0.15, 0.2, 0.7)
 		draw_arc(center, radius, a0, a1, 3, col, 9.0)
-	# Draft meter
-	var dm := Rect2(Vector2(W - 162, H - 12), Vector2(150, 6))
+	# The air meter: the tow from the car ahead (cyan), the push from the car
+	# behind (gold), and the side-draft holding you back (red, from the right).
+	var am := air(p, race)
+	var dm := Rect2(Vector2(W - 162, H - 14), Vector2(150, 8))
 	draw_rect(dm, Color(0, 0, 0, 0.6))
-	draw_rect(Rect2(dm.position, Vector2(dm.size.x * p.draft, dm.size.y)), Color(0.3, 1.0, 1.0))
+	var tw: float = dm.size.x * clamp(p.draft, 0.0, 1.0)
+	draw_rect(Rect2(dm.position, Vector2(tw, dm.size.y)), Color(0.3, 1.0, 1.0))
+	var pw: float = min(dm.size.x - tw, dm.size.x * 0.5 * clamp(am.push, 0.0, 1.0))
+	if pw > 0.5:
+		draw_rect(Rect2(dm.position + Vector2(tw, 0), Vector2(pw, dm.size.y)), Color(1.0, 0.8, 0.25))
+	var sw: float = dm.size.x * 0.4 * clamp(am.side, 0.0, 1.0)
+	if sw > 0.5:
+		draw_rect(Rect2(dm.end - Vector2(sw, dm.size.y), Vector2(sw, dm.size.y)), Color(1.0, 0.3, 0.25))
+	# The mark past which the tow is strong enough to slingshot.
+	draw_rect(Rect2(dm.position + Vector2(dm.size.x * 0.55, -2), Vector2(1, dm.size.y + 4)), Color(1, 1, 1, 0.7))
+	if am.cue:
+		var ax: float = dm.position.x - 14.0
+		var ay: float = dm.position.y + 4.0
+		var side_dir: float = -1.0 if am.out_side < 0 else 1.0
+		draw_colored_polygon(PackedVector2Array([Vector2(ax + 6 * side_dir, ay), Vector2(ax - 4 * side_dir, ay - 6), Vector2(ax - 4 * side_dir, ay + 6)]), Color(0.4, 1.0, 0.4))
 	# Time of day, track temperature and the weather.
 	if race.weather and control:
 		draw_string(Game.arcade_font, Vector2(W * 0.5 - 120, 44), race.weather.summary(), HORIZONTAL_ALIGNMENT_CENTER, 240, 10, Color(0.85, 0.9, 1.0))
+	if l_crew.visible:
+		var r := Rect2(l_crew.position - Vector2(8, 3), l_crew.size + Vector2(16, 6))
+		r.size.y = max(r.size.y, l_crew.get_minimum_size().y + 6.0)
+		draw_rect(r, Color(0.05, 0.05, 0.1, 0.72))
+		draw_rect(Rect2(r.position, Vector2(3, r.size.y)), l_crew.label_settings.font_color)
 	# Car condition: damage by corner, tyres and fuel.
 	var cc := Vector2(16, H - 104)
 	var dmg: Dictionary = p.damage
@@ -283,6 +389,13 @@ func _draw() -> void:
 		tc = tc.lerp(Color(1.0, 0.25, 0.15), clamp((t - 115.0) / 30.0, 0.0, 1.0))
 		if p.tyre_air[i] < 0.9 and int(blink * 6.0) % 2 == 0:
 			tc = Color(1, 1, 1) # tyre going down: flashing
+		# Each tyre's health as a traffic light round it: green fine, amber hot
+		# or worn, red about to fail (flashing).
+		var hl: float = CrewWatch.tyre_health(p, i)
+		var hc := Color(0.25, 0.9, 0.35) if hl < 0.34 else (Color(1.0, 0.75, 0.15) if hl < 0.7 else Color(1.0, 0.2, 0.15))
+		if hl >= 0.7 and int(blink * 5.0) % 2 == 0:
+			hc = Color(1, 1, 1)
+		draw_rect(Rect2(cc + corners[i] - Vector2(2, 2), Vector2(10, 10)), hc)
 		draw_rect(Rect2(cc + corners[i], Vector2(6, 6)), tc)
 	var f := Game.arcade_font
 	draw_string(f, cc + Vector2(36, 14), "TIRE", HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color(0.8, 0.9, 1.0))
