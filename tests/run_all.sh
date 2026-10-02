@@ -121,7 +121,7 @@ jobs_list() {
 		elif [[ " $CLOUD_TESTS " == *" $n "* ]]; then
 			echo "cloud $n"
 		elif [[ " $RENDER_TESTS " == *" $n "* ]]; then
-			for t in 0 1 2 3 4 5 6 7 8 9 10; do
+			for t in $(seq 0 39); do
 				echo "render $n $t" # a track each: one renders slowly
 			done
 		else

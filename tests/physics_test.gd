@@ -74,7 +74,7 @@ func _run() -> void:
 	Race = load("res://scripts/race.gd")
 	var only := OS.get_environment("TRACK")
 	var game := root.get_node("Game")
-	for idx in game.tracks.size():
+	for idx in (game.tracks.size() if OS.get_environment("ALL_TRACKS") != "" else game.ORIGINAL_TRACKS): # (replicas: replica_test, or ALL_TRACKS=1)
 		if only != "" and int(only) != idx:
 			continue
 		var t: Node3D = Track.new()

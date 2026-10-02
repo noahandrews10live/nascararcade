@@ -34,7 +34,7 @@ func _run() -> void:
 	_check(main.race.order[0].dist > lead0 + 20.0, "attract race is running")
 
 	var only := OS.get_environment("TRACK")
-	for idx in root.get_node("Game").tracks.size():
+	for idx in (root.get_node("Game").tracks.size() if OS.get_environment("ALL_TRACKS") != "" else root.get_node("Game").ORIGINAL_TRACKS): # (replicas: replica_test, or ALL_TRACKS=1)
 		if only != "" and int(only) != idx:
 			continue
 		print("TRACK ", idx, ": ", root.get_node("Game").tracks[idx].name)
