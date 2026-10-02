@@ -712,6 +712,42 @@ func _quad(kind: String, a: Vector3, b: Vector3, c: Vector3, d: Vector3, col: Co
 	st.add_vertex(d)
 
 
+## Like _quad, with a colour per edge: col_ab along a-c (sample i's a, i+1's c)
+## and col_cd along b-d. For baked contact shading (see AO).
+func _quad2(kind: String, a: Vector3, b: Vector3, c: Vector3, d: Vector3, col_ac: Color, col_bd: Color, n0 := Vector3.ZERO, n1 := Vector3.ZERO) -> void:
+	var st := _st_for(kind)
+	if n0 == Vector3.ZERO:
+		n0 = (b - a).cross(c - a).normalized()
+		if n0 == Vector3.ZERO:
+			n0 = (d - b).cross(c - b).normalized()
+		n1 = n0
+	st.set_normal(n0)
+	st.set_color(col_ac)
+	st.add_vertex(a)
+	st.set_normal(n1)
+	st.add_vertex(c)
+	st.set_normal(n0)
+	st.set_color(col_bd)
+	st.add_vertex(b)
+	st.add_vertex(b)
+	st.set_normal(n1)
+	st.set_color(col_ac)
+	st.add_vertex(c)
+	st.set_color(col_bd)
+	st.add_vertex(d)
+
+
+## Baked contact shading: where a surface meets a wall, the sky light that reaches
+## it is cut off and it goes darker (what a lightmap bake gives you; the tracks are
+## made at run time, so it goes into the vertex colours). Lighter on desktop, whose
+## SSAO adds some of its own.
+func _ao(col: Color, amount: float) -> Color:
+	var k: float = amount * (0.6 if Game.forward_plus else 1.0)
+	var c := col.darkened(k)
+	c.a = col.a
+	return c
+
+
 func _commit_surfaces() -> void:
 	for kind in _st:
 		var mi := MeshInstance3D.new()
@@ -763,8 +799,10 @@ func _build_mesh() -> void:
 		if in_pit_roadway(seg_s) and in_pit_roadway(seg_s + length / n):
 			_pit_segment(i, i2, seg_s, shade, grass)
 		else:
-			_quad("grass", _pt(i, iw), _pt(i, ae), _pt(i2, iw), _pt(i2, ae), grass * (1.0 if stripe else 0.93), up, up)
-		_quad("concrete", _pt(i, iw) + up * 0.9, _pt(i, iw), _pt(i2, iw) + up * 0.9, _pt(i2, iw), Color(0.85, 0.85, 0.85))
+			var gc: Color = grass * (1.0 if stripe else 0.93)
+			_quad2("grass", _pt(i, iw), _pt(i, iw + 1.2), _pt(i2, iw), _pt(i2, iw + 1.2), _ao(gc, 0.35), gc, up, up)
+			_quad("grass", _pt(i, iw + 1.2), _pt(i, ae), _pt(i2, iw + 1.2), _pt(i2, ae), gc, up, up)
+		_quad2("concrete", _pt(i, iw) + up * 0.9, _pt(i, iw), _pt(i2, iw) + up * 0.9, _pt(i2, iw), Color(0.85, 0.85, 0.85), _ao(Color(0.85, 0.85, 0.85), 0.3))
 		# apron
 		_quad("asphalt", _pt(i, ae), _pt(i, -hw - 0.7), _pt(i2, ae), _pt(i2, -hw - 0.7), Color(0.42, 0.42, 0.44) * shade, au0, au1)
 		# double yellow
@@ -774,13 +812,16 @@ func _build_mesh() -> void:
 		# racing surface: bottom lane, rubbered-in groove, upper lane
 		_quad("asphalt", _pt(i, -hw), _pt(i, -hw + width * 0.2), _pt(i2, -hw), _pt(i2, -hw + width * 0.2), asphalt, ru0, ru1)
 		_quad("asphalt", _pt(i, -hw + width * 0.2), _pt(i, -hw + width * 0.55), _pt(i2, -hw + width * 0.2), _pt(i2, -hw + width * 0.55), groove, ru0, ru1)
-		_quad("asphalt", _pt(i, -hw + width * 0.55), _pt(i, hw - 0.6), _pt(i2, -hw + width * 0.55), _pt(i2, hw - 0.6), asphalt, ru0, ru1)
-		_quad("line", _pt(i, hw - 0.6), _pt(i, hw), _pt(i2, hw - 0.6), _pt(i2, hw), Color(0.92, 0.92, 0.92), ru0, ru1)
+		_quad("asphalt", _pt(i, -hw + width * 0.55), _pt(i, hw - 2.0), _pt(i2, -hw + width * 0.55), _pt(i2, hw - 2.0), asphalt, ru0, ru1)
+		# (the last metres up to the wall, darkening into its foot)
+		_quad2("asphalt", _pt(i, hw - 2.0), _pt(i, hw - 0.6), _pt(i2, hw - 2.0), _pt(i2, hw - 0.6), asphalt, _ao(asphalt, 0.22), ru0, ru1)
+		var lc := Color(0.92, 0.92, 0.92)
+		_quad2("line", _pt(i, hw - 0.6), _pt(i, hw), _pt(i2, hw - 0.6), _pt(i2, hw), _ao(lc, 0.22), _ao(lc, 0.38), ru0, ru1)
 		# outer wall with sponsor panels
 		var panel: Color = sponsor_cols[(i / 8) % sponsor_cols.size()]
 		var wb := _pt(i, hw)
 		var wb2 := _pt(i2, hw)
-		_quad("concrete", wb + up * wall_h * 0.45, wb, wb2 + up * wall_h * 0.45, wb2, Color(0.95, 0.95, 0.95))
+		_quad2("concrete", wb + up * wall_h * 0.45, wb, wb2 + up * wall_h * 0.45, wb2, Color(0.95, 0.95, 0.95), _ao(Color(0.95, 0.95, 0.95), 0.3))
 		_quad("line", wb + up * wall_h, wb + up * wall_h * 0.45, wb2 + up * wall_h, wb2 + up * wall_h * 0.45, panel)
 		var ro := right[i] * 0.5
 		var ro2 := right[i2] * 0.5
@@ -834,7 +875,7 @@ func _pit_segment(i: int, i2: int, seg_s: float, shade: float, grass: Color) -> 
 		var w1 := _pt(i2, pwd)
 		var r0 := right[i] * 0.25
 		var r1 := right[i2] * 0.25
-		_quad("concrete", w0 + r0 + up * 1.05, w0 + r0, w1 + r1 + up * 1.05, w1 + r1, Color(0.9, 0.9, 0.9))
+		_quad2("concrete", w0 + r0 + up * 1.05, w0 + r0, w1 + r1 + up * 1.05, w1 + r1, Color(0.9, 0.9, 0.9), _ao(Color(0.9, 0.9, 0.9), 0.3))
 		_quad("concrete", w0 - r0 + up * 1.05, w0 + r0 + up * 1.05, w1 - r1 + up * 1.05, w1 + r1 + up * 1.05, Color(0.75, 0.75, 0.75), up, up)
 		_quad("line", w0 + r0 + up * 0.75, w0 + r0 + up * 0.55, w1 + r1 + up * 0.75, w1 + r1 + up * 0.55, Color(0.1, 0.25, 0.75))
 		# Pit road: box lane and fast lane, the line between them, and the stalls.
@@ -857,8 +898,8 @@ func _pit_segment(i: int, i2: int, seg_s: float, shade: float, grass: Color) -> 
 		var h := 1.0
 		var r0 := right[i] * 0.3
 		var r1 := right[i2] * 0.3
-		_quad("concrete", b0 + r0 + up * h, b0 + r0, b1 + r1 + up * h, b1 + r1, Color(0.92, 0.92, 0.92))
-		_quad("concrete", b0 - r0, b0 - r0 + up * h, b1 - r1, b1 - r1 + up * h, Color(0.86, 0.86, 0.86))
+		_quad2("concrete", b0 + r0 + up * h, b0 + r0, b1 + r1 + up * h, b1 + r1, Color(0.92, 0.92, 0.92), _ao(Color(0.92, 0.92, 0.92), 0.3))
+		_quad2("concrete", b0 - r0, b0 - r0 + up * h, b1 - r1, b1 - r1 + up * h, _ao(Color(0.86, 0.86, 0.86), 0.3), Color(0.86, 0.86, 0.86))
 		var top_col := Color(0.85, 0.12, 0.1) if (i / 6) % 2 == 0 else Color(0.97, 0.97, 0.97)
 		_quad("line", b0 - r0 + up * h, b0 + r0 + up * h, b1 - r1 + up * h, b1 + r1 + up * h, top_col, up, up)
 	elif not zone:
@@ -982,7 +1023,8 @@ func _build_scenery() -> void:
 		_quad("concrete", bt + up * (2.0 + rows * 1.3 + 3.0), bt, bt2 + up * (2.0 + rows * 1.3 + 3.0), bt2, Color(0.55, 0.55, 0.6))
 		# roof
 		var roof_h := 2.0 + rows * 1.3 + 3.0
-		_quad("scenery", pos[i] + right[i] * (hw + 14.0) + up * roof_h, bt + up * roof_h, pos[i2] + right[i2] * (hw + 14.0) + up * roof_h, bt2 + up * roof_h, Color(0.75, 0.75, 0.8))
+		# (a sheet-metal roof: a textured mid grey, not a flat white slab)
+		_quad("concrete", pos[i] + right[i] * (hw + 14.0) + up * roof_h, bt + up * roof_h, pos[i2] + right[i2] * (hw + 14.0) + up * roof_h, bt2 + up * roof_h, Color(0.56, 0.57, 0.6))
 	# Scoring pylon in the infield at start/finish (if there's room for it).
 	var pyl := pos[0] + right[0] * (inner_wall() - 30.0)
 	if _clear_of_track(pyl, infield_clear() + 4.0):
@@ -1653,9 +1695,10 @@ static func _motorhome_mesh() -> Mesh:
 
 
 ## Reflection probes along the grandstands and pit road, so cars reflect the stands
-## and the world around them rather than only the sky (desktop Modern, HIGH and up).
+## and the world around them rather than only the sky (desktop HIGH and up; the
+## phone apps from MEDIUM).
 func _build_probes() -> void:
-	if not Game.forward_plus:
+	if not (Game.forward_plus or Game.mobile_renderer):
 		return
 	var stand_len := front_length()
 	stand_len = clamp(stand_len * 0.9, 200.0, 900.0)

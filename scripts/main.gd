@@ -449,15 +449,16 @@ func _apply_graphics() -> void:
 	if modern:
 		env.ambient_light_source = Environment.AMBIENT_SOURCE_SKY
 		env.ambient_light_energy = 1.0 if not night else 0.6
+		_neutral_fill(night, 0.0)
 		env.reflected_light_source = Environment.REFLECTION_SOURCE_SKY
 		# AgX: a filmic curve, closer to how a camera sees a sunny track than ACES.
 		env.tonemap_mode = Environment.TONE_MAPPER_AGX
 		env.tonemap_exposure = 1.12 if not night else 1.45
 		env.tonemap_white = 6.0
-		env.ssao_enabled = true
+		env.ssao_enabled = Game.forward_plus # (_apply_quality decides)
 		env.ssao_radius = 1.2
 		env.ssao_intensity = 1.8
-		env.ssr_enabled = true
+		env.ssr_enabled = Game.forward_plus
 		env.ssr_max_steps = 48
 		env.ssr_fade_in = 0.2
 		env.ssr_fade_out = 2.0
@@ -470,7 +471,7 @@ func _apply_graphics() -> void:
 		env.fog_sun_scatter = 0.35
 		env.fog_aerial_perspective = 0.6
 		env.fog_sky_affect = 0.0 if not night else 0.3
-		env.volumetric_fog_enabled = night
+		env.volumetric_fog_enabled = night and Game.forward_plus
 		env.volumetric_fog_density = 0.012
 		env.volumetric_fog_albedo = Color(0.8, 0.8, 0.85)
 		env.volumetric_fog_length = 220.0
@@ -484,7 +485,11 @@ func _apply_graphics() -> void:
 		sun.directional_shadow_max_distance = 320.0
 		sun.shadow_blur = 1.2
 		sun.light_angular_distance = 0.6
-		if not Game.forward_plus:
+		if Game.mobile_renderer:
+			# The phone renderer lights like desktop but has no SSAO: a little less
+			# sky fill (the baked contact shading does the rest).
+			env.ambient_light_energy *= 0.8
+		elif not Game.forward_plus:
 			# The browser renderer has no SSAO and lights in a flatter space, so the
 			# sky fill washes everything out; pull it back.
 			env.ambient_light_energy *= 0.5
@@ -546,6 +551,15 @@ var _rain_fx: Node3D
 var _base_fog := 0.0
 
 
+## The fill light in the shade. Taken straight from a painted sky it tints every
+## surface (a dusk sky turns the whole track lavender); a camera sees shade as
+## neutral, a little cool on a clear day. So half sky, half neutral daylight
+## shade, and greyer as cloud comes over.
+func _neutral_fill(dark: bool, rain: float) -> void:
+	env.ambient_light_color = Color(0.6, 0.64, 0.7).lerp(Color(0.62, 0.63, 0.65), rain)
+	env.ambient_light_sky_contribution = 0.8 if dark else lerp(0.5, 0.35, rain)
+
+
 func apply_time_and_weather(w: Node) -> void:
 	if track == null or env == null or env.sky == null:
 		return
@@ -559,7 +573,8 @@ func apply_time_and_weather(w: Node) -> void:
 	var sun_col := Color(1.0, 0.97, 0.9).lerp(Color(1.0, 0.62, 0.38), low)
 	if dark:
 		sun_col = Color(0.7, 0.78, 1.0)
-	var energy: float = (0.15 if dark else lerp(1.4, 0.8, low)) * (1.0 - 0.45 * w.rain)
+	# (A sunny day's sun is several times the sky's fill: crisp shadows.)
+	var energy: float = (0.15 if dark else lerp(1.55, 0.9, low)) * (1.0 - 0.45 * w.rain)
 	sun.light_energy = energy
 	sun.light_color = sun_col
 	var sm = env.sky.sky_material
@@ -574,7 +589,9 @@ func apply_time_and_weather(w: Node) -> void:
 		sm.set_shader_parameter("cloud_cover", lerp(float(cfg.get("clouds", 0.42)), 0.97, w.rain))
 		sm.set_shader_parameter("energy", lerp(1.0, 0.5, w.rain) * (1.0 if not dark else 0.8))
 		_set_sky_photo(sm, "night" if night_sky else ("overcast" if w.rain > 0.35 else ("dusk" if elev < 16.0 else "day")))
-	env.ambient_light_energy = (0.6 if dark else 1.0) * (1.0 - 0.3 * w.rain) * (0.5 if Game.modern and not Game.forward_plus else 1.0)
+	env.ambient_light_energy = (0.6 if dark else 1.0) * (1.0 - 0.3 * w.rain) * (Game.ambient_scale() if Game.modern else 1.0)
+	if Game.modern:
+		_neutral_fill(dark, w.rain)
 	if _base_fog == 0.0:
 		_base_fog = env.fog_density
 	env.fog_density = _base_fog * (1.0 + 3.0 * w.rain)
@@ -640,10 +657,18 @@ func _apply_quality(night: bool) -> void:
 	var q := Game.quality_level()
 	var vp := get_viewport()
 	var fp := Game.forward_plus
+	var mob := Game.mobile_renderer
 	if fp:
 		vp.scaling_3d_mode = Viewport.SCALING_3D_MODE_FSR2
 		vp.scaling_3d_scale = [0.67, 0.67, 0.77, 0.87, 1.0][q]
 		vp.fsr_sharpness = 0.35
+	elif mob:
+		# Phone/tablet apps: plain upscaling when the resolution steps down (FSR is
+		# Forward+ only), and MSAA, which tiled phone GPUs resolve almost for free.
+		vp.scaling_3d_mode = Viewport.SCALING_3D_MODE_BILINEAR
+		_web_scale = 1.0
+		_fit_web_resolution(true)
+		vp.msaa_3d = [Viewport.MSAA_2X, Viewport.MSAA_DISABLED, Viewport.MSAA_2X, Viewport.MSAA_4X, Viewport.MSAA_4X][q]
 	else:
 		# Compatibility renderer (browser): plain upscaling and FXAA.
 		vp.scaling_3d_mode = Viewport.SCALING_3D_MODE_BILINEAR
@@ -652,19 +677,27 @@ func _apply_quality(night: bool) -> void:
 		# (Godot 4.7's Compatibility renderer has no FXAA; MSAA smooths the edges.)
 		vp.msaa_3d = Viewport.MSAA_2X if q >= 3 else Viewport.MSAA_DISABLED
 	RenderingServer.directional_shadow_atlas_set_size([2048, 2048, 4096, 4096, 8192][q], true)
-	sun.shadow_enabled = fp or q >= 2
+	sun.shadow_enabled = fp or mob or q >= 2
 	sun.directional_shadow_mode = DirectionalLight3D.SHADOW_PARALLEL_4_SPLITS if q >= 3 and fp else DirectionalLight3D.SHADOW_PARALLEL_2_SPLITS
-	sun.directional_shadow_max_distance = [150.0, 150.0, 200.0, 320.0, 420.0][q] if fp else [0.0, 0.0, 120.0, 180.0, 240.0][q]
+	# Shadows only as far as they read: the sharpest detail goes to the cars near
+	# the camera.
+	if fp:
+		sun.directional_shadow_max_distance = [150.0, 150.0, 200.0, 320.0, 420.0][q]
+	elif mob:
+		sun.directional_shadow_max_distance = [110.0, 80.0, 110.0, 160.0, 220.0][q]
+	else:
+		sun.directional_shadow_max_distance = [0.0, 0.0, 120.0, 180.0, 240.0][q]
 	RenderingServer.directional_soft_shadow_filter_set_quality(
 		[RenderingServer.SHADOW_QUALITY_SOFT_VERY_LOW, RenderingServer.SHADOW_QUALITY_SOFT_VERY_LOW, RenderingServer.SHADOW_QUALITY_SOFT_LOW, RenderingServer.SHADOW_QUALITY_SOFT_MEDIUM, RenderingServer.SHADOW_QUALITY_SOFT_HIGH][q])
-	env.ssao_enabled = fp and q >= 2
+	# (Godot 4.7's browser renderer has SSAO too: desktop browsers on HIGH and up.)
+	env.ssao_enabled = (fp and q >= 2) or (not fp and not mob and q >= 3 and not Game.touch_device())
 	if fp:
 		RenderingServer.environment_set_ssao_quality(
 			RenderingServer.ENV_SSAO_QUALITY_LOW if q <= 2 else RenderingServer.ENV_SSAO_QUALITY_MEDIUM, q <= 2, 0.5, 2, 50.0, 300.0)
 	env.ssr_enabled = fp and q >= 4
 	env.volumetric_fog_enabled = fp and night and q >= 3
-	env.glow_enabled = fp or q >= 3
-	get_tree().call_group("probe", "set_visible", fp and q >= 3)
+	env.glow_enabled = fp or mob or q >= 3
+	get_tree().call_group("probe", "set_visible", (fp and q >= 3) or (mob and q >= 2))
 	get_tree().call_group("haze", "set_visible", fp and q >= 3)
 
 
@@ -724,7 +757,7 @@ func _fit_web_resolution(force := false) -> void:
 ## time; drops 3D resolution by 10% when frames run long, adds 5% back when there's
 ## plenty of room (never above native).
 func _dynamic_resolution(delta: float) -> void:
-	if not OS.has_feature("web") or Game.forward_plus or int(Game.settings.get("res_mode", 0)) != 0:
+	if not (OS.has_feature("web") or OS.has_feature("mobile")) or Game.forward_plus or int(Game.settings.get("res_mode", 0)) != 0:
 		return
 	if paused or state != State.RACE:
 		_dyn_time = 0.0
@@ -3095,9 +3128,19 @@ func _cockpit_camera(car: Node3D, delta: float, spd: float) -> void:
 	cockpit.update(delta)
 	var look := Basis(Vector3.UP, -car.steer * 0.35)
 	cam.global_transform = cockpit.eye_transform() * Transform3D(look, Vector3.ZERO) * feel.update(car, delta, 0.35, 1.8)
-	cam.fov = 66.0 + spd * 6.0
+	cam.fov = _fov_for(95.0 + spd * 5.0, 66.0 + spd * 6.0)
 	cam.near = 0.03
 	cam_pos = cam.global_position
+
+
+## The in-car cameras are framed by their horizontal view, like a real lens on a
+## real car: a wide phone (19.5:9) doesn't get a fish-eye 120 degrees across.
+## Never wider vertically than `max_v` (what 16:9 and 4:3 screens always had).
+func _fov_for(h_deg: float, max_v: float) -> float:
+	var sz: Vector2 = get_viewport().get_visible_rect().size
+	var aspect: float = sz.x / max(sz.y, 1.0)
+	var v: float = rad_to_deg(2.0 * atan(tan(deg_to_rad(h_deg) * 0.5) / max(aspect, 0.5)))
+	return clamp(v, 40.0, max_v)
 
 
 func _hide_cockpit() -> void:
@@ -3113,7 +3156,7 @@ func _chase_camera(car: Node3D, delta: float, mode: int) -> void:
 	var spd: float = clamp(abs(car.v) / 85.0, 0.0, 1.2)
 	if mode == 2:
 		cam.global_transform = tr * Transform3D(Basis(), Vector3(0, 1.05, -2.3)) * feel.update(car, delta, 0.6)
-		cam.fov = 70.0 + spd * 10.0
+		cam.fov = _fov_for(98.0 + spd * 8.0, 70.0 + spd * 10.0)
 		cam_pos = cam.global_position
 		return
 	if mode == 3:
@@ -3130,7 +3173,7 @@ func _chase_camera(car: Node3D, delta: float, mode: int) -> void:
 	cam.global_position = cam_pos
 	var look := tr.origin + up * 1.0 - cam_back * 8.0
 	cam.look_at(look, up.lerp(Vector3.UP, 0.4).normalized())
-	cam.fov = 64.0 + spd * 14.0
+	cam.fov = _fov_for(92.0 + spd * 10.0, 64.0 + spd * 14.0)
 	# The chase camera is on a long arm: it feels the car, but softly.
 	cam.global_transform = cam.global_transform * feel.update(car, delta, 0.45, 0.35)
 
@@ -4581,7 +4624,7 @@ func _enter_photo() -> void:
 	if ov:
 		ov.visible = false
 	_sub("PHOTO MODE: ARROWS ORBIT  W/S ZOOM  E/Q HEIGHT  ENTER SNAP  BACKSPACE EXIT", 4.0)
-	if Game.forward_plus:
+	if Game.forward_plus or Game.mobile_renderer:
 		var ca := CameraAttributesPractical.new()
 		ca.dof_blur_far_enabled = true
 		ca.dof_blur_amount = 0.08

@@ -1397,9 +1397,38 @@ func interpolate(f: float) -> void:
 	global_transform = _tr_prev.interpolate_with(_tr_cur, f)
 
 
+static var _contact_mat: StandardMaterial3D
+var _contact: MeshInstance3D
+
+
+## One material for every car's contact shadow: a soft dark oval, darkest under
+## the middle of the car.
+static func _contact_material() -> StandardMaterial3D:
+	if _contact_mat:
+		return _contact_mat
+	var g := Gradient.new()
+	g.offsets = PackedFloat32Array([0.0, 0.55, 1.0])
+	g.colors = PackedColorArray([Color(0, 0, 0, 0.62), Color(0, 0, 0, 0.38), Color(0, 0, 0, 0.0)])
+	var tex := GradientTexture2D.new()
+	tex.gradient = g
+	tex.fill = GradientTexture2D.FILL_RADIAL
+	tex.fill_from = Vector2(0.5, 0.5)
+	tex.fill_to = Vector2(0.5, 0.0)
+	tex.width = 64
+	tex.height = 128
+	_contact_mat = StandardMaterial3D.new()
+	_contact_mat.albedo_texture = tex
+	_contact_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	_contact_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	_contact_mat.render_priority = -2 # under skid marks and smoke
+	return _contact_mat
+
+
 func _update_visual(delta: float) -> void:
 	if track == null:
 		return
+	if _contact:
+		_contact.visible = Game.modern and not tumbling and not towed
 	var tr: Transform3D
 	if tumbling:
 		tr = Transform3D(t_basis, t_pos - t_basis * Vector3(0.0, CG_H, 0.0))
@@ -1678,6 +1707,19 @@ func _build_model() -> void:
 	shadow.add_to_group("retro_only")
 	shadow.visible = not Game.modern
 	add_child(shadow)
+	# Modern: the soft contact shadow right under the car, where the sky can't
+	# reach (ambient occlusion the phone and browser renderers don't compute).
+	_contact = MeshInstance3D.new()
+	var cm := PlaneMesh.new()
+	cm.size = Vector2(2.7, 6.0)
+	_contact.mesh = cm
+	_contact.material_override = _contact_material()
+	_contact.position = Vector3(0, 0.03, 0)
+	_contact.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	_contact.visibility_range_end = 140.0
+	_contact.add_to_group("modern_only")
+	_contact.visible = Game.modern
+	add_child(_contact)
 	# sparks
 	sparks = CPUParticles3D.new()
 	sparks.emitting = false

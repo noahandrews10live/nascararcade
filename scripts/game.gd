@@ -781,11 +781,17 @@ func legend_team_idx() -> int:
 	return teams.size() - 1
 var selected_team := 0
 var scanlines := true
-## "Modern" = Forward+ PBR rendering. Needs a RenderingDevice (not available on web /
-## the Compatibility renderer), otherwise the game stays in 1999 mode.
+## "Modern" = the PBR look, on whichever renderer is running:
+##   forward_plus      desktop (Vulkan/D3D12/Metal): everything, SSAO, SSR, FSR 2;
+##   mobile            the phone and tablet apps (Metal on iOS, Vulkan on Android):
+##                     reflection probes, glow, shadows, MSAA, but no SSAO/SSR/
+##                     volumetric fog, and nothing that reads the screen back;
+##   gl_compatibility  browsers (and phones without Vulkan): the lightest.
 var modern_supported := false
 var modern := false
+var renderer := "gl_compatibility"
 var forward_plus := false
+var mobile_renderer := false
 ## Modern-mode quality: 0 AUTO, 1 LOW, 2 MEDIUM, 3 HIGH, 4 ULTRA.
 const QUALITY_NAMES := ["AUTO", "LOW", "MEDIUM", "HIGH", "ULTRA"]
 var quality := 0
@@ -899,9 +905,10 @@ func _ready() -> void:
 		tracks.append((t as Dictionary).duplicate(true))
 	load_mods()
 	_fill_teams()
-	# Modern works on both renderers; Forward+ (desktop Vulkan/D3D12) adds SSAO,
-	# SSR, volumetric fog and FSR 2 on top of the Compatibility (browser) version.
-	forward_plus = RenderingServer.get_rendering_device() != null
+	# Modern works on all three renderers (see `renderer`).
+	renderer = RenderingServer.get_current_rendering_method()
+	forward_plus = renderer == "forward_plus"
+	mobile_renderer = renderer == "mobile"
 	modern_supported = true
 	modern = true
 	load_settings()
@@ -1362,6 +1369,12 @@ func _fill_teams() -> void:
 
 
 ## Effective quality level 1..4 (LOW..ULTRA).
+## How much sky fill the renderer gets (see main's environment): desktop's SSAO
+## shades it; the others have no SSAO and need less.
+func ambient_scale() -> float:
+	return 1.0 if forward_plus else (0.8 if mobile_renderer else 0.5)
+
+
 func quality_level() -> int:
 	return auto_quality if quality == 0 else quality
 
@@ -1430,11 +1443,13 @@ func style(m: StandardMaterial3D) -> void:
 	match kind:
 		"paint":
 			if modern:
-				m.metallic = 0.35
-				m.roughness = 0.24
+				# Cup liveries are vinyl wraps over paint: mostly a colour coat under a
+				# glossy clear layer, only a touch of metal flake.
+				m.metallic = 0.15
+				m.roughness = 0.28
 				m.clearcoat_enabled = true
 				m.clearcoat = 1.0
-				m.clearcoat_roughness = 0.06
+				m.clearcoat_roughness = 0.05
 			else:
 				m.roughness = 0.4
 				m.metallic_specular = 0.7
@@ -1443,8 +1458,8 @@ func style(m: StandardMaterial3D) -> void:
 			m.vertex_color_use_as_albedo = true
 			m.vertex_color_is_srgb = modern
 			if modern:
-				m.metallic = 0.25
-				m.roughness = 0.3
+				m.metallic = 0.15
+				m.roughness = 0.28
 				m.clearcoat_enabled = true
 				m.clearcoat = 1.0
 				m.clearcoat_roughness = 0.05
@@ -1465,8 +1480,9 @@ func style(m: StandardMaterial3D) -> void:
 			m.metallic = 0.95 if modern else 0.3
 			m.roughness = 0.18
 		"rubber":
-			m.roughness = 0.95
-			m.metallic_specular = 0.2
+			# Racing slicks: a satin sheen when they're hot, not a matte block.
+			m.roughness = 0.78 if modern else 0.95
+			m.metallic_specular = 0.3
 		"plastic":
 			m.roughness = 0.5
 		"light":
@@ -1492,6 +1508,15 @@ func style(m: StandardMaterial3D) -> void:
 					m.normal_enabled = true
 					m.normal_texture = texture(kind, true)
 					m.normal_scale = {"asphalt": 0.9, "grass": 0.6, "concrete": 0.4}[kind]
+					var rough: Texture2D = roughness_map(kind)
+					if rough:
+						# Polished stone tops and smooth formwork catch the light; the
+						# binder and the pits don't (tools/make_roughness.py).
+						m.roughness_texture = rough
+						m.roughness_texture_channel = BaseMaterial3D.TEXTURE_CHANNEL_GREEN
+						m.roughness = 1.0
+					if kind == "grass":
+						m.metallic_specular = 0.25 # turf has almost no sheen
 					m.albedo_color = Color(1.12, 1.12, 1.12) * base
 					if kind == "asphalt":
 						# Weathered race asphalt reflects about an eighth of the light.
@@ -1614,6 +1639,16 @@ func texture(kind: String, normal: bool) -> Texture2D:
 		t.color_ramp = ramp
 	_tex[key] = t
 	return t
+
+
+## A photographed surface's roughness map (assets/textures/<kind>_rough.jpg), or null.
+func roughness_map(kind: String) -> Texture2D:
+	var path := "res://assets/textures/%s_rough.jpg" % kind
+	if not ResourceLoader.exists(path):
+		return null
+	if not _tex.has(path):
+		_tex[path] = load(path)
+	return _tex[path]
 
 
 func _photo(kind: String) -> bool:

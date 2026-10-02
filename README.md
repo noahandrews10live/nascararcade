@@ -53,7 +53,30 @@ audio. The project has no imported assets.
     course's tight corners. Each model is drawn once for all its copies;
   - a procedural sky with clouds (stars at night), sun shadows and bloom;
   - on desktop (Forward+): ambient occlusion, screen-space reflections, volumetric fog
-    with light-tower beams at night, and FSR 2 upscaling with temporal anti-aliasing.
+    with light-tower beams at night, and FSR 2 upscaling with temporal anti-aliasing;
+  - **built for the renderer it ships on.** The iPhone/iPad and Android apps run Godot's
+    Mobile renderer (Metal on iOS, Vulkan on Android, falling back to OpenGL on phones
+    without Vulkan): reflection probes along the grandstands from MEDIUM, glow, sun
+    shadows kept to the distance where they read, and MSAA, which tiled phone GPUs
+    resolve almost for free. Nothing that reads the screen back (heat haze, motion
+    blur) or that Mobile doesn't have (SSAO, SSR, volumetric fog) is switched on.
+    Browsers run the Compatibility renderer (desktop browsers get SSAO on HIGH and up);
+  - **calibrated materials.** Roughness is the biggest realism control, so every surface
+    has its own: asphalt and concrete have roughness maps made from their photographs
+    (polished stone tops and smooth formwork catch the light, the binder and pits don't;
+    `tools/make_roughness.py`), slicks have a satin sheen, liveries are a colour coat under
+    a glossy clear coat, turf has almost no sheen, and a wet track goes glossy;
+  - **baked contact shading.** What a lightmap bake gives a static scene, built into the
+    track as it's made: the asphalt and white line darken into the foot of the outside
+    wall, wall and barrier faces darken at their base, the grass at the inside wall. Every
+    car has a soft contact shadow underneath it, so cars sit on the track on renderers
+    without SSAO;
+  - **light like a camera sees it.** The shade is lit half by the sky and half by neutral
+    daylight fill, so a dusk sky no longer turns the whole track lavender, and the sun is
+    several times the fill, for crisp shadows. The grandstand roofs are textured grey
+    sheet metal;
+  - **real lenses.** The in-car cameras are framed by their horizontal view: a wide phone
+    (19.5:9) no longer gets a 120-degree fish-eye; 16:9 and 4:3 screens look as before.
   Options → Quality picks LOW / MEDIUM / HIGH / ULTRA, or AUTO, which lowers detail
   when frames run late. The browser build runs Modern with lighter effects.
 - **1999** is the original look: 640×480 upscaled, vertex colours, boxy cars, blob
@@ -508,6 +531,9 @@ an Android App Bundle: turn on Gradle build in the preset, which needs the full 
 in the **iOS** preset (it holds a placeholder, `TEAMID0000`) and export. Godot
 writes an Xcode project; open it, pick your signing team and run it on your phone,
 or archive it for TestFlight and the App Store (needs an Apple Developer account).
+Export into an empty folder. The app renders with Metal (Godot's Mobile renderer);
+the iOS Simulator only runs the Compatibility renderer, so judge the look and the
+frame rate on a real iPhone or iPad (`tests/gpu_bench.gd` is the route to compare).
 
 ## Install it on your phone
 
@@ -549,7 +575,7 @@ Rebuild after changes: export the **Web App** preset (`godot --headless --export
 ## Project layout
 
 ```
-project.godot              Forward+ on desktop, Compatibility on web; 640x480 base UI
+project.godot              Forward+ on desktop, Mobile in the phone apps, Compatibility on web; 640x480 base UI
 scenes/main.tscn           single scene; everything else is built in code
 scripts/game.gd            autoload: tracks, teams, input, settings, season, career,
                            paint shop, challenges, records, retro/modern materials
@@ -657,6 +683,8 @@ Each test also runs on its own, headless (`godot --headless --fixed-fps 60 --pat
 | `tests/fit_test.gd` | Menus and HUD fit phone, tablet and ultrawide screens |
 | `tests/line_field_test.gd` | 25-car races on the flat tracks: the line is used, cars still pass, few crashes, the pack's pace |
 | `tests/cpu_bench.gd` | CPU time per frame of a 25-car race (no rendering) |
+| `tests/gpu_bench.gd` | The benchmark route: a 20-car race from the chase camera; frame times (on the device) and draw calls, objects and triangles per frame (the same anywhere). Run it with `--rendering-method mobile` to see the phone path |
+| `tests/shots_look.gd` | The same five views (chase, the car close up, turn 1, the wall, a TV long lens) for comparing the look between changes and renderers |
 | `tests/shots_wow.gd` | Intro, showroom, TV race, wreck replay and victory lane (screenshots with `OUT=dir`) |
 | `tests/split_shots.gd` | Two-player race (screenshot with `OUT=dir` and a renderer) |
 
