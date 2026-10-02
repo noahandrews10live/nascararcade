@@ -2155,8 +2155,7 @@ func _player_input() -> void:
 	var ctl: Node = race.control
 	if ctl:
 		if Input.is_action_just_pressed("pit"):
-			p.want_pit = not p.want_pit
-			_sub("PIT THIS LAP: %s" % _plan_name(p.pit_plan) if p.want_pit else "PIT CANCELLED", 2.0)
+			toggle_pit()
 		if Input.is_action_just_pressed("pit_option"):
 			var cycle := {"4": "2", "2": "F", "F": "4"}
 			if track.cfg.get("road", false) and race.weather and race.weather.mode > 0:
@@ -2940,6 +2939,7 @@ func _process(delta: float) -> void:
 		if tutorial and tutorial.active:
 			if state in [State.COUNTDOWN, State.RACE]:
 				tutorial.update(delta)
+				tutorial.modulate.a = 0.0 if paused else 1.0 # (out of the pause screen's way)
 			elif state in [State.TITLE, State.MODE_SELECT, State.MENU]:
 				tutorial.visible = false
 				tutorial.active = false
@@ -3141,6 +3141,15 @@ func _fov_for(h_deg: float, max_v: float) -> float:
 	var aspect: float = sz.x / max(sz.y, 1.0)
 	var v: float = rad_to_deg(2.0 * atan(tan(deg_to_rad(h_deg) * 0.5) / max(aspect, 0.5)))
 	return clamp(v, 40.0, max_v)
+
+
+## Pit this lap, or cancel it (the PIT key, and PIT on the phone's pause screen).
+func toggle_pit() -> void:
+	if race == null or race.control == null or race.player == null:
+		return
+	var p: Node3D = race.player
+	p.want_pit = not p.want_pit
+	_sub("PIT THIS LAP: %s" % _plan_name(p.pit_plan) if p.want_pit else "PIT CANCELLED", 2.0)
 
 
 func _hide_cockpit() -> void:
@@ -3381,7 +3390,7 @@ func _enter_options() -> void:
 		{"id": "draft_cue", "label": "DRAFT SOUNDS", "values": ["OFF", "ON"], "index": int(Game.settings.get("draft_cue", 1)), "hint": "A TICK WHEN YOU CATCH THE DRAFT, A DOUBLE TICK WHEN IT'S TIME TO PULL OUT AND PASS"},
 		{"id": "haptics", "label": "VIBRATION", "values": ["OFF", "ON"], "index": int(Game.settings.get("haptics", 1)), "hint": "PHONES: A BUZZ ON HITS AND LOCKED WHEELS"},
 		{"id": "share_stats", "label": "SHARE STATS", "values": ["OFF", "ON"], "index": int(Game.settings.get("share_stats", 1)), "hint": "SENDS YOUR FRAME RATE AND DEVICE TYPE AFTER A RACE (NOTHING PERSONAL) TO HELP TUNE THE GAME"},
-		{"id": "auto_gas", "label": "GAS", "values": ["YOU", "AUTO"], "index": int(Game.settings.get("auto_gas", 0)), "hint": "AUTO: THE CAR TAKES EACH CORNER AT A SAFE SPEED, YOU STEER (ONE THUMB). BRAKE STILL WORKS"},
+		{"id": "auto_gas", "label": "PEDALS", "values": ["MANUAL GAS + BRAKE", "AUTO GAS, YOU BRAKE"], "index": int(Game.settings.get("auto_gas", 0)), "hint": "MANUAL: HOLD ANYWHERE ON THE RIGHT HALF OF THE SCREEN FOR GAS. AUTO: THE CAR TAKES EACH CORNER AT A SAFE SPEED, YOU STEER. THE BRAKE IS BESIDE THE SPEEDOMETER EITHER WAY"},
 		{"id": "tilt_sens", "label": "TILT STEERING", "values": ["GENTLE", "NORMAL", "QUICK", "VERY QUICK"], "index": int(Game.settings.get("tilt_sens", 1)), "hint": "PHONES: HOW FAR YOU TILT FOR FULL LOCK (18 / 12 / 9 / 6 DEGREES)"},
 		{"id": "radio", "label": "CREW CHIEF VOICE", "values": ["OFF", "ON"], "index": 1 if Game.radio_voice else 0, "hint": "THE CREW CHIEF'S CALLS, SPOKEN"},
 		{"id": "commentary", "label": "COMMENTARY", "values": ["OFF", "ON"], "index": int(Game.settings.get("commentary", 1)), "hint": "THE TV BOOTH'S PLAY-BY-PLAY AND ANALYST LINES, ON SCREEN"},

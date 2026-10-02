@@ -5,8 +5,11 @@ extends Control
 ## Racing:
 ##   - steering by tilting the device like a wheel (when the browser gives us the
 ##     motion sensor), or by dragging a thumb left/right anywhere on the left side;
-##   - round GAS (green) and BRAKE (red) pedals on the right, pressure-free (press = full);
-##   - small buttons for pause, camera, pit and switching tilt/drag steering.
+##   - gas: hold anywhere on the right half of the screen (nothing is drawn there),
+##     or AUTO GAS (Options -> PEDALS); a round red BRAKE pedal left of the
+##     speedometer (mirrored for LEFT-HANDED);
+##   - a pause button; the camera, clips, the pit call and tilt/drag steering are
+##     on the pause screen.
 ## Menus, results and replays: a D-pad and A (select) / B (back) buttons.
 ##
 ## Everything is sent as ordinary input actions (InputEventAction), so the game
@@ -82,7 +85,7 @@ func _read_tilt() -> void:
 			_tilt_center = _tilt_value # first reading: however it's held is straight
 
 
-## Radius of the round GAS and BRAKE pedals.
+## Radius of the round BRAKE pedal.
 const PEDAL_R := 38.0
 
 
@@ -104,36 +107,24 @@ func _layout() -> void:
 	_buttons.clear()
 	var reserve: Array = []
 	if _racing():
-		# Round pedals under the right thumb: green GAS, red BRAKE just to its left.
-		# Pedals stay big enough for a thumb on tablets, and sit lower when the
-		# screen is upright (hands hold a tablet near the bottom).
+		# The red BRAKE pedal just left of the speedometer (mirrored for the left-
+		# handed). There's no gas pedal: with manual gas, holding anywhere on the
+		# right half of the screen is the gas, and nothing is drawn there.
 		var pr: float = PEDAL_R * max(k, 0.8)
-		var upright := sr.size.y > sr.size.x
-		var gas_c := Vector2(R - 20.0 * k - pr, T + sr.size.y * (0.7 if upright else 0.58))
-		var brake_c := gas_c + Vector2(-pr * 2.0 - 22.0 * k, pr * 0.5)
+		var sp: Rect2 = main.hud.speedo_rect() if main.hud else Rect2(sr.size.x - 130.0, sr.size.y - 118.0, 130.0, 118.0)
+		var brake_c := Vector2(L + sp.position.x - 16.0 * k - pr, T + sp.end.y - 55.0)
+		brake_c.y = min(brake_c.y, B - pr - 6.0)
 		if _lefty():
-			# LEFT-HANDED: the pedals under the left thumb, steering on the right.
-			gas_c.x = L + 20.0 * k + pr
-			brake_c = gas_c + Vector2(pr * 2.0 + 22.0 * k, pr * 0.5)
-		if _one_thumb():
-			# AUTO GAS: no gas pedal; the brake sits where the gas was.
-			_buttons.append([Rect2(gas_c - Vector2.ONE * pr, Vector2.ONE * pr * 2.0), "BRAKE", "brake", "brake"])
-		else:
-			_buttons.append([Rect2(gas_c - Vector2.ONE * pr, Vector2.ONE * pr * 2.0), "GAS", "accelerate", "gas"])
-			_buttons.append([Rect2(brake_c - Vector2.ONE * pr, Vector2.ONE * pr * 2.0), "BRAKE", "brake", "brake"])
-		# Small buttons beside the car's state (which sits under the position
-		# readout, top right).
+			brake_c.x = L + (sr.size.x - (brake_c.x - L))
+		_buttons.append([Rect2(brake_c - Vector2.ONE * pr, Vector2.ONE * pr * 2.0), "BRAKE", "brake", "brake"])
+		# Pause, beside the car's state (under the position readout, top right):
+		# the camera, clips and the pit call are on the pause screen.
 		var bw := 48.0 * k
 		var bh := 34.0 * k
-		var gap := 6.0 * k
 		var mr: Rect2 = main.hud.status_rect() if main.hud else Rect2(sr.size.x - 96.0, 96.0, 82.0, 106.0)
 		var x: float = L + mr.position.x - 12.0 - bw
 		var y: float = T + mr.position.y - 5.0
 		_buttons.append([Rect2(x, y, bw, bh), "II", "pause", "tap"])
-		_buttons.append([Rect2(x, y + bh + gap, bw, bh), "CAM", "camera", "tap"])
-		_buttons.append([Rect2(x, y + (bh + gap) * 2.0, bw, bh), "CLIP", "clip", "tap"])
-		if main.race.control:
-			_buttons.append([Rect2(x, y + (bh + gap) * 3.0, bw, bh), "PIT", "pit", "tap"])
 		# REWIND, for a few seconds after a mistake: big, mid-left, easy to hit.
 		if main.rewind and main.rewind.offer_t > 0.0 and main.rewind.available():
 			var rw := Rect2(L + 16.0 * k, T + sr.size.y * 0.3, 120.0 * k, 46.0 * k)
@@ -154,8 +145,20 @@ func _layout() -> void:
 		if tilt and _tilt_ok:
 			_buttons.append([Rect2(x3 + w3 + 8.0 * k, y2, w3, h * 0.75), "CENTRE", "_recenter", "tap"])
 		_buttons.append([Rect2(x3 + (w3 + 8.0 * k) * 2.0, y2, w3, h * 0.75), "REPORT A PROBLEM", "_report", "tap"])
+		# The race's own buttons: camera, a clip of the last 15 seconds, the pit call.
+		var y3 := y2 + h * 0.75 + 10.0 * k
+		var racing_pause: bool = main.race != null and main.state in [main.State.COUNTDOWN, main.State.RACE, main.State.FINISHED] and main.split_cams.is_empty()
+		if racing_pause:
+			var n3 := 3 if main.race.control else 2
+			var w4 := (w * 2.0 + 20.0 * k - 8.0 * k * (n3 - 1)) / n3
+			_buttons.append([Rect2(x3, y3, w4, h * 0.7), "CAMERA", "camera", "tap"])
+			_buttons.append([Rect2(x3 + w4 + 8.0 * k, y3, w4, h * 0.7), "SAVE CLIP", "_clip", "tap"])
+			if main.race.control:
+				var pit_on: bool = main.race.player != null and main.race.player.want_pit
+				_buttons.append([Rect2(x3 + (w4 + 8.0 * k) * 2.0, y3, w4, h * 0.7), "PIT: CANCEL" if pit_on else "PIT THIS LAP", "_pit", "tap"])
+			y3 += h * 0.7 + 10.0 * k
 		if main.rewind and main.rewind.available() and main.state == main.State.RACE:
-			_buttons.append([Rect2(x3, y2 + h * 0.75 + 10.0 * k, w * 2.0 + 20.0 * k, h * 0.7), "REWIND 5 SECONDS (%s LEFT)" % (str(main.rewind.left) if main.rewind.left < 50 else "ANY"), "_rewind", "tap"])
+			_buttons.append([Rect2(x3, y3, w * 2.0 + 20.0 * k, h * 0.7), "REWIND 5 SECONDS (%s LEFT)" % (str(main.rewind.left) if main.rewind.left < 50 else "ANY"), "_rewind", "tap"])
 	elif main:
 		# Menus are touched directly (cards, tiles); a BACK button top left, and
 		# on the course and car pickers < > to browse and GO to choose.
@@ -209,7 +212,7 @@ func _toggle_tilt() -> void:
 	Game.settings["touch_tilt"] = tilt
 	Game.save_settings()
 	_tilt_center = _tilt_value
-	main._sub("STEERING: " + ("TILT THE DEVICE" if tilt else "DRAG ON THE LEFT"), 2.0)
+	main._sub("STEERING: " + ("TILT THE DEVICE" if tilt else "DRAG ON THE %s" % ("RIGHT" if _lefty() else "LEFT")), 2.0)
 
 
 func _input(event: InputEvent) -> void:
@@ -246,7 +249,11 @@ func _touch(event: InputEvent) -> void:
 						_tap(b[2])
 					return
 			if _racing():
-				if (p.x >= get_viewport_rect().size.x * 0.5) == _lefty() or _one_thumb():
+				var gas_side: bool = (p.x >= get_viewport_rect().size.x * 0.5) != _lefty()
+				if gas_side and not _one_thumb():
+					# Manual gas: anywhere on this half, nothing drawn.
+					_fingers[idx] = {"zone": "gas", "start": p, "pos": p}
+				elif not gas_side or _one_thumb():
 					_fingers[idx] = {"zone": "steer", "start": p, "pos": p}
 			else:
 				# Menus: a tap, a swipe or a drag (scrolling a list); decided on release.
@@ -277,6 +284,17 @@ func _tap(action) -> void:
 		return
 	_send(action, 1.0)
 	_release.call_deferred(action)
+
+
+## Pause screen: a clip of the last 15 seconds (saved from the race's buffer).
+func _clip() -> void:
+	if main and main.showtime:
+		main.showtime.request_clip()
+
+
+func _pit() -> void:
+	if main:
+		main.toggle_pit()
 
 
 func _rewind() -> void:
@@ -393,6 +411,9 @@ func _draw() -> void:
 		draw_rect(r, col)
 		draw_rect(r, Color(1, 1, 1, 0.45), false, 2.0)
 		var fs := maxi(10, roundi((18.0 if r.size.y > 40.0 * _k else 12.0) * _k))
+		# (shrunk to fit: a label never runs off its button)
+		while fs > 8 and _font.get_string_size(String(b[1]), HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x > r.size.x - 8.0:
+			fs -= 1
 		draw_string(_font, Vector2(r.position.x, r.get_center().y + fs * 0.35), String(b[1]), HORIZONTAL_ALIGNMENT_CENTER, r.size.x, fs, Color(1, 1, 1, 0.85))
 	if _racing():
 		# The thumb's steering knob, and the steering amount along the bottom.
@@ -407,4 +428,4 @@ func _draw() -> void:
 		draw_line(Vector2(cx - 60, y), Vector2(cx + 60, y), Color(1, 1, 1, 0.2), 4.0)
 		draw_line(Vector2(cx, y), Vector2(cx + _steer * 60.0, y), Color(1, 0.85, 0.2, 0.8), 4.0)
 		if tilt and not _tilt_ok and _race_time < 6.0:
-			draw_string(_font, Vector2(sr.position.x, sr.position.y + 84.0), "NO TILT SENSOR HERE: DRAG ON THE LEFT TO STEER", HORIZONTAL_ALIGNMENT_CENTER, sr.size.x, 12, Color(1, 1, 1, 0.75))
+			draw_string(_font, Vector2(sr.position.x, sr.position.y + 84.0), "NO TILT SENSOR HERE: DRAG ON THE %s TO STEER" % ("RIGHT" if _lefty() else "LEFT"), HORIZONTAL_ALIGNMENT_CENTER, sr.size.x, 12, Color(1, 1, 1, 0.75))

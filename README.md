@@ -181,7 +181,7 @@ time the game is online.
 - **The garage** is home: your car on the turntable, big tiles for every mode, your level and XP.
 - **Menus are cards** you tap; a card's < > change its value, long lists drag to scroll, BACK is top left. The course and car pickers swipe, or use < > and GO.
 - **Your first race teaches you**: steering (tilt or drag), the gas, braking into the turns, the draft and the map, each prompt once you need it.
-- **AUTO GAS** (Options): the car takes each corner at a safe speed and you just steer, with one thumb (drag anywhere) or none (tilt). The brake still works.
+- **PEDALS** (Options): MANUAL GAS + BRAKE (hold anywhere on the right half of the screen for gas; nothing is drawn there) or AUTO GAS, YOU BRAKE (the car takes each corner at a safe speed and you just steer, with one thumb, dragging anywhere, or none, with tilt). Either way the red BRAKE sits just left of the speedometer.
 - **Vibration** on hits and locked wheels, a click on each gear change, and a rhythm when you run off the edge (Options).
 - **The pause screen** shows the lap, your place, your tyres and fuel, with big RESUME and QUIT buttons, steering, and REPORT A PROBLEM. **The pit call** has TAKE THE CREW CHIEF'S CALL as a one-tap row on top.
 - **Options → TILT STEERING** previews itself: while it's picked, a phone on screen turns with yours and shows how much steering that angle gives.
@@ -189,7 +189,7 @@ time the game is online.
 - **Carry on later**: full races (Single Race, Season, Career) save a checkpoint every lap under green. If the app is closed, the garage leads with RESUME RACE: every car goes back where it was (fuel, tyres, damage, the clock) and it counts you back in. Quitting a race on purpose throws the checkpoint away.
 - **BATTERY SAVER** (Options): OFF, AUTO or ON. ON runs at 30 fps to save battery and heat; the race still runs 60 steps a second, so it drives the same. AUTO switches it on at 20% battery or less, not charging, in browsers that report the battery (Chrome on Android). The phone apps can't read the battery, so there it's OFF or ON.
 - **Controllers**: a Bluetooth pad works too. Pressing a button or pushing a stick hides the touch controls, and connecting or disconnecting it is announced.
-- **Accessibility** (Options): LARGE TEXT (the small print grows, titles stay), MAP DOTS: HIGH CONTRAST (white dots, the leader ringed, you a blinking square, not told apart by colour) and LEFT-HANDED controls (pedals on the left, steering on the right).
+- **Accessibility** (Options): LARGE TEXT (the small print grows, titles stay), MAP DOTS: HIGH CONTRAST (white dots, the leader ringed, you a blinking square, not told apart by colour) and LEFT-HANDED controls (gas on the left half and the brake bottom left, steering on the right).
 - **A smaller download**: the browser version runs on an engine built with only what the game uses (no physics engine, navigation, VR, video or the complex-script text shaper): a 23 MB engine instead of 39.5 MB. It starts downloading as soon as the page opens, the page gives the real size, and the installed web app keeps everything for offline play. The build profile is `native/web/build_profile.py`, and the template is `native/web/web_release_trimmed.zip`.
 
 ## Your career online
@@ -234,7 +234,7 @@ stand-in for the server.
 - **Victory lane.** Win and you do a burnout, then drive into victory lane for the trophy, confetti and the crew.
 - **Night racing.** Glowing brake discs, bright brake lights, and flames on lift at high revs.
 - **Ghost laps.** Your best lap at each track is saved and driven by a see-through car in practice, qualifying and time challenges.
-- **Clips.** F9 (or the CLIP button on touch) saves the last 15 seconds as a video on the web build: the share sheet on phones, a download on computers, and a save prompt when the game is played on claude.ai.
+- **Clips.** F9 (or SAVE CLIP on the pause screen on touch) saves the last 15 seconds as a video on the web build: the share sheet on phones, a download on computers, and a save prompt when the game is played on claude.ai.
 - **Racing AI.** The field drives a proper racing line (wide on entry, apex, out on exit) nose to tail when strung out, and leaves it to race side by side or to set up a pass. An optional catch-up setting (Race Setup) keeps the field close. `tests/line_field_test.gd` runs 25-car races on the flat tracks and checks line use, passing, crashes and pace.
 - **The course map** sits top left, beside the lap, lap time and best lap: every car as a dot in its colours, you flashing on top, and the leader and the cars either side of you numbered. **Your car's state** (damage, tyres, fuel, water temperature) sits top right, under your position.
 
@@ -494,9 +494,9 @@ godot --headless --path . --export-release Web build/web/index.html
 - In the browser, Start goes full screen (untick it to play in the page). On Android it also locks landscape. A full screen button appears when you move the mouse or touch the bottom middle of the screen. iPhone Safari has no full screen for web pages; the game still fills the page.
 - **Fits every screen.** The HUD, menus and touch buttons stay clear of a notch or camera cut-out, rounded corners and the home bar (the page reads the phone's safe area). Menus shrink if they have to, and make room for the on-screen D-pad and A/B buttons. Touch buttons are sized for thumbs: on a tablet or touchscreen laptop they get smaller, so they don't take over the screen. `tests/fit_test.gd` checks every screen on phone, tablet, laptop, ultrawide and tall-window shapes.
 - **Touch controls** appear on phones and tablets, and on a touchscreen laptop as soon as you touch it. Using a keyboard or gamepad hides them again.
-- **Tablets.** iPads (which tell websites they're Macs) and Android tablets are recognised as touch devices from the start. Tablets can race either way up: held upright the view keeps its width, and the pedals move down to where your thumbs are. Pedals stay thumb-sized on the bigger screen.
+- **Tablets.** iPads (which tell websites they're Macs) and Android tablets are recognised as touch devices from the start. Tablets can race either way up: held upright the view keeps its width, and the brake stays thumb-sized on the bigger screen.
   - Steer by tilting the device like a wheel. Full lock takes only 12° of tilt (Options → TILT STEERING: 18°, 12°, 9° or 6°). A gentle curve gives fine control near the centre, a small dead zone ignores wobble, and the sensor is smoothed. Wherever you hold it at the start counts as straight ahead; it re-centres after a pause or pit call, or when you tap CTR. You can also drag a thumb anywhere on the left side, where a full lock is about a thumb's width. TILT/DRAG switches between the two.
-  - Two round pedals on the right: green GAS and red BRAKE just to its left. Small buttons beside the course map: II pause, CAM, CLIP, PIT.
+  - Gas: hold anywhere on the right half of the screen (no button, nothing drawn). A round red BRAKE just left of the speedometer. One small II pause button at the top right; the pause screen has CAMERA, SAVE CLIP and PIT THIS LAP (and CANCEL), with RESUME, QUIT, steering and REPORT A PROBLEM.
   - Menus, results and replays show a D-pad with A (select) and B (back). The pause screen shows RESUME and QUIT, and the TILT/DRAG steering switch and CENTRE.
   - Tilt needs the motion sensor: iPhone asks permission when you tap Start. The page reads the accelerometer, or the orientation sensor where that's all there is. It works out each phone's sign convention from which edge of the screen is higher. Where the browser or an embedding page blocks the sensor, the game says so and uses drag steering. The installed app isn't embedded, so tilt works there.
 - **Light on the CPU.** Races have at most 25 cars (20 by default in a phone browser), distant cars run their physics at a lower rate, and the fine detail (wheels, lights, flames, loose bodywork) is only animated for cars near the camera. `tests/cpu_bench.gd` times a full 25-car race frame by frame without rendering.
@@ -596,7 +596,7 @@ scripts/atmosphere.gd      haze, sun shafts, lingering smoke, focus, sun glare
 scripts/rain_fx.gd         water film and dry line, spray, drops on the glass
 scripts/track_wear.gd      the rubber line, marbles and wall scuffs (also drives grip)
 scripts/race_day.gd        pit crews, flagman, crowd reactions, fireworks, burnout
-scripts/touch_controls.gd  phone/tablet controls: tilt or drag steering, pedals, menu pad
+scripts/touch_controls.gd  phone/tablet controls: tilt or drag steering, gas zone and brake, pause screen buttons, menu pad
 scripts/car_body.gd        the four car bodies (lofted meshes, LODs, lights, flames)
 scripts/showtime.gd        intro, showroom, TV package, commentary, wreck replays,
                            last lap, photo finish, victory lane

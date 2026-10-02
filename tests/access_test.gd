@@ -31,7 +31,7 @@ func _frames(n: int) -> void:
 func _touch(pos: Vector2, pressed: bool) -> void:
 	var ev := InputEventScreenTouch.new()
 	ev.index = 0
-	ev.position = pos
+	ev.position = root.get_final_transform() * pos # (events come in window pixels)
 	ev.pressed = pressed
 	Input.parse_input_event(ev)
 	await process_frame
@@ -82,7 +82,7 @@ func _run() -> void:
 	await _touch(s0, true)
 	var drag := InputEventScreenDrag.new()
 	drag.index = 0
-	drag.position = s0 + Vector2(80, 0)
+	drag.position = root.get_final_transform() * (s0 + Vector2(80, 0))
 	drag.relative = Vector2(80, 0)
 	Input.parse_input_event(drag)
 	await _frames(3)
@@ -92,6 +92,16 @@ func _run() -> void:
 			has_steer = true
 	_check(has_steer, "and steering is on the right")
 	await _touch(s0 + Vector2(80, 0), false)
+	# Gas: anywhere on the left half.
+	var g0 := Vector2(w * 0.3, 160)
+	await _touch(g0, true)
+	await _frames(2)
+	var has_gas := false
+	for f in main.touch._fingers.values():
+		if f.get("zone", "") == "gas":
+			has_gas = true
+	_check(has_gas, "and the gas is the left half")
+	await _touch(g0, false)
 	game.settings.hand = 0
 	# High-contrast map.
 	game.settings.map_contrast = 1

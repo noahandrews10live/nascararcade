@@ -1,7 +1,9 @@
 extends SceneTree
 ## Touch controls, with real touch events:
 ##   - in the menus a tap on the screen moves on (title -> the garage);
-##   - in a race the GAS pedal opens the throttle and BRAKE brakes;
+##   - in a race holding anywhere on the right half is the gas (no button), and
+##     the BRAKE beside the speedometer brakes;
+##   - CAMERA, SAVE CLIP and PIT THIS LAP are on the pause screen;
 ##   - dragging a thumb on the left steers (right drag = right, left = left);
 ##   - a keyboard press hides the touch controls again.
 ##   godot --headless --fixed-fps 60 -s tests/touch_test.gd
@@ -78,20 +80,64 @@ func _run() -> void:
 	main.autopilot = false
 	await _frames(300)
 	var p = main.race.player
-	var gas := _button("accelerate")
-	_check(gas.size.x > 0.0, "the race has a GAS pedal")
-	_touch(2, gas.get_center(), true)
+	var vw: Vector2 = t.get_viewport_rect().size
+	_check(_button("accelerate").size.x == 0.0, "there's no GAS button")
+	for a in ["camera", "clip", "pit"]:
+		_check(_button(a).size.x == 0.0, "no %s button on the race screen (it's on the pause screen)" % a)
+	# Gas: hold anywhere on the right half (somewhere no button is).
+	var gas_at := Vector2(vw.x * 0.62, vw.y * 0.45)
+	_touch(2, gas_at, true)
 	await _frames(10)
 	await main.get_tree().physics_frame
-	print("   throttle with the pedal held: %.2f" % p.throttle)
-	_check(p.throttle > 0.9, "holding GAS opens the throttle")
-	_touch(2, gas.get_center(), false)
+	print("   throttle holding the right half: %.2f" % p.throttle)
+	_check(p.throttle > 0.9, "holding anywhere on the right half opens the throttle")
+	_touch(2, gas_at, false)
+	await _frames(4)
+	await main.get_tree().physics_frame
+	_check(p.throttle < 0.1, "letting go lifts")
 	var brk := _button("brake")
+	var sp: Rect2 = main.hud.speedo_rect()
+	var sr: Rect2 = root.get_node("Game").safe_rect(t.get_viewport())
+	print("   brake %s, speedometer %s" % [brk, Rect2(sp.position + sr.position, sp.size)])
+	_check(brk.size.x > 0.0 and brk.end.x <= sr.position.x + sp.position.x + 1.0 and brk.get_center().x > vw.x * 0.5, "the BRAKE is just left of the speedometer")
+	_check(brk.position.y < sr.position.y + sp.end.y and brk.end.y > sr.position.y + sp.position.y, "level with it")
 	_touch(3, brk.get_center(), true)
 	await _frames(10)
 	await main.get_tree().physics_frame
 	_check(p.brake > 0.9 and p.throttle < 0.1, "holding BRAKE brakes (and the gas is off)")
 	_touch(3, brk.get_center(), false)
+	# The pause screen has the camera, a clip and the pit call.
+	var pause := _button("pause")
+	_touch(5, pause.get_center(), true)
+	_touch(5, pause.get_center(), false)
+	await _frames(4)
+	_check(main.paused, "II pauses")
+	var cam0: int = main.cam_mode
+	var camb := _button("camera")
+	var clipb := _button("_clip")
+	var pitb := _button("_pit")
+	_check(camb.size.x > 0.0 and clipb.size.x > 0.0 and pitb.size.x > 0.0, "the pause screen has CAMERA, SAVE CLIP and PIT THIS LAP")
+	_touch(6, camb.get_center(), true)
+	_touch(6, camb.get_center(), false)
+	await _frames(4)
+	_check(main.cam_mode != cam0, "CAMERA changes the camera")
+	var pit0: bool = p.want_pit
+	_touch(7, pitb.get_center(), true)
+	_touch(7, pitb.get_center(), false)
+	await _frames(4)
+	_check(p.want_pit != pit0, "PIT THIS LAP calls the stop")
+	_touch(7, pitb.get_center(), true)
+	_touch(7, pitb.get_center(), false)
+	await _frames(4)
+	_check(p.want_pit == pit0, "and again cancels it")
+	main.cam_mode = cam0
+	_touch(5, _button("pause").get_center(), true)
+	_touch(5, _button("pause").get_center(), false)
+	var wait := 0
+	while main.paused and wait < 300:
+		await _frames(1)
+		wait += 1
+	_check(not main.paused, "RESUME (after the count back in)")
 	# Drag steering (tilt is off here: no motion sensor in a test).
 	var start := Vector2(120, 330)
 	_touch(4, start, true)

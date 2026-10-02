@@ -475,6 +475,11 @@ func map_rect() -> Rect2:
 	return Rect2(LAP_BLOCK_W, 8.0 + top, mm, mm)
 
 
+## The speedometer and tachometer, bottom right (the phone's brake sits to its left).
+func speedo_rect() -> Rect2:
+	return Rect2(W - 130.0, H - 118.0, 130.0, 118.0)
+
+
 ## The car's state (damage, tyres, fuel, water temperature), top right under
 ## your position.
 func status_rect() -> Rect2:

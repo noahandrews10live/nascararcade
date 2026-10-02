@@ -77,11 +77,11 @@ func _prompt(step: String, auto: bool) -> String:
 	var tilt: bool = bool(Game.settings.get("touch_tilt", true))
 	match step:
 		"steer":
-			return "STEER: TILT YOUR PHONE LIKE A WHEEL" if tilt else "STEER: DRAG YOUR THUMB LEFT AND RIGHT ON THE LEFT SIDE"
+			return "STEER: TILT YOUR PHONE LIKE A WHEEL" if tilt else "STEER: DRAG YOUR THUMB LEFT AND RIGHT ON THE %s SIDE" % ("RIGHT" if int(Game.settings.get("hand", 0)) == 1 else "LEFT")
 		"gas":
-			return "HOLD THE GREEN PEDAL FOR GAS"
+			return "GAS: HOLD YOUR THUMB ANYWHERE ON THE %s HALF OF THE SCREEN" % ("LEFT" if int(Game.settings.get("hand", 0)) == 1 else "RIGHT")
 		"brake":
-			return "TURN COMING: TAP THE RED PEDAL TO BRAKE" if not auto else "AUTO GAS SLOWS FOR THE TURNS. TAP RED TO BRAKE HARDER"
+			return "TURN COMING: TAP THE RED BRAKE BY THE SPEEDOMETER" if not auto else "AUTO GAS SLOWS FOR THE TURNS. TAP THE RED BRAKE TO BRAKE HARDER"
 		"draft":
 			return "TUCK IN BEHIND A CAR TO DRAFT: YOU GO FASTER IN ITS WAKE"
 		"map":
