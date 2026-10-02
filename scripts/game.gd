@@ -714,6 +714,24 @@ var settings := {
 ## Garage setup (applied to the player's car): -3..3 balance (tight..loose),
 ## tyre pressure 0 low / 1 std / 2 high, gearing 0 short / 1 std / 2 long.
 var setup := {"balance": 0, "pressure": 1, "gearing": 1, "springs_f": 1, "springs_r": 1, "bar_f": 1, "bump": 1, "stagger": 1, "psi_l": 1, "psi_r": 1, "bias": 2}
+## Your garage setup for each track you've tuned (track index -> setup), saved
+## with the settings and put back when you go to that track.
+var track_setups := {}
+
+
+func remember_setup(track_idx: int) -> void:
+	track_setups[str(track_idx)] = setup.duplicate()
+
+
+## The setup you last used at this track, if you've tuned one there.
+func recall_setup(track_idx: int) -> bool:
+	var saved = track_setups.get(str(track_idx))
+	if not (saved is Dictionary):
+		return false
+	for k in saved:
+		if setup.has(k):
+			setup[k] = saved[k]
+	return true
 ## Season in progress (empty = none).
 var season := {}
 
@@ -828,6 +846,7 @@ func load_settings() -> void:
 			settings[k] = cf.get_value("settings", k, settings[k])
 		for k in setup:
 			setup[k] = cf.get_value("setup", k, setup[k])
+		track_setups = cf.get_value("setup", "per_track", {})
 		modern = cf.get_value("video", "modern_look", modern) and modern_supported
 		scanlines = cf.get_value("video", "scanlines", scanlines)
 		quality = cf.get_value("video", "quality", quality)
@@ -948,6 +967,7 @@ func save_settings() -> void:
 	cf.set_value("settings", "field_v2", true)
 	for k in setup:
 		cf.set_value("setup", k, setup[k])
+	cf.set_value("setup", "per_track", track_setups)
 	cf.set_value("video", "modern_look", modern)
 	cf.set_value("video", "scanlines", scanlines)
 	cf.set_value("video", "quality", quality)

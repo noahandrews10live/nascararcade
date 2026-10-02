@@ -26,7 +26,7 @@ const Tutorial := preload("res://scripts/tutorial.gd")
 const Cloud := preload("res://scripts/cloud.gd")
 const Menu := preload("res://scripts/menu.gd")
 
-enum State { TITLE, MODE_SELECT, TRACK_SELECT, CAR_SELECT, MENU, COUNTDOWN, RACE, FINISHED, RESULTS, SESSION_RESULTS, STANDINGS, REPLAY }
+enum State { TITLE, MODE_SELECT, TRACK_SELECT, CAR_SELECT, MENU, COUNTDOWN, RACE, FINISHED, RESULTS, SESSION_RESULTS, STANDINGS, REPLAY, DEBRIEF }
 
 const PACE_SPEED := 32.0
 const SELECT_TIME := 20.0
@@ -337,6 +337,7 @@ func _graphics_text() -> String:
 
 func _use_track(idx: int) -> void:
 	Game.selected_track = idx
+	Game.recall_setup(idx) # the setup you last ran here
 	if not tracks.has(idx):
 		var t: Node3D = Track.new()
 		t.name = "Track%d" % idx
@@ -888,6 +889,14 @@ func _new_race(player_team: int) -> void:
 		race.control.pit_call.connect(_on_pit_call)
 		race.control.pit_report.connect(_on_pit_report)
 	race.car_finished.connect(_on_finished)
+	# The race recorder (for the debrief): your car, real races only.
+	if race_log and is_instance_valid(race_log):
+		race_log.queue_free()
+	race_log = null
+	if race.player and player_team >= 0 and session == "race" and mode != "arcade":
+		race_log = load("res://scripts/race_log.gd").new()
+		add_child(race_log)
+		race_log.begin(race)
 	if mode == "online":
 		net.attach(race)
 	# Time of day for every race; weather for the full-rules races.
@@ -1430,6 +1439,8 @@ func _on_finished(car: Node3D, place: int) -> void:
 	# XP for the race (not practice or qualifying), and how the game ran.
 	if car == race.player:
 		clear_checkpoint()
+		if race_log:
+			race_log.finish(place)
 	if session == "race" and car == race.player and mode != "2p":
 		last_award = Game.award_race(place, race.cars.size(), race.laps, car.total_damage() < 0.08)
 		cloud.push_profile()
@@ -1617,15 +1628,132 @@ func _unhandled_input(event: InputEvent) -> void:
 			elif event.is_action_pressed("highlights") and race.rec_times.size() > 20:
 				_enter_highlights()
 			elif event.is_action_pressed("start") and state_time > 1.0:
-				if (mode == "season" or mode == "career") and not Game.season.is_empty():
-					_after_season_race()
-				elif mode == "challenge":
-					_enter_challenges()
-				elif mode == "online" and net.connected:
-					net.in_race = false
-					_enter_lobby()
+				if _debrief_ready():
+					_enter_debrief()
 				else:
-					_enter_title()
+					_results_continue()
+		State.DEBRIEF:
+			if debrief == null or not is_instance_valid(debrief):
+				_results_continue()
+			elif event.is_action_pressed("steer_left") or event.is_action_pressed("menu_up"):
+				debrief.turn(-1)
+			elif event.is_action_pressed("steer_right") or event.is_action_pressed("menu_down"):
+				debrief.turn(1)
+			elif (event.is_action_pressed("start") or event.is_action_pressed("back")) and state_time > 0.5:
+				_results_continue()
+			elif event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT and event.device != InputEvent.DEVICE_ID_EMULATION:
+				debrief.tap(ui_root.get_global_transform_with_canvas().affine_inverse() * event.position)
+
+
+## On from the results (or the debrief): back to the hub, the challenges, the
+## lobby or the title.
+func _results_continue() -> void:
+	if (mode == "season" or mode == "career") and not Game.season.is_empty():
+		_after_season_race()
+	elif mode == "challenge":
+		_enter_challenges()
+	elif mode == "online" and net.connected:
+		net.in_race = false
+		_enter_lobby()
+	else:
+		_enter_title()
+
+
+# --- the debrief ------------------------------------------------------------------
+
+var race_log: Node
+var debrief: Control
+var _open_rnd_next := false
+
+
+func _debrief_ready() -> bool:
+	return race_log != null and is_instance_valid(race_log) and race_log.started and session == "race" \
+		and mode != "arcade" and mode != "2p" and not race_log.laps.is_empty()
+
+
+func _debrief_context() -> Dictionary:
+	var me: Node3D = race.player
+	var winner: Node3D = race.order[0]
+	var fastest := 0.0
+	var fastest_by := ""
+	for c in race.cars:
+		if c.best_lap > 0.0 and (fastest == 0.0 or c.best_lap < fastest):
+			fastest = c.best_lap
+			fastest_by = "#" + c.team.num
+	var margin := 0.0
+	if race.order.size() > 1 and race.order[0].finished and race.order[1].finished:
+		margin = race.order[1].finish_time - race.order[0].finish_time
+	var greens: Array = race_log.summary().green_laps
+	var avg := 0.0
+	for g in greens:
+		avg += float(g)
+	avg = avg / greens.size() if greens.size() > 0 else (me.best_lap if me.best_lap > 0.0 else 30.0)
+	var cx := {
+		"mode": mode, "field": race.cars.size(), "my_best": me.best_lap, "winner_best": winner.best_lap if winner != me else me.best_lap,
+		"fastest": fastest, "fastest_by": fastest_by, "margin": margin if winner == me else 0.0, "avg_lap": avg,
+		"difficulty": int(Game.settings.difficulty), "assist_level": Game.assist_level if Game.assists else 0.0,
+		"career": mode == "career" and not Game.career.is_empty(),
+	}
+	if cx.career:
+		cx.rnd_gain = _rnd_gain_here()
+	return cx
+
+
+## Roughly what one more R&D level is worth here, as a fraction of a lap (from
+## tests/upgrade_bench.gd): grip matters most on short tracks and road courses,
+## power and drag on the big tracks (less where the rules hold the pack).
+func _rnd_gain_here() -> Dictionary:
+	var cfg: Dictionary = track.cfg
+	var per: Dictionary
+	if cfg.get("road", false):
+		per = {"chassis": 0.004, "engine": 0.003, "aero": 0.002}
+	elif cfg.has("pack_gap"):
+		per = {"engine": 0.0015, "aero": 0.0012, "chassis": 0.001}
+	elif track.length < 1100.0:
+		per = {"chassis": 0.006, "engine": 0.0015, "aero": 0.0005}
+	else:
+		per = {"engine": 0.006, "aero": 0.005, "chassis": 0.004}
+	var out := {}
+	for k in per:
+		if int(Game.career.upgrades.get(k, 0)) < Game.MAX_UPGRADE:
+			out[k] = per[k]
+	return out
+
+
+func _enter_debrief() -> void:
+	_set_state(State.DEBRIEF)
+	_clear_screen()
+	hud.visible = false
+	debrief = load("res://scripts/debrief.gd").new()
+	screen.add_child(debrief)
+	debrief.setup(race_log.summary(), _debrief_context())
+	debrief.done.connect(_results_continue)
+	debrief.action.connect(_on_debrief_action)
+
+
+## A crew chief's suggestion, applied from the debrief.
+func _on_debrief_action(a: Dictionary) -> void:
+	match String(a.kind):
+		"setup":
+			var lim := {"balance": [-3, 3], "bias": [0, 4]}
+			var key: String = a.key
+			var r: Array = lim.get(key, [0, 2])
+			Game.setup[key] = clampi(int(Game.setup[key]) + int(a.delta), int(r[0]), int(r[1]))
+			Game.remember_setup(Game.selected_track)
+			Game.save_settings()
+			_sub("GARAGE: %s" % String(a.label), 2.5)
+		"difficulty":
+			Game.settings.difficulty = clampi(int(Game.settings.difficulty) + int(a.delta), 0, Game.DIFFICULTIES.size() - 1)
+			Game.save_settings()
+			_sub("DIFFICULTY: %s" % Game.DIFFICULTIES[int(Game.settings.difficulty)][0], 2.5)
+		"assists":
+			Game.assists = true
+			Game.assist_level = 1.0
+			Game.save_settings()
+			_sub("STEERING HELP: FULL", 2.5)
+		"rnd":
+			_open_rnd_next = true
+			_results_continue()
 
 
 func _physics_process(delta: float) -> void:
@@ -1649,6 +1777,8 @@ func _physics_process(delta: float) -> void:
 		State.RACE:
 			_player_input()
 			race.tick(delta)
+			if race_log:
+				race_log.tick(delta)
 			if race.player:
 				ghost.record(race.player, race.time, delta)
 			if mode != "arcade":
@@ -1672,6 +1802,8 @@ func _physics_process(delta: float) -> void:
 				race.player.brake = 0.3
 				race.player.steer_in = 0.0
 			race.tick(delta)
+			if race_log:
+				race_log.tick(delta)
 			if state_time > 5.0:
 				_enter_results()
 		State.RESULTS:
@@ -1958,6 +2090,8 @@ func ui_tap(pos: Vector2) -> bool:
 			return _mode_tap(p)
 		State.MENU:
 			return menu != null and menu.tap(p)
+		State.DEBRIEF:
+			return debrief != null and is_instance_valid(debrief) and debrief.tap(p)
 	return false
 
 
@@ -2896,6 +3030,7 @@ func _on_menu_changed(id: String, idx: int) -> void:
 				Game.setup.balance = idx - 3
 			elif Game.setup.has(id):
 				Game.setup[id] = idx
+			Game.remember_setup(Game.selected_track) # this track keeps it
 			Game.save_settings()
 		"paint":
 			if id == "scheme" and not Game.scheme_unlocked(idx):
@@ -3406,6 +3541,10 @@ func _enter_career_hub() -> void:
 	_open_menu("hub", "YEAR %d  -  $%s  -  REP %d" % [cr.year, Game.money_text(cr.money), cr.rep], rows, 0)
 	menu.row_h = 28
 	menu.build(menu.title, rows, 0)
+	if _open_rnd_next:
+		# The debrief's "OPEN THE R&D SHOP".
+		_open_rnd_next = false
+		_enter_rnd()
 
 
 ## Restarting or retiring throws away everything this career has done, so ask

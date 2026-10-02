@@ -6,6 +6,9 @@ extends Node3D
 signal lap_completed(car: Node3D, laps_done: int, lap_time: float)
 signal car_finished(car: Node3D, place: int)
 signal incident(car: Node3D, kind: String)
+## Two cars touched: `who_hit` ran into `hit` (from behind or the side), `vn`
+## the closing speed (m/s). For the race log; only real contact (over 1.5 m/s).
+signal contact(who_hit: Node3D, hit: Node3D, vn: float)
 
 const Car := preload("res://scripts/car.gd")
 const SkidMarks := preload("res://scripts/skid_marks.gd")
@@ -1043,6 +1046,12 @@ func _contact(a: Node3D, b: Node3D, rel: Vector2) -> void:
 		if vp.x < -1.4 and abs(vp.y) > 0.45 and abs(n.x) > 0.5:
 			lever = max(lever, clamp(0.55 + vn / 8.0, 0.0, 1.0))
 	var dmg_j: float = j * (0.3 if soft_push else 1.0)
+	if vn > 1.5 and not soft_push:
+		# b is ahead along n: a ran into b.
+		if n.x > 0.3:
+			contact.emit(a, b, vn)
+		else:
+			contact.emit(b, a, vn)
 	if not a.remote:
 		a.apply_impulse(-imp, ra_p * lever)
 		a.add_damage(dmg_j, ra_p)

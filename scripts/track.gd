@@ -1360,6 +1360,98 @@ func _build_motorhomes() -> void:
 	add_child(mmi)
 
 
+## Where on the track s is, the way a broadcast says it: "TURN 2", "THE
+## FRONTSTRETCH", "THE BACKSTRETCH" (ovals: each end is two turns, numbered from
+## the line), or "TURN 7" / "THE STRAIGHT AFTER TURN 7" on a road course.
+var _turns: Array = [] # [start_s, end_s, number]
+
+
+func _find_turns() -> void:
+	_turns.clear()
+	var thresh := 1.0 / 900.0
+	var regions: Array = []
+	var inside := false
+	var start := 0
+	# Start the scan on a straight so a corner across the line isn't split.
+	var i0 := 0
+	for i in n:
+		if abs(curv[i]) < thresh * 0.5:
+			i0 = i
+			break
+	for k in n + 1:
+		var i := (i0 + k) % n
+		var c: bool = abs(curv[i]) > thresh and k < n
+		if c and not inside:
+			inside = true
+			start = i
+		elif not c and inside:
+			inside = false
+			regions.append([start, i])
+	# Merge corners split by a short kink (under ~40 m).
+	var merged: Array = []
+	for r in regions:
+		if not merged.is_empty():
+			var gap: float = fposmod(float(r[0] - merged[-1][1]) * length / n, length)
+			if gap < 40.0:
+				merged[-1][1] = r[1]
+				continue
+		merged.append(r)
+	var road: bool = cfg.get("road", false)
+	var spans: Array = [] # [start_s, end_s (may run past the line)]
+	for r in merged:
+		var s0: float = float(r[0]) * length / n
+		var s1: float = float(r[1]) * length / n
+		if s1 < s0:
+			s1 += length
+		spans.append([s0, s1])
+	var pieces: Array = []
+	if road or spans.size() < 2:
+		pieces = spans
+	else:
+		# Ovals: the corners are the big ones (the ends; three for a triangle).
+		# Kinks like a tri-oval's dogleg aren't turns.
+		var by_len := spans.duplicate()
+		by_len.sort_custom(func(a, b): return a[1] - a[0] > b[1] - b[0])
+		var triangle: bool = by_len.size() >= 3 and (by_len[2][1] - by_len[2][0]) > 0.5 * (by_len[1][1] - by_len[1][0])
+		var ends: Array = by_len.slice(0, 3 if triangle else 2)
+		for e in ends:
+			if triangle:
+				pieces.append(e)
+			else:
+				var mid: float = (e[0] + e[1]) * 0.5
+				pieces.append([e[0], mid])
+				pieces.append([mid, e[1]])
+	# Number them in order from the start/finish line.
+	pieces.sort_custom(func(a, b): return fposmod(a[0], length) < fposmod(b[0], length))
+	for k in pieces.size():
+		var a: float = fposmod(pieces[k][0], length)
+		_turns.append([a, a + (pieces[k][1] - pieces[k][0]), k + 1])
+
+
+func place_name(s: float) -> String:
+	if _turns.is_empty() and n > 0:
+		_find_turns()
+	var ss := fposmod(s, length)
+	for t in _turns:
+		for off in [0.0, length]:
+			if ss + off >= t[0] and ss + off <= t[1]:
+				return "TURN %d" % t[2]
+	if _turns.size() == 4 and not cfg.get("road", false):
+		# Ovals: between turns 2 and 3 is the backstretch, else the frontstretch.
+		var t2: float = fposmod(_turns[1][1], length)
+		var t3: float = _turns[2][0]
+		return "THE BACKSTRETCH" if ss > t2 and ss < t3 else "THE FRONTSTRETCH"
+	# Otherwise: the straight after the last corner passed (before turn 1, or
+	# after the last one, it's the frontstretch).
+	var last := 0
+	for t in _turns:
+		if t[1] <= ss:
+			last = t[2]
+	if last == 0 or last == _turns.size():
+		return "THE FRONTSTRETCH"
+	return "THE STRAIGHT AFTER TURN %d" % last
+
+
 ## How far from the centreline the track (and its inside wall) reaches on the
 ## infield side: anything in the infield keeps at least this far from every point
 ## of the centreline.
