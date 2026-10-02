@@ -13,7 +13,9 @@ import hashlib, json, re, secrets, sys, uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qsl
 
-TRACK_M = [3444, 2430, 869, 4216, 3685, 2591, 1996, 853, 2028, 4522, 5198]
+TRACK_M = [3444, 2430, 869, 4212, 3685, 2590, 1989, 853, 2028, 4522, 5198,
+           4023, 2478, 3862, 1609, 2414, 2198, 846, 857, 2413, 4280, 2414, 3943, 2414, 2140, 3218,
+           4023, 5471, 3202, 2414, 1005, 4023, 1408, 1206, 1702, 2011, 3669, 2414, 1609, 402]
 players, laps, events, friends, sessions = {}, {}, {}, set(), []
 reports = []
 saves, transfers = {}, {}  # player id -> {"data", "updated_at"}; code -> player id

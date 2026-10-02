@@ -309,6 +309,8 @@ func apron_edge() -> float:
 ## Pit road runs along the inside of the front stretch, between the apron and the
 ## inner wall. Entry (commitment line) is at the end of turn 4, exit at turn 1.
 func front_length() -> float:
+	if cfg.has("front"):
+		return float(cfg.front) # a front stretch with a kink in it (segment tri-ovals)
 	if _front_len > 0.0:
 		return _front_len
 	return float(cfg.get("front_mid", 0.0)) + 2.0 * float(cfg.get("front_side", 0.0)) + 2.0 * float(cfg.get("dog_r", 0.0)) * deg_to_rad(float(cfg.get("dog_phi", 0.0)))
@@ -805,7 +807,7 @@ func _build_scenery() -> void:
 	var hw := width * 0.5
 	var night: bool = cfg.get("night", false)
 	# Grandstands along the frontstretch, outside the wall.
-	var stand_len := float(cfg.get("front_mid", 0.0)) + 2.0 * float(cfg.get("front_side", 0.0)) + 2.0 * float(cfg.get("dog_r", 0.0)) * deg_to_rad(float(cfg.get("dog_phi", 0.0)))
+	var stand_len := front_length()
 	stand_len *= 0.9
 	var crowd := [Color(0.9, 0.2, 0.2), Color(0.2, 0.3, 0.9), Color(1, 1, 1), Color(1, 0.8, 0.2), Color(0.3, 0.8, 0.3), Color(0.9, 0.5, 0.1), Color(0.6, 0.2, 0.7)]
 	var seg := length / n
@@ -1199,7 +1201,7 @@ func _build_fence() -> void:
 ## colours (Modern look).
 ## Length of the main grandstand along the front stretch (centred on the line).
 func stand_length() -> float:
-	var l := float(cfg.get("front_mid", 0.0)) + 2.0 * float(cfg.get("front_side", 0.0)) + 2.0 * float(cfg.get("dog_r", 0.0)) * deg_to_rad(float(cfg.get("dog_phi", 0.0)))
+	var l := front_length()
 	return l * 0.9
 
 
@@ -1500,7 +1502,7 @@ static func _motorhome_mesh() -> Mesh:
 func _build_probes() -> void:
 	if not Game.forward_plus:
 		return
-	var stand_len := float(cfg.get("front_mid", 0.0)) + 2.0 * float(cfg.get("front_side", 0.0)) + 2.0 * float(cfg.get("dog_r", 0.0)) * deg_to_rad(float(cfg.get("dog_phi", 0.0)))
+	var stand_len := front_length()
 	stand_len = clamp(stand_len * 0.9, 200.0, 900.0)
 	var count := clampi(int(stand_len / 150.0), 2, 6)
 	for k in count:

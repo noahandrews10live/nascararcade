@@ -119,6 +119,29 @@ The game tells you what happened, why, and what to change.
 - **One tap to the next race**: the home screen leads with NEXT: CAREER RACE n, NEXT:
   SEASON RACE n or RACE AGAIN.
 
+## Like it is on TV
+
+- **The ticker** across the top of the race screen, like a live telecast: the flag, the
+  lap and the laps left in the stage, then the whole field scrolling by, each car with its
+  position, number in its colours, name and gap to the leader (or laps down, PIT, OUT).
+  When cars change places their cells slide past each other, the one moving up with a
+  green arrow and the one going back with a red one. Your car is highlighted. When a stage
+  ends, its top 10 come up. Options → TV GRAPHICS → SIMPLE goes back to the plain HUD.
+- **Stage breaks**: the field restarts in the order it finished the stage, whether a car
+  pits or not, so the stop is free (the pit call says so, and the crews all come in).
+  Other cautions still put the cars that pit behind the ones that stay out.
+
+## Second chances
+
+- **REWIND**: after a spin, a crash or a wall hit, a REWIND button comes up for a few
+  seconds (BACKSPACE on a keyboard, and on the pause screen and the pit call after your own
+  crash). It puts every car back where it was five seconds earlier, cancels a caution your
+  crash brought out, and counts you back in 3-2-1. Three per race by default (Options →
+  REWIND: OFF, 3 PER RACE, UNLIMITED); never online or in the daily challenge, and a lap
+  you rewound in doesn't count as a record.
+- **Car alongside**: amber chevrons at the side of the screen when a car is beside you,
+  stronger the more it overlaps.
+
 ## Report a problem
 
 Pause → REPORT A PROBLEM (or F8, or Options): tap what went wrong (car handling,
@@ -352,7 +375,56 @@ stand-in for the server.
   - Fans jump up for the action and do the wave under caution.
   - The winner gets fireworks and does a burnout.
 
-## Tracks (11, all fictional)
+## Tracks (40)
+
+The track picker has groups: tap one, or press up / down, and < > browse within it.
+
+### The 2026 Cup calendar (29 replicas)
+
+Every venue on the 2026 NASCAR Cup Series calendar (the 27 points-paying tracks, plus the
+Clash's quarter-mile and the All-Star race's mile) as a replica: the real length, shape,
+banking in each corner and on the straights, the race distance, the car package (the
+superspeedway package at Daytona, Talladega and Atlanta, short-track and road-course power
+elsewhere), concrete where it's concrete, and lights where they race at night. The names
+are made up; the picker says which real track each is modelled on. Road courses that really
+run clockwise are mirrored, because the game races anticlockwise, and the road courses are
+close approximations of the real layouts, not surveys. A FULL season runs the real 2026
+calendar in order, Daytona to Homestead. The layouts are made by `tools/make_replicas.py`
+(it writes `scripts/replica_tracks.gd`; `PLOT=dir` draws every layout).
+
+| Track | Layout | Modelled on |
+|---|---|---|
+| Surfside | 2.5-mile tri-oval | Daytona International Speedway |
+| Peachtree | 1.54-mile quad-oval | EchoPark Speedway (Atlanta) |
+| Hill Country | 2.4-mile road course | Circuit of the Americas |
+| Saguaro | 1-mile dogleg oval | Phoenix Raceway |
+| Neon Valley | 1.5-mile tri-oval | Las Vegas Motor Speedway |
+| Pee Dee | 1.366-mile egg | Darlington Raceway |
+| Blue Ridge | 0.526-mile paperclip | Martinsville Speedway |
+| Thunder Hollow | 0.533-mile concrete bowl | Bristol Motor Speedway |
+| Prairie | 1.5-mile tri-oval | Kansas Speedway |
+| Cotton State | 2.66-mile tri-oval | Talladega Superspeedway |
+| Longhorn | 1.5-mile quad-oval | Texas Motor Speedway |
+| Finger Lakes | 2.45-mile road course | Watkins Glen International |
+| Queen City | 1.5-mile quad-oval | Charlotte Motor Speedway |
+| Music Row | 1.33-mile concrete tri-oval | Nashville Superspeedway |
+| Irish Hills | 2-mile d-oval | Michigan International Speedway |
+| Laurel Mtn | 2.5-mile triangle | Pocono Raceway |
+| Harbor Base | 3.4-mile street course | Naval Base Coronado street course (San Diego) |
+| Wine Country | 1.99-mile road course | Sonoma Raceway |
+| Lakeshore | 1.5-mile d-oval | Chicagoland Speedway |
+| Moonshine | 0.625-mile oval | North Wilkesboro Speedway |
+| Crossroads | 2.5-mile rectangle | Indianapolis Motor Speedway |
+| Corn Belt | 0.875-mile d-oval | Iowa Speedway |
+| Capital City | 0.75-mile d-oval | Richmond Raceway |
+| Granite State | 1.058-mile flat oval | New Hampshire Motor Speedway |
+| Riverbend | 1.25-mile egg | World Wide Technology Raceway (Gateway) |
+| Qc Roval | 2.28-mile roval | Charlotte Motor Speedway Roval |
+| Biscayne | 1.5-mile oval | Homestead-Miami Speedway |
+| First State | 1-mile concrete oval | Dover Motor Speedway |
+| Twin City | 0.25-mile stadium oval | Bowman Gray Stadium |
+
+### The originals (11, fictional)
 
 | Track | Type |
 |---|---|
@@ -546,6 +618,10 @@ Each test also runs on its own, headless (`godot --headless --fixed-fps 60 --pat
 | `tests/draft_cue_test.gd` | The air meter (DRAFT, PUSH, SIDE DRAFT, closing speed) and the PULL OUT cue |
 | `tests/career_ux_test.gd` | The weekend preview, the season goal and its bonus, milestones, and the easier/tougher field offer |
 | `tests/friction_test.gd` | One-tap NEXT RACE, the pause status, the one-tap pit call, the tilt preview, and REPORT A PROBLEM online and offline (with `tests/tools/fake_cloud.py`) |
+| `tests/replica_test.gd` | Every replica builds, closes, is the real length and laps on autopilot; the picker's groups; a full season is the calendar; only a few tracks stay built |
+| `tests/stage_order_test.gd` | Stage breaks restart in stage order (quick and full cautions); other cautions don't |
+| `tests/tv_test.gd` | The TV ticker: every car, places sliding with arrows, gaps, the stage board, TV GRAPHICS: SIMPLE |
+| `tests/rewind_test.gd` | REWIND: back five seconds, the caution cancelled, the pit call's offer, uses, records, not online |
 | `tests/full_race_qa.gd` | A full-rules race at one track (`TRACK=n`) watched for anything a player would notice |
 | `tests/weather_test.gd` | Rain on an oval (held under caution until dry) and a road course (wet tyres), and the moving clock |
 | `tests/director_test.gd` | Replay director, photo mode and the highlight reel |

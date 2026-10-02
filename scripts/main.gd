@@ -48,6 +48,9 @@ var _battery_t := 0.0 # seconds until the battery saver looks again
 var battery_saver_on := false
 
 var tracks := {}
+const MAX_BUILT_TRACKS := 3
+var _track_lru: Array = []
+var _track_tabs: Array = [] # the track picker's group tabs (Rect2s, frame units)
 var track: Node3D
 var race: Node3D
 var cam: Camera3D
@@ -56,6 +59,8 @@ var sun: DirectionalLight3D
 var synth: Node
 var soundscape: Node3D
 var hud: Control
+var tv_ticker: Control
+var rewind: Node
 var tutorial: Control # first race on a phone: short prompts
 var cloud: Node # leaderboards, friends, events, progress online
 var rival: Node3D # someone else's best lap to chase (a ghost)
@@ -234,6 +239,14 @@ func _ready() -> void:
 	hud_layer.layer = 1
 	add_child(hud_layer)
 	hud_layer.add_child(hud)
+	# The TV broadcast ticker across the top (inside the HUD, in its coordinates).
+	rewind = load("res://scripts/rewind.gd").new()
+	rewind.main = self
+	add_child(rewind)
+	tv_ticker = load("res://scripts/tv_ticker.gd").new()
+	tv_ticker.main = self
+	tv_ticker.hud = hud
+	hud.add_child(tv_ticker)
 	tutorial = Tutorial.new()
 	tutorial.main = self
 	hud_layer.add_child(tutorial)
@@ -274,7 +287,7 @@ func _ready() -> void:
 	pause_status.size = Vector2(640, 24)
 	pause_status.position = Vector2(0, 136)
 	pause_frame.add_child(pause_status)
-	pause_keys = Game.make_label("ESC  RESUME      Q  QUIT / END SESSION      F8  REPORT A PROBLEM", 16, Color.WHITE, 5)
+	pause_keys = Game.make_label("ESC  RESUME    Q  QUIT    BACKSPACE  REWIND    F8  REPORT", 16, Color.WHITE, 5)
 	pause_keys.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	pause_keys.size = Vector2(640, 30)
 	pause_keys.position = Vector2(0, 250)
@@ -363,6 +376,14 @@ func _use_track(idx: int) -> void:
 		add_child(t)
 		t.setup(Game.tracks[idx])
 		tracks[idx] = t
+	# Keep only the last few tracks built (40 of them would fill a phone).
+	_track_lru.erase(idx)
+	_track_lru.append(idx)
+	while _track_lru.size() > MAX_BUILT_TRACKS:
+		var old: int = _track_lru.pop_front()
+		if tracks.has(old) and old != idx:
+			tracks[old].queue_free()
+			tracks.erase(old)
 	for k in tracks:
 		tracks[k].visible = k == idx
 	track = tracks[idx]
@@ -917,6 +938,15 @@ func _new_race(player_team: int) -> void:
 		add_child(race_log)
 		race_log.begin(race)
 		race_log.moment.connect(_on_moment)
+	# REWIND: a few per race, offline (not the daily challenge's board).
+	var uses: int = [0, 3, 99][clampi(int(Game.settings.get("rewinds", 1)), 0, 2)]
+	if mode == "online" or mode == "2p" or (mode == "challenge" and challenge_idx < 0) or race.player == null:
+		uses = 0
+	rewind.begin(race, uses)
+	if race.player:
+		race.incident.connect(func(c: Node3D, _kind: String):
+			if c == race.player:
+				_offer_rewind())
 	# The crew chief watching your car (full-rules races and practice).
 	if crew_watch and is_instance_valid(crew_watch):
 		crew_watch.queue_free()
@@ -1206,12 +1236,49 @@ func _enter_track_select() -> void:
 	_label("kind", "", 16, Color(0.5, 0.9, 1.0), Vector2(0, 322))
 	_label("info", "", 16, Color.WHITE, Vector2(0, 350))
 	_label("rec", "", 14, Color(1, 0.85, 0.3), Vector2(0, 380))
+	_label("real", "", 12, Color(0.75, 0.8, 0.9), Vector2(0, 236))
+	_label("pos", "", 12, Color(0.75, 0.8, 0.9), Vector2(540, 258), HORIZONTAL_ALIGNMENT_LEFT, 3)
+	# The groups, as tabs (tap one, or up / down).
+	_track_tabs.clear()
+	var groups: Array = Game.track_groups()
+	var tw: float = 560.0 / groups.size()
+	for i in groups.size():
+		var r := Rect2(40 + i * tw, 56, tw - 6, 26)
+		_track_tabs.append(r)
+		_panel(r, Color(0, 0, 0, 0.55))
+		var l := _label("grp%d" % i, groups[i][0], 13, Color.WHITE, r.position + Vector2(0, 5), HORIZONTAL_ALIGNMENT_CENTER, 3)
+		l.size = Vector2(r.size.x, 20)
+		l.position.x = r.position.x
 	_label("", "SWIPE OR TAP < >  TO BROWSE        GO  TO SELECT" if _touchy() else "<   LEFT / RIGHT   >        START  SELECT", 14, Color(0.85, 0.85, 0.85), Vector2(0, 414))
+	_refresh_track_select()
+
+
+## Up / down (or a tap on a group's name): the next group of tracks.
+func _track_group_jump(dir: int) -> void:
+	var groups: Array = Game.track_groups()
+	var g: int = posmod(Game.track_group_of(Game.selected_track) + dir, groups.size())
+	_track_group_go(g)
+
+
+func _track_group_go(g: int) -> void:
+	var groups: Array = Game.track_groups()
+	synth.beep(990.0, 0.05)
+	_use_track(int(groups[g][1]))
+	_start_attract()
 	_refresh_track_select()
 
 
 func _refresh_track_select() -> void:
 	var cfg: Dictionary = Game.track()
+	var groups: Array = Game.track_groups()
+	var gi: int = Game.track_group_of(Game.selected_track)
+	for i in groups.size():
+		var l: Label = menu_labels.get("grp%d" % i)
+		if l:
+			l.text = ("[ %s ]" if i == gi else "%s") % groups[i][0]
+			l.label_settings.font_color = Color(1.0, 0.85, 0.2) if i == gi else Color(0.6, 0.7, 0.8)
+	menu_labels.pos.text = "%d / %d" % [Game.selected_track - int(groups[gi][1]) + 1, int(groups[gi][2])]
+	menu_labels.real.text = ("MODELLED ON " + String(cfg.real).to_upper()) if cfg.has("real") else ""
 	menu_labels.level.text = "<  %s  >" % cfg.level
 	menu_labels.name.text = cfg.name
 	menu_labels.kind.text = cfg.kind
@@ -1516,6 +1583,9 @@ func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_F8:
 		open_report()
 		return
+	if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_BACKSPACE and state == State.RACE:
+		do_rewind()
+		return
 	if editor and is_instance_valid(editor) and editor.visible and state == State.MENU:
 		editor.handle(event)
 		return
@@ -1591,11 +1661,15 @@ func _unhandled_input(event: InputEvent) -> void:
 		State.TRACK_SELECT:
 			if event.is_action_pressed("steer_left") or event.is_action_pressed("steer_right"):
 				var dir := -1 if event.is_action_pressed("steer_left") else 1
-				var idx := posmod(Game.selected_track + dir, Game.tracks.size())
+				# < > browse within the group (ORIGINALS, the 2026 CUP CALENDAR, MODS).
+				var grp: Array = Game.track_groups()[Game.track_group_of(Game.selected_track)]
+				var idx: int = int(grp[1]) + posmod(Game.selected_track - int(grp[1]) + dir, int(grp[2]))
 				synth.beep(880.0, 0.05)
 				_use_track(idx)
 				_start_attract()
 				_refresh_track_select()
+			elif event.is_action_pressed("menu_up") or event.is_action_pressed("menu_down"):
+				_track_group_jump(-1 if event.is_action_pressed("menu_up") else 1)
 			elif event.is_action_pressed("start"):
 				_enter_car_select()
 			elif event.is_action_pressed("back"):
@@ -1841,6 +1915,7 @@ func _physics_process(delta: float) -> void:
 				race_log.tick(delta)
 			if crew_watch:
 				crew_watch.tick(delta)
+			rewind.tick(delta)
 			_draft_cue(delta)
 			if race.player:
 				ghost.record(race.player, race.time, delta)
@@ -2151,6 +2226,12 @@ func ui_tap(pos: Vector2) -> bool:
 			return true
 		State.MODE_SELECT:
 			return _mode_tap(p)
+		State.TRACK_SELECT:
+			for i in _track_tabs.size():
+				if (_track_tabs[i] as Rect2).grow(4).has_point(p):
+					_track_group_go(i)
+					return true
+			return false
 		State.MENU:
 			return menu != null and menu.tap(p)
 		State.DEBRIEF:
@@ -2212,12 +2293,14 @@ func _on_pit_call(info: Dictionary) -> void:
 		{"id": "chassis", "label": "CHASSIS", "values": ["NO CHANGE", "TIGHTEN (ROUND OF WEDGE IN)", "LOOSEN (ROUND OF WEDGE OUT)"], "index": 0,
 			"hint": "TIGHT: THE FRONT PUSHES UP THE TRACK.  LOOSE: THE REAR WANTS TO COME AROUND"},
 		{"id": "go", "label": "CONFIRM", "hint": "START TO SEND IT"},
-	], 1)
+	] + ([{"id": "rewind", "label": "REWIND 5 SECONDS (%s LEFT)" % (str(rewind.left) if rewind.left < 50 else "ANY"), "hint": "GO BACK TO BEFORE IT HAPPENED"}] if rewind.available() and (rewind.offer_t > 0.0 or race.control._cause == race.player) else []), 1)
 	var lines := [
 		"RUNNING %s OF %d  -  %d LAPS TO GO" % [Game.ordinal(int(info.position)), int(info.field), int(info.laps_left)],
 		"TIRES %d%% WORN (GRIP %d%%)   FUEL %d LAPS   DAMAGE %s" % [int(round(float(info.wear) * 100.0)), int(round(float(info.grip) * 100.0)), int(info.fuel_laps), "NONE" if float(info.damage) < 0.02 else ("LIGHT" if float(info.damage) < 0.1 else "HEAVY")],
 		"CREW CHIEF: %s" % String(info.names[max(options.find(info.advice), 0)]),
 	]
+	if info.get("stage_break", false):
+		lines[2] = "STAGE BREAK: RESTART IN STAGE ORDER - PITTING IS FREE"
 	for i in lines.size():
 		var l := Game.make_label(lines[i], 18 if i < 2 else 16, Color.WHITE if i < 2 else Color(1.0, 0.85, 0.2), 5)
 		l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -2227,6 +2310,9 @@ func _on_pit_call(info: Dictionary) -> void:
 	_pit_hint()
 	pit_menu.changed.connect(func(_id, _i): _pit_hint())
 	pit_menu.activated.connect(func(id):
+		if id == "rewind":
+			do_rewind()
+			return
 		if id == "advice":
 			pit_menu.set_value("plan", adv_i)
 			pit_menu.set_value("chassis", 0)
@@ -2322,6 +2408,8 @@ func _on_control_message(text: String, kind: String) -> void:
 
 ## Your own spins, wall hits and tyres, with why they happened.
 func _on_moment(e: Dictionary) -> void:
+	if String(e.kind) in ["spin", "wall"]:
+		_offer_rewind()
 	if state != State.RACE or String(e.get("why", "")) == "":
 		return
 	match String(e.kind):
@@ -2389,6 +2477,40 @@ func _notification(what: int) -> void:
 			auto_pause()
 		NOTIFICATION_APPLICATION_FOCUS_IN, NOTIFICATION_APPLICATION_RESUMED, NOTIFICATION_WM_WINDOW_FOCUS_IN:
 			AudioServer.set_bus_mute(0, false)
+
+
+func _offer_rewind() -> void:
+	if not rewind.available() or rewind.offer_t > 0.0:
+		return
+	rewind.offer()
+	if not _touchy():
+		hud.crew_call("BACKSPACE: REWIND 5 SECONDS (%s LEFT)" % (str(rewind.left) if rewind.left < 50 else "ANY"))
+
+
+## Go back five seconds: everyone where they were, then 3-2-1.
+func do_rewind() -> bool:
+	if state != State.RACE or not rewind.available():
+		return false
+	if pit_menu and is_instance_valid(pit_menu):
+		pit_menu.queue_free()
+		pit_menu = null
+	if showtime.replay_active:
+		showtime._end_replay()
+	if not rewind.rewind():
+		return false
+	if race_log and is_instance_valid(race_log):
+		race_log._event("rewind", "Rewound %d seconds" % int(rewind.BACK))
+	hud.visible = true
+	hud.clear_messages()
+	_msg("REWIND", 1.5, Color(0.5, 0.85, 1.0))
+	_sub("%d LEFT THIS RACE" % rewind.left if rewind.left < 50 else "", 2.0)
+	synth.beep(520.0, 0.12)
+	synth.beep(780.0, 0.12)
+	paused = true
+	_bg_paused = false
+	pause_layer.visible = false
+	_start_resume()
+	return true
 
 
 ## "LAP 12 OF 60  -  8TH  -  TIRES GOOD  -  FUEL 14 LAPS" (just the lap and
@@ -3191,6 +3313,8 @@ func _enter_options() -> void:
 		{"id": "map_contrast", "label": "MAP DOTS", "values": ["TEAM COLOURS", "HIGH CONTRAST"], "index": int(Game.settings.get("map_contrast", 0)), "hint": "HIGH CONTRAST: WHITE DOTS, THE LEADER RINGED, YOU A BLINKING SQUARE"},
 		{"id": "hand", "label": "CONTROLS", "values": ["RIGHT-HANDED", "LEFT-HANDED"], "index": int(Game.settings.get("hand", 0)), "hint": "LEFT-HANDED: PEDALS ON THE LEFT, STEER ON THE RIGHT"},
 		{"id": "battery", "label": "BATTERY SAVER", "values": ["OFF", "AUTO", "ON"], "index": int(Game.settings.get("battery", 1)), "hint": "30 FPS TO SAVE BATTERY AND HEAT.  AUTO: ON BATTERY AT 20% OR LESS"},
+		{"id": "rewinds", "label": "REWIND", "values": ["OFF", "3 PER RACE", "UNLIMITED"], "index": int(Game.settings.get("rewinds", 1)), "hint": "GO BACK 5 SECONDS AFTER A MISTAKE (BACKSPACE, OR THE BUTTON).  NOT ONLINE OR IN THE DAILY CHALLENGE"},
+		{"id": "tv_graphics", "label": "TV GRAPHICS", "values": ["SIMPLE", "BROADCAST"], "index": int(Game.settings.get("tv_graphics", 1)), "hint": "BROADCAST: THE RUNNING ORDER TICKER ACROSS THE TOP, STAGE RESULTS, LIKE THE RACE ON TV"},
 		{"id": "draft_cue", "label": "DRAFT SOUNDS", "values": ["OFF", "ON"], "index": int(Game.settings.get("draft_cue", 1)), "hint": "A TICK WHEN YOU CATCH THE DRAFT, A DOUBLE TICK WHEN IT'S TIME TO PULL OUT AND PASS"},
 		{"id": "haptics", "label": "VIBRATION", "values": ["OFF", "ON"], "index": int(Game.settings.get("haptics", 1)), "hint": "PHONES: A BUZZ ON HITS AND LOCKED WHEELS"},
 		{"id": "share_stats", "label": "SHARE STATS", "values": ["OFF", "ON"], "index": int(Game.settings.get("share_stats", 1)), "hint": "SENDS YOUR FRAME RATE AND DEVICE TYPE AFTER A RACE (NOTHING PERSONAL) TO HELP TUNE THE GAME"},
@@ -3310,7 +3434,7 @@ func _on_menu_changed(id: String, idx: int) -> void:
 			elif id == "map_contrast" or id == "hand":
 				Game.settings[id] = idx
 				Game.save_settings()
-			elif id == "auto_gas" or id == "share_stats" or id == "haptics" or id == "draft_cue":
+			elif id == "auto_gas" or id == "share_stats" or id == "haptics" or id == "draft_cue" or id == "tv_graphics" or id == "rewinds":
 				Game.settings[id] = idx
 				Game.save_settings()
 			elif id == "vsync":

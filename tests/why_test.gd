@@ -62,6 +62,7 @@ func _run() -> void:
 	_check(ctl.caution_why("RAIN", null) == "", "rain needs no more words")
 	var got: Array = []
 	ctl.message.connect(func(t, k): got.append([t, k]))
+	print("   flag before: ", ctl.flag, " cautions ", ctl.caution_count, " reason ", ctl._last_caution_reason)
 	ctl.throw_caution("SPIN", other)
 	_check(got.any(func(x): return x[1] == "why" and String(x[0]).contains("#" + other.team.num)), "the caution comes with its reason on screen")
 	_check(main.race_log.events.any(func(e): return e.kind == "caution" and String(e.text).contains("#" + other.team.num)), "and the debrief's key moments get it too")

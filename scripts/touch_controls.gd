@@ -134,6 +134,10 @@ func _layout() -> void:
 		_buttons.append([Rect2(x, y + (bh + gap) * 2.0, bw, bh), "CLIP", "clip", "tap"])
 		if main.race.control:
 			_buttons.append([Rect2(x, y + (bh + gap) * 3.0, bw, bh), "PIT", "pit", "tap"])
+		# REWIND, for a few seconds after a mistake: big, mid-left, easy to hit.
+		if main.rewind and main.rewind.offer_t > 0.0 and main.rewind.available():
+			var rw := Rect2(L + 16.0 * k, T + sr.size.y * 0.3, 120.0 * k, 46.0 * k)
+			_buttons.append([rw, "REWIND (%s)" % (str(main.rewind.left) if main.rewind.left < 50 else "ANY"), "_rewind", "tap"])
 	elif main and main.paused and main.pit_menu == null and not (main.report and is_instance_valid(main.report)):
 		# The pause screen: a big RESUME, QUIT, and under them steering and
 		# REPORT A PROBLEM.
@@ -150,6 +154,8 @@ func _layout() -> void:
 		if tilt and _tilt_ok:
 			_buttons.append([Rect2(x3 + w3 + 8.0 * k, y2, w3, h * 0.75), "CENTRE", "_recenter", "tap"])
 		_buttons.append([Rect2(x3 + (w3 + 8.0 * k) * 2.0, y2, w3, h * 0.75), "REPORT A PROBLEM", "_report", "tap"])
+		if main.rewind and main.rewind.available() and main.state == main.State.RACE:
+			_buttons.append([Rect2(x3, y2 + h * 0.75 + 10.0 * k, w * 2.0 + 20.0 * k, h * 0.7), "REWIND 5 SECONDS (%s LEFT)" % (str(main.rewind.left) if main.rewind.left < 50 else "ANY"), "_rewind", "tap"])
 	elif main:
 		# Menus are touched directly (cards, tiles); a BACK button top left, and
 		# on the course and car pickers < > to browse and GO to choose.
@@ -267,6 +273,11 @@ func _tap(action) -> void:
 		return
 	_send(action, 1.0)
 	_release.call_deferred(action)
+
+
+func _rewind() -> void:
+	if main:
+		main.do_rewind()
 
 
 func _report() -> void:

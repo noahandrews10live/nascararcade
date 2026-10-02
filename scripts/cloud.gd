@@ -22,8 +22,9 @@ const URL := "https://nlkfuldftcaikdbvwoxx.supabase.co"
 ## The project's public "anon" key (read-only; writes go through the function).
 const KEY := "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5sa2Z1bGRmdGNhaWtkYnZ3b3h4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTA0OTMwMjAsImV4cCI6MjEwNjA2OTAyMH0.fKZ8-80brPK9Jm7ZUE_ccFMFMQ7KPK2o9v5qYV6DYTE"
 const SAVE := "user://cloud.cfg"
-## Leaderboards exist for the game's own 11 tracks (not mods).
-const RANKED_TRACKS := 11
+## Leaderboards exist for the game's own 40 tracks (the 11 originals and the 29
+## NASCAR calendar replicas; not mods).
+const RANKED_TRACKS := 40
 
 var id := ""
 var secret := ""

@@ -69,6 +69,9 @@ var quick := true
 var quick_phase := "" # "", "slow", "decide", "roll"
 var _quick_t := 0.0
 var _freeze: Array = [] # running order when the caution came out (scoring freeze)
+## The caution is a stage break: the field restarts in the order the stage
+## finished, pit stop or not (so everyone can pit for free).
+var stage_break := false
 var _calls := {} # car -> "4", "2", "F", "W", "S" (slicks) or "" (stay out)
 var _adjust := {} # car -> wedge change asked for
 var _cause: Node3D = null
@@ -337,6 +340,7 @@ func throw_caution(reason: String, who: Node3D, where := "") -> void:
 		race.freeze_finish()
 		return
 	flag = Flag.YELLOW
+	stage_break = reason.begins_with("STAGE")
 	caution_elapsed = 0.0
 	caution_count += 1
 	caution_laps = 0
@@ -377,6 +381,61 @@ func throw_caution(reason: String, who: Node3D, where := "") -> void:
 		_adjust.clear()
 		player_pending = false
 		_freeze = race.order.filter(func(c): return not c.towed and not c.finished)
+	elif stage_break:
+		_freeze = race.order.filter(func(c): return not c.towed and not c.finished)
+
+
+## Full cautions at a stage break: the lead-lap cars in line behind the pace
+## car swap places into the order they finished the stage (each takes the slot
+## of the car that should be there), whoever pitted.
+func _restage_order() -> void:
+	var lead: Node3D = _freeze[0] if not _freeze.is_empty() else leader()
+	var cars: Array = race.order.filter(func(c): return not c.towed and not c.out and c.pit_state == Pit.NONE and _laps_down(c, lead) == 0)
+	if cars.size() < 2:
+		return
+	var slots: Array = cars.map(func(c): return [c.dist, c.d])
+	slots.sort_custom(func(a, b): return a[0] > b[0])
+	var want: Array = _freeze.filter(func(c): return cars.has(c))
+	for c in cars:
+		if not want.has(c):
+			want.append(c) # not scored at the freeze (shouldn't happen): at the back
+	for i in want.size():
+		var c: Node3D = want[i]
+		c.dist = slots[i][0]
+		c.d = slots[i][1]
+		c.kin_d = c.d
+		c.ai_lane = c.d
+		c.sync_visual()
+	race._update_order()
+	message.emit("LINED UP IN STAGE FINISHING ORDER", "pit")
+
+
+## REWIND: the caution never happened (the player went back to before it).
+func cancel_caution(cautions_before: int) -> void:
+	flag = Flag.GREEN
+	caution_count = cautions_before
+	quick_phase = ""
+	one_to_go = false
+	restart_armed = false
+	choosing = false
+	pit_open = false
+	stage_break = false
+	final_lap_caution = false
+	player_pending = false
+	_freeze.clear()
+	_calls.clear()
+	_adjust.clear()
+	_waiting.clear()
+	_incident_timers.clear()
+	lane_choice.clear()
+	pace_car.visible = false
+	pace_car.pace_mode = false
+	pace_car.process_mode = Node.PROCESS_MODE_DISABLED
+	for c in race.cars:
+		c.pace_mode = false
+		c.pitted_this_caution = false
+	_green_since = 0.0
+	flag_changed.emit("GREEN")
 
 
 func pace_speed() -> float:
@@ -433,6 +492,8 @@ func _caution_tick(delta: float) -> void:
 		if caution_laps == caution_needed_laps - 1:
 			one_to_go = true
 			message.emit("ONE TO GO", "flag")
+			if stage_break:
+				_restage_order()
 			_wave_around()
 			choosing = true
 		if caution_laps >= caution_needed_laps:
@@ -804,6 +865,7 @@ func player_info(who: Node3D = null) -> Dictionary:
 		"fuel_laps": p.fuel / max(per_lap, 0.001),
 		"damage": p.total_damage(),
 		"reason": _last_caution_reason,
+		"stage_break": stage_break,
 	}
 
 
@@ -874,6 +936,8 @@ func ai_pit_call(c: Node3D, advice := false) -> String:
 	var stay_share: float = 0.3 if laps_left > 40 else (0.45 if laps_left > 15 else 0.6)
 	var cost: float = float(field - pos) * stay_share + (2.5 if pos <= 3 else 0.0)
 	cost = min(cost, 12.0)
+	if stage_break:
+		cost = 0.0 # the stage's order holds for the restart: a stop is free
 	gain4 *= lerp(0.85, 1.15, c.ai_racecraft) * lerp(0.9, 1.1, c.ai_patience)
 	gain2 *= lerp(0.85, 1.15, c.ai_racecraft)
 	cost *= lerp(0.8, 1.3, c.ai_aggression)
@@ -945,6 +1009,9 @@ func _compute_order() -> Array:
 	var out: Array = stay.duplicate()
 	for pp in pitters:
 		out.append(pp[0])
+	if stage_break:
+		# A stage break: the lead-lap cars restart as they finished the stage.
+		out = _freeze.filter(func(c): return stay.has(c) or pitters.any(func(pp): return pp[0] == c))
 	if lucky:
 		out.append(lucky)
 	out.append_array(lapped)

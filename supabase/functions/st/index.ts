@@ -14,9 +14,12 @@ const CORS = {
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
-// Track lengths in metres (the game's 11 tracks); a lap faster than 95 m/s
-// average (212 mph) isn't possible anywhere.
-const TRACK_M = [3444, 2430, 869, 4216, 3685, 2591, 1996, 853, 2028, 4522, 5198];
+// Track lengths in metres (the game's 11 original tracks, then the 29 NASCAR
+// calendar replicas); a lap faster than 95 m/s average (212 mph) isn't
+// possible anywhere.
+const TRACK_M = [3444, 2430, 869, 4212, 3685, 2590, 1989, 853, 2028, 4522, 5198,
+  4023, 2478, 3862, 1609, 2414, 2198, 846, 857, 2413, 4280, 2414, 3943, 2414, 2140, 3218,
+  4023, 5471, 3202, 2414, 1005, 4023, 1408, 1206, 1702, 2011, 3669, 2414, 1609, 402];
 const MAX_AVG = 95.0;
 const CODE_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 // A saved game: a few small config files as text. Plenty of room.

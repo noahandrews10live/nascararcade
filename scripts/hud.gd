@@ -15,6 +15,11 @@ var player_idx := 1 # 1 = race.player, 2 = race.player2
 var control: Node = null # race_control.gd in Single Race mode
 var time_left := 0.0
 var show_timer := true
+## Room at the top for the TV ticker (the HUD's top row moves down by this).
+var top := 0.0
+## The TV ticker is showing: it carries the flag and the running order, so the
+## flag banner and the top-5 board step aside.
+var ticker_on := false
 
 var l_time_cap: Label
 var l_time: Label
@@ -111,27 +116,27 @@ func _layout() -> void:
 	l_spot.size = Vector2(W, 30)
 	# On narrow screens the gauges at the bottom reach the middle: go above them.
 	l_spot.position = Vector2(0, H - (88.0 if W >= 820.0 else 132.0))
-	l_flag.position = Vector2(W * 0.5 - 120, 4)
+	l_flag.position = Vector2(W * 0.5 - 120, 4 + top)
 	l_sub.size = Vector2(W - 40.0, 30)
 	l_sub.position = Vector2(20, H * 0.46)
 	if l_crew:
 		var cw: float = clamp(W - 300.0, 300.0, 460.0)
 		l_crew.size = Vector2(cw, 0)
-		l_crew.position = Vector2((W - cw) * 0.5, 58)
+		l_crew.position = Vector2((W - cw) * 0.5, 58 + top)
 
 
 func _place(l: Label, p: Vector2, corner: int) -> void:
 	match corner:
 		0:
-			l.position = p
+			l.position = p + Vector2(0, top if p.y >= 0.0 else 0.0)
 		1:
 			l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 			l.size = Vector2(W, 0)
-			l.position = Vector2(0, p.y)
+			l.position = Vector2(0, p.y + top)
 		2:
 			l.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 			l.size = Vector2(200, 0)
-			l.position = Vector2(W - 200 + p.x, p.y)
+			l.position = Vector2(W - 200 + p.x, p.y + top)
 		3:
 			l.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 			l.size = Vector2(120, 0)
@@ -199,6 +204,35 @@ static func air(p: Node3D, r: Node3D) -> Dictionary:
 	return {"tow": v4.x, "push": v4.y, "side": v4.z, "wall": v4.w, "closing": closing, "gap": gap, "state": state, "cue": cue, "out_side": out_side}
 
 
+## A car alongside: chevrons at the side of the screen it's on, stronger the
+## more it overlaps (what a spotter's "car inside!" tells you).
+func _draw_alongside(p: Node3D) -> void:
+	var left := 0.0
+	var right := 0.0
+	var nbl: Array = p.nb
+	for q in range(0, nbl.size(), 2):
+		var o: Node3D = nbl[q]
+		var gap: float = nbl[q + 1]
+		var lat: float = o.d - p.d
+		if abs(gap) < 6.0 and abs(lat) > 1.2 and abs(lat) < 5.5 and not o.out:
+			var amt: float = clamp(1.0 - (abs(gap) - 1.0) / 5.0, 0.0, 1.0)
+			if lat < 0.0:
+				left = max(left, amt) # inside (driving anticlockwise, the inside is on the left)
+			else:
+				right = max(right, amt)
+	var cy: float = H * 0.55
+	for side in [[left, -1.0], [right, 1.0]]:
+		var a: float = side[0]
+		if a <= 0.0:
+			continue
+		var x: float = 22.0 if side[1] < 0.0 else W - 22.0
+		var col := Color(1.0, 0.75, 0.15, 0.35 + 0.55 * a)
+		for k in 2:
+			var xo: float = x + side[1] * -k * 12.0
+			var tip := Vector2(xo + side[1] * 10.0, cy)
+			draw_colored_polygon(PackedVector2Array([tip, Vector2(xo - side[1] * 2.0, cy - 22.0), Vector2(xo - side[1] * 8.0, cy - 22.0), Vector2(tip.x - side[1] * 10.0, cy), Vector2(xo - side[1] * 8.0, cy + 22.0), Vector2(xo - side[1] * 2.0, cy + 22.0)]), col)
+
+
 ## A call from the crew chief (urgent ones in red, and they blink).
 func crew_call(text: String, urgent := false) -> void:
 	l_crew.text = "CREW CHIEF:  " + text
@@ -254,24 +288,11 @@ func _process(delta: float) -> void:
 	if race == null or race.player == null:
 		return
 	var p: Node3D = race.player if player_idx == 1 or race.player2 == null else race.player2
-	l_board.visible = H > 440.0
-	# Flag / race-control strip (Single Race mode)
-	l_flag.visible = control != null
+	l_board.visible = H > 440.0 and not ticker_on
+	# Flag / race-control strip (Single Race mode); the TV ticker shows it instead.
+	l_flag.visible = control != null and not ticker_on
 	if control:
-		var names := ["GREEN", "CAUTION", "WHITE FLAG", "CHECKERED"]
-		var txt: String = names[control.flag]
-		if control.flag == control.Flag.YELLOW:
-			if control.one_to_go:
-				txt = "ONE TO GO"
-			elif control.pit_open:
-				txt = "CAUTION - PITS OPEN"
-		elif control.flag == control.Flag.GREEN and control.stage <= control.stage_ends.size():
-			txt = "STAGE %d  ENDS LAP %d" % [control.stage, control.stage_ends[control.stage - 1]]
-		elif control.flag == control.Flag.GREEN:
-			txt = "FINAL STAGE"
-		if p.want_pit and p.pit_state == 0:
-			txt += "   PIT: " + {"4": "4T", "2": "2T", "F": "FUEL"}[p.pit_plan]
-		l_flag.text = txt
+		l_flag.text = flag_text(p)
 	l_time.text = "%d" % ceil(max(time_left, 0.0))
 	var low := time_left < 10.0
 	l_time.label_settings.font_color = Color(1, 0.2, 0.15) if low else Color(1, 0.9, 0.2)
@@ -317,18 +338,39 @@ func _process(delta: float) -> void:
 	queue_redraw()
 
 
+## "STAGE 1  ENDS LAP 15", "CAUTION - PITS OPEN", "WHITE FLAG"... (and your
+## pit request).
+func flag_text(p: Node3D) -> String:
+	var names := ["GREEN", "CAUTION", "WHITE FLAG", "CHECKERED"]
+	var txt: String = names[control.flag]
+	if control.flag == control.Flag.YELLOW:
+		if control.one_to_go:
+			txt = "ONE TO GO"
+		elif control.pit_open:
+			txt = "CAUTION - PITS OPEN"
+	elif control.flag == control.Flag.GREEN and control.stage <= control.stage_ends.size():
+		txt = "STAGE %d  ENDS LAP %d" % [control.stage, control.stage_ends[control.stage - 1]]
+	elif control.flag == control.Flag.GREEN:
+		txt = "FINAL STAGE"
+	if p.want_pit and p.pit_state == 0:
+		txt += "   PIT: " + {"4": "4T", "2": "2T", "F": "FUEL", "W": "WETS"}.get(p.pit_plan, "")
+	return txt
+
+
 func _draw() -> void:
 	if race == null or race.player == null or track == null:
 		return
 	var p: Node3D = race.player if player_idx == 1 or race.player2 == null else race.player2
 	if control:
 		var fc: Color = [Color(0.1, 0.8, 0.2), Color(1.0, 0.85, 0.05), Color(0.95, 0.95, 0.95), Color(0.9, 0.9, 0.9)][control.flag]
-		draw_rect(Rect2(W * 0.5 - 120, 4, 240, 24), fc)
+		if not ticker_on:
+			draw_rect(Rect2(W * 0.5 - 120, 4 + top, 240, 24), fc)
 		if control.flag == control.Flag.CHECKERED:
 			for i in 24:
 				for j in 2:
 					if (i + j) % 2 == 0:
-						draw_rect(Rect2(W * 0.5 - 120 + i * 10, 4 + j * 12, 10, 12), Color(0.05, 0.05, 0.05))
+						if not ticker_on:
+							draw_rect(Rect2(W * 0.5 - 120 + i * 10, 4 + top + j * 12, 10, 12), Color(0.05, 0.05, 0.05))
 	# Tachometer arc (LED segments)
 	var center := Vector2(W - 65, H - 55)
 	var radius := 58.0
@@ -364,7 +406,7 @@ func _draw() -> void:
 		draw_colored_polygon(PackedVector2Array([Vector2(ax + 6 * side_dir, ay), Vector2(ax - 4 * side_dir, ay - 6), Vector2(ax - 4 * side_dir, ay + 6)]), Color(0.4, 1.0, 0.4))
 	# Time of day, track temperature and the weather.
 	if race.weather and control:
-		draw_string(Game.arcade_font, Vector2(W * 0.5 - 120, 44), race.weather.summary(), HORIZONTAL_ALIGNMENT_CENTER, 240, 10, Color(0.85, 0.9, 1.0))
+		draw_string(Game.arcade_font, Vector2(W * 0.5 - 120, 44 + top), race.weather.summary(), HORIZONTAL_ALIGNMENT_CENTER, 240, 10, Color(0.85, 0.9, 1.0))
 	if l_crew.visible:
 		var r := Rect2(l_crew.position - Vector2(8, 3), l_crew.size + Vector2(16, 6))
 		r.size.y = max(r.size.y, l_crew.get_minimum_size().y + 6.0)
@@ -410,6 +452,7 @@ func _draw() -> void:
 	draw_string(f, cc + Vector2(-2, 82), "H2O %d" % int(wt * 1.8 + 32.0), HORIZONTAL_ALIGNMENT_LEFT, -1, 10, wcol)
 	if p.dvp_clock >= 0.0:
 		draw_string(f, cc + Vector2(-2, 94), "DVP %d:%02d" % [int(p.dvp_clock) / 60, int(p.dvp_clock) % 60], HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color(1, 0.6, 0.2))
+	_draw_alongside(p)
 	_draw_map(p)
 
 
@@ -417,7 +460,7 @@ func _draw() -> void:
 ## top, with the leader and the cars either side of you numbered.
 func map_rect() -> Rect2:
 	var mm: float = clamp(H * 0.26, 64.0, 120.0)
-	return Rect2(W - 14.0 - mm, 92.0, mm, mm)
+	return Rect2(W - 14.0 - mm, 92.0 + top, mm, mm)
 
 
 var high_contrast: bool:

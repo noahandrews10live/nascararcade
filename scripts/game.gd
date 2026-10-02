@@ -610,7 +610,7 @@ func weekly_event() -> Dictionary:
 	var td := Time.get_date_dict_from_unix_time(thursday * 86400)
 	var jan1 := int(Time.get_unix_time_from_datetime_dict({"year": td.year, "month": 1, "day": 1})) / 86400
 	var week := (thursday - jan1) / 7 + 1
-	var track: int = (td.year * 53 + week) % mini(tracks.size(), 11)
+	var track: int = (td.year * 53 + week) % mini(tracks.size(), ORIGINAL_TRACKS + ReplicaTracks.TRACKS.size())
 	return {"key": "weekly-%04d-W%02d" % [td.year, week], "track": track, "name": String(tracks[track].short) + " TIME TRIAL"}
 
 
@@ -734,7 +734,7 @@ func award_race(place: int, field: int, laps: int, clean: bool) -> Dictionary:
 func daily_challenge() -> Dictionary:
 	var rng := RandomNumberGenerator.new()
 	rng.seed = hash("daily" + daily_key())
-	var t := rng.randi_range(0, tracks.size() - 1)
+	var t := rng.randi_range(0, mini(tracks.size(), ORIGINAL_TRACKS + ReplicaTracks.TRACKS.size()) - 1) # (not mods)
 	var name: String = tracks[t].short
 	var kind := rng.randi_range(0, 3)
 	var ch := {"track": t, "field": 24}
@@ -824,6 +824,28 @@ const FIELDS := [20, 25]
 ## reference machine), aiming to leave room in a 60 fps frame for drawing.
 const PERF_FIXED_MS := 2.5
 const PERF_CAR_MS := 0.13
+const ReplicaTracks := preload("res://scripts/replica_tracks.gd")
+## The original tracks come first (0..10), then the replicas.
+const ORIGINAL_TRACKS := 11
+
+
+## The picker's groups of tracks: [name, first index, count].
+func track_groups() -> Array:
+	var g: Array = [["ORIGINALS", 0, ORIGINAL_TRACKS], ["2026 CUP CALENDAR", ORIGINAL_TRACKS, ReplicaTracks.TRACKS.size()]]
+	var mods: int = tracks.size() - ORIGINAL_TRACKS - ReplicaTracks.TRACKS.size()
+	if mods > 0:
+		g.append(["MODS", ORIGINAL_TRACKS + ReplicaTracks.TRACKS.size(), mods])
+	return g
+
+
+func track_group_of(idx: int) -> int:
+	var g := track_groups()
+	for i in g.size():
+		if idx >= int(g[i][1]) and idx < int(g[i][1]) + int(g[i][2]):
+			return i
+	return 0
+
+
 ## Shown with problem reports (and in OPTIONS).
 const VERSION := "1.5 (2026-10-02)"
 const PERF_BUDGET_MS := 9.0
@@ -832,7 +854,7 @@ var settings := {
 	# field: -1 = AUTO (see field_size), else an index into FIELDS.
 	"length": 1, "difficulty": 1, "field": -1, "auto_field": 0, "cautions": 1, "damage": 1, "wear": 1, "weather": 0,
 	"assists": 2, "manual": 0, "weekend": 1, "touch_tilt": true, "tilt_sens": 1, "res_mode": 0, "commentary": 1, "catchup": 0,
-	"auto_gas": 0, "tutorial_done": 0, "share_stats": 1, "haptics": 1, "battery": 1, "draft_cue": 1,
+	"auto_gas": 0, "tutorial_done": 0, "share_stats": 1, "haptics": 1, "battery": 1, "draft_cue": 1, "tv_graphics": 1, "rewinds": 1,
 	"big_text": 0, "map_contrast": 0, "hand": 0, # accessibility: larger text, high-contrast map, left-handed controls
 }
 ## Garage setup (applied to the player's car): -3..3 balance (tight..loose),
@@ -872,6 +894,9 @@ func _ready() -> void:
 	# Slant the glyphs for that italic arcade cabinet look.
 	arcade_font.variation_transform = Transform2D(Vector2(1, 0), Vector2(-0.22, 1), Vector2.ZERO)
 	records.load(RECORDS_PATH)
+	# The NASCAR calendar replicas, after the originals (mods come after both).
+	for t in ReplicaTracks.TRACKS:
+		tracks.append((t as Dictionary).duplicate(true))
 	load_mods()
 	_fill_teams()
 	# Modern works on both renderers; Forward+ (desktop Vulkan/D3D12) adds SSAO,
@@ -1188,8 +1213,16 @@ func new_season(team_idx: int, length_idx: int) -> void:
 	var sched: Array = []
 	var rng := RandomNumberGenerator.new()
 	rng.randomize()
-	for i in n:
-		sched.append(i % tracks.size() if i < tracks.size() else rng.randi() % tracks.size())
+	if n >= ReplicaTracks.CALENDAR.size():
+		# A full season follows the real 2026 Cup calendar, race by race.
+		for i in n:
+			sched.append(ORIGINAL_TRACKS + int(ReplicaTracks.CALENDAR[i % ReplicaTracks.CALENDAR.size()]))
+	else:
+		# Shorter ones: a mix of the calendar's tracks and the originals.
+		var pool: Array = range(ORIGINAL_TRACKS + ReplicaTracks.TRACKS.size())
+		pool.shuffle()
+		for i in n:
+			sched.append(pool[i % pool.size()])
 	season = {
 		"team": team_idx, "schedule": sched, "round": 0,
 		"points": {}, "wins": {}, "top5": {}, "results": [],

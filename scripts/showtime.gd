@@ -149,7 +149,7 @@ func process(delta: float) -> void:
 	_update_showroom(delta)
 	# TV package: only while racing, not in the cockpit-only arcade feel of the 1999 look.
 	var tv: bool = racing and main.hud.visible and not replay_active
-	_ticker.visible = tv and main.state != main.State.COUNTDOWN
+	_ticker.visible = tv and main.state != main.State.COUNTDOWN and not (main.tv_ticker and main.tv_ticker.visible)
 	if _ticker.visible:
 		_ticker_t -= delta
 		if _ticker_t <= 0.0:
