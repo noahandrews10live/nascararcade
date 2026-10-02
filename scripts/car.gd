@@ -149,6 +149,7 @@ var laps_led := 0
 var burn_scale := 1.0
 var ai_driving_caution_choice := false
 var autopilot_forced := false
+var is_pace := false # the pace car (it cuts through the pit barrier to leave the track)
 
 # AI
 var ai := true
@@ -1130,8 +1131,10 @@ func _integrate_tumble(h: float) -> void:
 	# Ground and wall contact at the tyres and the body's corners.
 	var s_now := s()
 	scraping = false
-	var outer: float = track.outer_edge()
-	var inner: float = track.inner_wall()
+	# The walls either side (the pit road barrier splits the track from pit road).
+	var walls: Vector2 = track.walls_for(s_now, d) if not is_pace else Vector2(track.inner_wall(), track.outer_edge())
+	var outer: float = walls.y
+	var inner: float = walls.x
 	for ci in 16:
 		var is_tyre: bool = ci < 4
 		var lp: Vector3 = T_WHEELS[ci] if is_tyre else T_BODY[ci - 4]
@@ -1338,8 +1341,11 @@ func corners_track() -> Array[Vector2]:
 
 
 func _walls() -> void:
-	var outer: float = track.outer_edge()
-	var inner: float = track.inner_wall()
+	# The walls either side (the pit road barrier splits the track from pit road;
+	# the pace car takes the short cut into the pits).
+	var walls: Vector2 = track.walls_for(s(), d) if not is_pace else Vector2(track.inner_wall(), track.outer_edge())
+	var outer: float = walls.y
+	var inner: float = walls.x
 	if d < outer - 2.8 and d > inner + 2.8:
 		return # nowhere near either wall
 	for side in [1.0, -1.0]:

@@ -60,6 +60,7 @@ var synth: Node
 var soundscape: Node3D
 var hud: Control
 var tv_ticker: Control
+var pit_show: Control
 var rewind: Node
 var tutorial: Control # first race on a phone: short prompts
 var cloud: Node # leaderboards, friends, events, progress online
@@ -243,10 +244,14 @@ func _ready() -> void:
 	rewind = load("res://scripts/rewind.gd").new()
 	rewind.main = self
 	add_child(rewind)
+	pit_show = load("res://scripts/pit_show.gd").new()
+	pit_show.main = self
+	pit_show.hud = hud
 	tv_ticker = load("res://scripts/tv_ticker.gd").new()
 	tv_ticker.main = self
 	tv_ticker.hud = hud
 	hud.add_child(tv_ticker)
+	hud.add_child(pit_show)
 	tutorial = Tutorial.new()
 	tutorial.main = self
 	hud_layer.add_child(tutorial)
@@ -1572,6 +1577,8 @@ func _on_finished(car: Node3D, place: int) -> void:
 # --- main loop ------------------------------------------------------------------
 
 func _unhandled_input(event: InputEvent) -> void:
+	if pit_show.showing:
+		return # the stop replay (it takes its own skip)
 	if report and is_instance_valid(report):
 		# The problem report has the keys (its text box takes the typing).
 		if event.is_action_pressed("pause") or event.is_action_pressed("back"):
@@ -2339,6 +2346,9 @@ func _close_pit_menu() -> void:
 	synth.beep(1320.0, 0.08)
 	if race and race.control:
 		race.control.resolve_player(call, wedge)
+		# A quick caution's stops are made at once: show yours at the box.
+		if call != "" and race.control.quick and int(Game.settings.get("pit_view", 1)) == 1 and race.player.has_meta("stop"):
+			pit_show.start_show(race.player)
 
 
 ## After the stops: who pitted and where you'll restart, for a few seconds.
@@ -2883,6 +2893,8 @@ func _apply_resume() -> void:
 
 
 func _process(delta: float) -> void:
+	if race:
+		pit_show.update(delta)
 	if pause_layer.visible and race and race.player and pause_status:
 		pause_status.text = _pause_status_text()
 	_update_resume(delta)
@@ -3006,6 +3018,8 @@ func _update_camera(delta: float) -> void:
 		_hide_cockpit()
 	if showtime.camera(delta):
 		return
+	if state in [State.COUNTDOWN, State.RACE] and not photo_mode and split_cams.is_empty() and pit_show.camera(cam, delta):
+		return # in the box: the pit-stop camera
 	shake = max(shake - delta * 2.5, 0.0)
 	var sh := Vector3(rng.randf_range(-1, 1), rng.randf_range(-1, 1), 0) * shake * 0.25
 	match state:
@@ -3318,6 +3332,7 @@ func _enter_options() -> void:
 		{"id": "map_contrast", "label": "MAP DOTS", "values": ["TEAM COLOURS", "HIGH CONTRAST"], "index": int(Game.settings.get("map_contrast", 0)), "hint": "HIGH CONTRAST: WHITE DOTS, THE LEADER RINGED, YOU A BLINKING SQUARE"},
 		{"id": "hand", "label": "CONTROLS", "values": ["RIGHT-HANDED", "LEFT-HANDED"], "index": int(Game.settings.get("hand", 0)), "hint": "LEFT-HANDED: PEDALS ON THE LEFT, STEER ON THE RIGHT"},
 		{"id": "battery", "label": "BATTERY SAVER", "values": ["OFF", "AUTO", "ON"], "index": int(Game.settings.get("battery", 1)), "hint": "30 FPS TO SAVE BATTERY AND HEAT.  AUTO: ON BATTERY AT 20% OR LESS"},
+		{"id": "pit_view", "label": "MY PIT STOPS", "values": ["JUST THE RESULT", "SHOW THEM"], "index": int(Game.settings.get("pit_view", 1)), "hint": "SHOW THEM: THE PIT-STOP CAMERA AT YOUR BOX, THE CREW AT WORK, AND YOUR GETAWAY"},
 		{"id": "rewinds", "label": "REWIND", "values": ["OFF", "3 PER RACE", "UNLIMITED"], "index": int(Game.settings.get("rewinds", 1)), "hint": "GO BACK 5 SECONDS AFTER A MISTAKE (BACKSPACE, OR THE BUTTON).  NOT ONLINE OR IN THE DAILY CHALLENGE"},
 		{"id": "tv_graphics", "label": "TV GRAPHICS", "values": ["SIMPLE", "BROADCAST"], "index": int(Game.settings.get("tv_graphics", 1)), "hint": "BROADCAST: THE RUNNING ORDER TICKER ACROSS THE TOP, STAGE RESULTS, LIKE THE RACE ON TV"},
 		{"id": "draft_cue", "label": "DRAFT SOUNDS", "values": ["OFF", "ON"], "index": int(Game.settings.get("draft_cue", 1)), "hint": "A TICK WHEN YOU CATCH THE DRAFT, A DOUBLE TICK WHEN IT'S TIME TO PULL OUT AND PASS"},
@@ -3439,7 +3454,7 @@ func _on_menu_changed(id: String, idx: int) -> void:
 			elif id == "map_contrast" or id == "hand":
 				Game.settings[id] = idx
 				Game.save_settings()
-			elif id == "auto_gas" or id == "share_stats" or id == "haptics" or id == "draft_cue" or id == "tv_graphics" or id == "rewinds":
+			elif id == "auto_gas" or id == "share_stats" or id == "haptics" or id == "draft_cue" or id == "tv_graphics" or id == "rewinds" or id == "pit_view":
 				Game.settings[id] = idx
 				Game.save_settings()
 			elif id == "vsync":

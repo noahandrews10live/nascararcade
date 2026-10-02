@@ -313,6 +313,13 @@ stand-in for the server.
   - **Stages:** stage points go to the top 10 at the end of each stage.
   - **Finish:** overtime (green-white-checkered), and a caution on the final lap ends the race.
 - **Pit stops.** Choose 4 tyres, 2 tyres or fuel only; stops also repair damage. Pit road is driven automatically, and the AI runs its own pit strategy.
+- **Pit road like the real thing.** A concrete barrier with a red and white cap runs between the apron and pit road, with a yellow and black attenuator at its nose. Cars that pit leave the track before it starts (the white commitment line), and they rejoin past its end (the blend line). It's a real wall both ways: you can't cut onto pit road through it, and you can't get out of pit road through it. Pit road has a fast lane and a box lane, a yellow-lined stall for each car, the pit wall with the crews behind it, and each team's war wagon under its canopy. A pit road light at the entry shows green, or red under caution until pit road opens.
+- **Your stop, the way TV shows it.**
+  - On pit road, a speed panel shows the limit and five lights: green under it, red over.
+  - In the box, the camera cuts to the pit-stop camera on the wall. A panel shows the stop clock, each tyre coming off and going on (right side first), the fuel going in, and any wedge or repairs.
+  - The jack drop is yours. When it drops, GO! flashes: hit the gas and your reaction is part of the stop. Press too early and you jump the jack, which costs 1.5 s. If you hold the gas through it, the getaway is slow. AUTO GAS on a phone goes for you.
+  - Off pit road, a summary gives the stop time, your getaway and the places you won or lost.
+  - Under a QUICK caution the stops happen at once, so yours plays as a short replay at your box before the restart (tap to skip; Options → MY PIT STOPS: JUST THE RESULT turns it off).
 - **Spotter.** Callouts for car high, car low, three wide and clear.
 - **Garage.** Adjust handling balance (tight or loose), tyre pressure (grip versus wear) and gearing.
 - **Replays.** After any race, press R to watch it with TV, chase, bumper or helicopter cameras.
@@ -632,6 +639,7 @@ Each test also runs on its own, headless (`godot --headless --fixed-fps 60 --pat
 | `tests/physics_test.gd` | Solo lap speeds, draft gain and a 25-car race per track |
 | `tests/field_test.gd` | Full-field AI race with incident tracing (`TRACK=n SECS=s TRACE=car#`) |
 | `tests/rules_test.gd` | A full rules race: cautions, pits, stages and points |
+| `tests/pit_test.gd` | Pit road: the barrier walls on both sides, a green-flag stop that stays on the pit side of the barrier with no hard hits, the stop panel and summary, the jack drop (wait, release, push-off, jumping it), the light under caution, the quick-caution replay. TRACK=n picks the track |
 | `tests/caution_test.gd` | Quick cautions: the pit call screen, AI pit calls, the restart order, about 15 s yellow to green |
 | `tests/race_mode_test.gd` | Single Race through the real game flow |
 | `tests/weekend_test.gd` | Practice → qualifying → race, plus a season round |

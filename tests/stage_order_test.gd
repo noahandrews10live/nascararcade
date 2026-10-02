@@ -121,7 +121,7 @@ func _run() -> void:
 	frozen = _nums(ctl._freeze)
 	_check(ctl.stage_break and frozen.size() > 10, "full caution: a stage break, the order frozen (%d cars)" % frozen.size())
 	n = 0
-	while not ctl.one_to_go and n < 60 * 240:
+	while not ctl.one_to_go and n < 60 * 360: # (the whole field stops: a lap and a half)
 		await physics_frame
 		n += 1
 	await _frames(2)

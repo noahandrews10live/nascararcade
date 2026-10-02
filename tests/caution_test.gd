@@ -7,7 +7,8 @@ extends SceneTree
 ##   - the restart order: cars that stayed out in the order they held when the
 ##     caution came out, then the cars that pitted in the order they got off pit
 ##     road, then the free pass car and the lapped cars; lined up double file;
-##   - the player's stop is actually made (a 2-tire stop changes the right sides);
+##   - the player's stop is actually made (a 2-tire stop changes the right sides),
+##     and replayed at the box;
 ##   - the lap the field was lined up in doesn't count as a best lap.
 ##   godot --headless --fixed-fps 60 -s tests/caution_test.gd
 
@@ -119,7 +120,13 @@ func _run() -> void:
 			stop_t[[c, o]] = ctl._stop_time(c, o)
 	await _press("start")
 	await _frames(3)
-	_check(main.pit_menu == null and not main.paused, "confirming the call resumes the race")
+	# The stop is replayed at the box first (the race waits), then it goes on.
+	_check(main.pit_show.showing, "the player's stop is replayed at the box")
+	var shown := 0
+	while main.pit_show.showing and shown < 60 * 15:
+		await process_frame
+		shown += 1
+	_check(main.pit_menu == null and not main.paused, "after the replay the race goes on (%.1f s)" % (shown / 60.0))
 	# --- the stops and the order
 	var calls: Dictionary = ctl._calls
 	var pit_worn := 0

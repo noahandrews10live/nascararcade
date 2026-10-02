@@ -72,6 +72,7 @@ var _freeze: Array = [] # running order when the caution came out (scoring freez
 ## The caution is a stage break: the field restarts in the order the stage
 ## finished, pit stop or not (so everyone can pit for free).
 var stage_break := false
+var _light_open := true
 var _calls := {} # car -> "4", "2", "F", "W", "S" (slicks) or "" (stay out)
 var _adjust := {} # car -> wedge change asked for
 var _cause: Node3D = null
@@ -113,6 +114,7 @@ func setup(r: Node3D) -> void:
 
 func _build_pace_car() -> void:
 	pace_car = Car.new()
+	pace_car.is_pace = true
 	pace_car.name = "PaceCar"
 	race.add_child(pace_car)
 	pace_car.setup({"num": "", "driver": "PACE CAR", "sponsor": "OFFICIAL PACE CAR", "c1": Color(0.95, 0.95, 0.97), "c2": Color(0.1, 0.2, 0.7), "cn": Color(0.1, 0.1, 0.1), "speed": 1.0, "handling": 1.0}, track)
@@ -145,6 +147,13 @@ func tick(delta: float) -> void:
 	_dt = delta
 	if not enabled or not race.running:
 		return
+	# The pit road light: green when pit road is open (under green, or when the
+	# caution opens it), red under caution until then.
+	var open: bool = flag != Flag.YELLOW or pit_open
+	if open != _light_open:
+		_light_open = open
+		if track.has_method("set_pit_open"):
+			track.set_pit_open(open)
 	if follower:
 		# The host decides; this screen just tows its own wreck and spots.
 		if flag == Flag.YELLOW:
@@ -699,7 +708,19 @@ func _pit_drive(c: Node3D) -> Array:
 		Pit.SERVICE:
 			c.pit_timer -= _dt
 			if c.pit_timer <= 0.0:
+				if c == race.player and _is_human(c) and not c.get_meta("released", false):
+					# The jack drops: the player's GO (main times the reaction);
+					# nobody home after a second and a half, the crew pushes them off.
+					c.set_meta("go_t", float(c.get_meta("go_t", 0.0)) + _dt)
+					if float(c.get_meta("go_t")) < 1.5:
+						return [0.0, lane_d - 1.6]
 				c.pit_state = Pit.EXIT
+				c.remove_meta("released")
+				if _is_human(c):
+					c.set_meta("reaction", float(c.get_meta("go_t", 0.0)))
+				else:
+					c.remove_meta("reaction")
+				c.remove_meta("go_t")
 				message_for(c, "GO GO GO!", "pit")
 			return [0.0, lane_d - 1.6]
 		Pit.EXIT:
@@ -779,7 +800,11 @@ func _service(c: Node3D) -> float:
 				message_for(c, "TOO MUCH DAMAGE TO MAKE MINIMUM SPEED - PARKED", "pit")
 			else:
 				message_for(c, "DAMAGED VEHICLE POLICY: %d:%02d OF REPAIRS LEFT" % [int(c.dvp_clock) / 60, int(c.dvp_clock) % 60], "pit")
-	return max(tyre_t, fuel_t) * c.pit_crew_mult + repair
+	var total: float = max(tyre_t, fuel_t) * c.pit_crew_mult + repair
+	# What the stop was, for the pit-stop panel and its replay.
+	c.set_meta("stop", {"total": total, "tyre_t": tyre_t * c.pit_crew_mult, "fuel_t": fuel_t * c.pit_crew_mult,
+		"repair": repair, "corners": corners, "fuel_add": fuel_add, "wedge": float(_adjust.get(c, 0.0))})
+	return total
 
 
 # --- quick cautions ------------------------------------------------------------------
@@ -1100,6 +1125,8 @@ func _quick_apply() -> void:
 		quick_phase = ""
 		caution_laps = 1
 		_pace_last_lap = pace_car.lap()
+		if pits_enabled:
+			pit_open = true # a long hold: anyone short of fuel can stop
 	else:
 		restart_armed = true
 	# The board: who pitted, who stayed out, and how it came out for the player.

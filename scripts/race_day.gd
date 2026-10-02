@@ -91,6 +91,83 @@ func _build_grills() -> void:
 		p.global_position = track.pos[i] + track.right[i] * (track.inner_wall() - 40.0 - 8.0 * (k % 2)) + Vector3.UP * 1.0
 
 
+## Each team's pit box: the war wagon (the crew chief's cart, in the team's
+## colours, with a canopy) behind the pit wall at its stall, and its stall
+## marked on pit road in the same colours. One mesh for the lot.
+var _pit_boxes_built := false
+
+
+func _build_pit_boxes() -> void:
+	_pit_boxes_built = true
+	var ctl: Node = race.control
+	if not track.has_method("pit_wall_d"):
+		return
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var up := Vector3.UP
+	var pwd: float = track.pit_wall_d()
+	var box_d: float = track.pit_lane_d() - 1.6
+	for c in race.cars:
+		var s: float = ctl.box_s(c)
+		var fwd: Vector3 = track.fwd_at(s)
+		var right: Vector3 = track.right_at(s)
+		var basis := Basis(right, up, -fwd).orthonormalized()
+		var c1: Color = c.team.get("c1", Color(0.8, 0.1, 0.1))
+		var c2: Color = c.team.get("c2", Color.WHITE)
+		# The war wagon: a cabinet with the team's colours, a monitor deck on top.
+		var wp: Vector3 = track.surface_point(s, pwd - 2.2)
+		_add_box(st, wp + up * 0.8, basis, Vector3(1.4, 1.6, 2.4), c1)
+		_add_box(st, wp + up * 1.7, basis, Vector3(1.5, 0.2, 2.5), c2)
+		_add_box(st, wp + up * 1.95 + right * 0.3, basis, Vector3(0.1, 0.4, 1.6), Color(0.08, 0.08, 0.1))
+		# The canopy over it, on two poles.
+		for z in [-1.3, 1.3]:
+			_add_box(st, wp + fwd * z + up * 1.5 - right * 0.7, basis, Vector3(0.08, 3.0, 0.08), Color(0.6, 0.6, 0.62))
+		_add_box(st, wp + up * 3.05, basis, Vector3(2.4, 0.08, 3.2), c1.lightened(0.15))
+		# The stall on pit road: a box outline in the team's colour.
+		var lw := 0.18
+		for e in [[-3.0, -2.6], [2.6, 3.0]]:
+			var p0: Vector3 = track.surface_point(s + e[0], box_d - 1.5) + up * 0.025
+			var p1: Vector3 = track.surface_point(s + e[1], box_d - 1.5) + up * 0.025
+			var p2: Vector3 = track.surface_point(s + e[0], box_d + 1.5) + up * 0.025
+			var p3: Vector3 = track.surface_point(s + e[1], box_d + 1.5) + up * 0.025
+			_add_quad(st, p0, p1, p2, p3, c1)
+		_add_quad(st, track.surface_point(s - 2.6, box_d - 1.5) + up * 0.025, track.surface_point(s + 2.6, box_d - 1.5) + up * 0.025,
+			track.surface_point(s - 2.6, box_d - 1.5 + lw) + up * 0.025, track.surface_point(s + 2.6, box_d - 1.5 + lw) + up * 0.025, c1)
+	st.generate_normals()
+	var mi := MeshInstance3D.new()
+	mi.mesh = st.commit()
+	var mat := StandardMaterial3D.new()
+	mat.vertex_color_use_as_albedo = true
+	mat.roughness = 0.7
+	mi.material_override = mat
+	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	add_child(mi)
+
+
+func _add_quad(st: SurfaceTool, a: Vector3, b: Vector3, c: Vector3, d: Vector3, col: Color) -> void:
+	st.set_color(col)
+	for v in [a, c, b, b, c, d]:
+		st.add_vertex(v)
+	for v in [a, b, c, b, d, c]:
+		st.add_vertex(v) # both faces (seen from above or below the bank)
+
+
+func _add_box(st: SurfaceTool, center: Vector3, basis: Basis, size: Vector3, col: Color) -> void:
+	var h := size * 0.5
+	var c := [Vector3(-h.x, -h.y, -h.z), Vector3(h.x, -h.y, -h.z), Vector3(h.x, h.y, -h.z), Vector3(-h.x, h.y, -h.z),
+		Vector3(-h.x, -h.y, h.z), Vector3(h.x, -h.y, h.z), Vector3(h.x, h.y, h.z), Vector3(-h.x, h.y, h.z)]
+	var faces := [[0, 1, 2, 3], [5, 4, 7, 6], [4, 0, 3, 7], [1, 5, 6, 2], [3, 2, 6, 7], [4, 5, 1, 0]]
+	var shade := [0.85, 0.85, 0.75, 0.75, 1.0, 0.6]
+	for fi in faces.size():
+		var fc: Array = faces[fi]
+		var p := []
+		for k in fc:
+			p.append(center + basis * c[k])
+		st.set_color(col * shade[fi])
+		for v in [p[0], p[1], p[2], p[0], p[2], p[3]]:
+			st.add_vertex(v)
+
+
 ## A crew member in a firesuit and helmet.
 func _person(col: Color, trim := Color(0.95, 0.95, 0.95), hat := "helmet") -> Node3D:
 	var p := Person.new()
@@ -207,6 +284,8 @@ func update(delta: float) -> void:
 		var caution: bool = race.control != null and race.control.flag == race.control.Flag.YELLOW
 		_wave = move_toward(_wave, 1.0 if caution else 0.0, delta * 0.3)
 		track.crowd_mat.set_shader_parameter("wave", _wave)
+	if not _pit_boxes_built and race.control and race.cars.size() > 0:
+		_build_pit_boxes()
 	_update_crews(delta)
 	_update_fireworks(delta)
 	_update_burnout(delta)

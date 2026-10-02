@@ -138,7 +138,7 @@ func _layout() -> void:
 		if main.rewind and main.rewind.offer_t > 0.0 and main.rewind.available():
 			var rw := Rect2(L + 16.0 * k, T + sr.size.y * 0.3, 120.0 * k, 46.0 * k)
 			_buttons.append([rw, "REWIND (%s)" % (str(main.rewind.left) if main.rewind.left < 50 else "ANY"), "_rewind", "tap"])
-	elif main and main.paused and main.pit_menu == null and not (main.report and is_instance_valid(main.report)):
+	elif main and main.paused and main.pit_menu == null and not (main.report and is_instance_valid(main.report)) and not (main.pit_show and main.pit_show.showing):
 		# The pause screen: a big RESUME, QUIT, and under them steering and
 		# REPORT A PROBLEM.
 		var c := sr.get_center()
@@ -231,6 +231,10 @@ func _input(event: InputEvent) -> void:
 func _touch(event: InputEvent) -> void:
 	if main and main.report and is_instance_valid(main.report):
 		return # the problem report has the screen (its own buttons and text box)
+	if main and main.pit_show and main.pit_show.showing:
+		if event is InputEventScreenTouch and event.pressed:
+			main.pit_show.skip() # a tap skips the stop's replay
+		return
 	var p: Vector2 = event.position
 	var idx: int = event.index
 	if event is InputEventScreenTouch:

@@ -82,6 +82,7 @@ func _run() -> void:
 			yellow_t = 0.0
 		if yellow and ctl.weather_hold:
 			rain_hold += 1.0 / 60.0 # rain: held under yellow until it's dry (by design)
+			yellow_t = 0.0 # (what counts is getting going again once it's dry)
 		elif yellow:
 			yellow_t += 1.0 / 60.0
 			longest_yellow = max(longest_yellow, yellow_t)

@@ -12,6 +12,11 @@ const TYRE_MU := 1.35
 ## How fast relative grip falls as a tyre is loaded up: mu ~ load^-LOAD_SENS.
 const LOAD_SENS := 0.16
 const PIT_LANE_EXT := 170.0 # entry / exit lanes beyond the pit road itself
+const PIT_MIN_INFIELD := 13.0
+## The barrier between the apron and pit road starts this far before the pit
+## road (cars are on the entry lane by then) and ends this far after it.
+const BARRIER_LEAD := 85.0
+const BARRIER_TAIL := 50.0
 
 var cfg: Dictionary
 var length := 0.0
@@ -37,13 +42,15 @@ func setup(config: Dictionary) -> void:
 	cfg = config
 	width = cfg.width
 	apron = cfg.apron
-	infield = cfg.infield
+	# Room inside the apron for pit road, its barrier, the pit wall and the crews.
+	infield = max(float(cfg.infield), PIT_MIN_INFIELD)
 	_build_centerline()
 	_build_profile()
 	_build_line()
 	_build_bumps()
 	_build_minimap()
 	_build_mesh()
+	_build_pit_ends()
 	_build_scenery()
 	_commit_surfaces()
 	_build_fence()
@@ -328,8 +335,42 @@ func pit_out_s() -> float:
 	return pit_half()
 
 
+## Across pit road, from the track in: the barrier (just inside the apron), the
+## fast lane, the box lane, then the pit wall with the crews behind it.
+func pit_barrier_d() -> float:
+	return apron_edge() - 0.6
+
+
+## The middle of pit road: the fast lane is 1.6 m outside it, the box lane 1.6 m inside.
 func pit_lane_d() -> float:
-	return apron_edge() - infield * 0.5
+	return pit_barrier_d() - 4.0
+
+
+func pit_wall_d() -> float:
+	return pit_lane_d() - 4.2
+
+
+## Is s along the barrier between the apron and pit road?
+func in_pit_barrier(s_pos: float) -> bool:
+	var ss := fposmod(s_pos, length)
+	return ss >= pit_in_s() - BARRIER_LEAD or ss <= pit_out_s() + BARRIER_TAIL
+
+
+## The walls a car at (s, d) is between: Vector2(inner, outer). Along pit road
+## the barrier splits the two: on the track side it's the inside wall; on the
+## pit side it's the outside wall, with the pit wall inside.
+func walls_for(s_pos: float, d_now: float) -> Vector2:
+	var inner := inner_wall()
+	var outer := outer_edge()
+	if in_pit_barrier(s_pos):
+		var b := pit_barrier_d()
+		if d_now > b:
+			inner = b + 0.3
+		else:
+			outer = b - 0.3
+			if in_pit_zone(s_pos):
+				inner = pit_wall_d() + 0.3
+	return Vector2(inner, outer)
 
 
 ## Is track position s along the pit road (between entry and exit, across the line)?
@@ -720,14 +761,7 @@ func _build_mesh() -> void:
 		# infield grass strip (or pit road along the front stretch) + inner wall
 		var seg_s := i * (length / n)
 		if in_pit_roadway(seg_s) and in_pit_roadway(seg_s + length / n):
-			var pl := pit_lane_d()
-			var pw := infield * 0.4
-			_quad("grass", _pt(i, iw), _pt(i, pl - pw), _pt(i2, iw), _pt(i2, pl - pw), grass * 0.9, up, up)
-			_quad("asphalt", _pt(i, pl - pw), _pt(i, ae), _pt(i2, pl - pw), _pt(i2, ae), Color(0.36, 0.36, 0.38) * shade, up, up)
-			_quad("line", _pt(i, pl + pw * 0.55) + up * 0.02, _pt(i, pl + pw * 0.62) + up * 0.02, _pt(i2, pl + pw * 0.55) + up * 0.02, _pt(i2, pl + pw * 0.62) + up * 0.02, Color(0.95, 0.95, 0.95), up, up)
-			if i % 4 == 0:
-				# pit box lines
-				_quad("line", _pt(i, pl - pw) + up * 0.02, _pt(i, pl) + up * 0.02, _pt(i, pl - pw) + fwd[i] * 0.2 + up * 0.02, _pt(i, pl) + fwd[i] * 0.2 + up * 0.02, Color(1.0, 0.85, 0.1), up, up)
+			_pit_segment(i, i2, seg_s, shade, grass)
 		else:
 			_quad("grass", _pt(i, iw), _pt(i, ae), _pt(i2, iw), _pt(i2, ae), grass * (1.0 if stripe else 0.93), up, up)
 		_quad("concrete", _pt(i, iw) + up * 0.9, _pt(i, iw), _pt(i2, iw) + up * 0.9, _pt(i2, iw), Color(0.85, 0.85, 0.85))
@@ -776,6 +810,117 @@ func _build_mesh() -> void:
 			var cc := surface_point(s0 + 1.0, d0) + up * 0.03
 			var dd := surface_point(s0 + 1.0, d1) + up * 0.03
 			_quad("line", a, b, cc, dd, col)
+
+
+## One sample of pit road, across from the inside wall to the apron: the crews'
+## area, the pit wall, the box lane with its stalls, the fast lane, and the
+## barrier between pit road and the track.
+func _pit_segment(i: int, i2: int, seg_s: float, shade: float, grass: Color) -> void:
+	var up := Vector3.UP
+	var iw := inner_wall()
+	var ae := apron_edge()
+	var pl := pit_lane_d()
+	var bd := pit_barrier_d()
+	var pwd := pit_wall_d()
+	var zone: bool = in_pit_zone(seg_s) and in_pit_zone(seg_s + length / n)
+	var barrier: bool = in_pit_barrier(seg_s) and in_pit_barrier(seg_s + length / n)
+	var road := Color(0.33, 0.33, 0.35) * shade
+	road.a = 1.0
+	if zone:
+		# The crews' side: concrete behind the pit wall.
+		_quad("concrete", _pt(i, iw), _pt(i, pwd - 0.25), _pt(i2, iw), _pt(i2, pwd - 0.25), Color(0.62, 0.62, 0.6) * shade, up, up)
+		# The pit wall (waist high) with a stripe.
+		var w0 := _pt(i, pwd)
+		var w1 := _pt(i2, pwd)
+		var r0 := right[i] * 0.25
+		var r1 := right[i2] * 0.25
+		_quad("concrete", w0 + r0 + up * 1.05, w0 + r0, w1 + r1 + up * 1.05, w1 + r1, Color(0.9, 0.9, 0.9))
+		_quad("concrete", w0 - r0 + up * 1.05, w0 + r0 + up * 1.05, w1 - r1 + up * 1.05, w1 + r1 + up * 1.05, Color(0.75, 0.75, 0.75), up, up)
+		_quad("line", w0 + r0 + up * 0.75, w0 + r0 + up * 0.55, w1 + r1 + up * 0.75, w1 + r1 + up * 0.55, Color(0.1, 0.25, 0.75))
+		# Pit road: box lane and fast lane, the line between them, and the stalls.
+		_quad("asphalt", _pt(i, pwd + 0.25), _pt(i, bd - 0.3), _pt(i2, pwd + 0.25), _pt(i2, bd - 0.3), road, up, up)
+		_quad("line", _pt(i, pl - 0.08) + up * 0.02, _pt(i, pl + 0.08) + up * 0.02, _pt(i2, pl - 0.08) + up * 0.02, _pt(i2, pl + 0.08) + up * 0.02, Color(0.95, 0.95, 0.95), up, up)
+		if i % 20 == 0:
+			# Stall lines across the box lane (every 10 m).
+			var f := fwd[i] * 0.12
+			_quad("line", _pt(i, pwd + 0.3) - f + up * 0.02, _pt(i, pl - 0.1) - f + up * 0.02, _pt(i, pwd + 0.3) + f + up * 0.02, _pt(i, pl - 0.1) + f + up * 0.02, Color(1.0, 0.85, 0.1), up, up)
+	else:
+		# The entry and exit lanes: grass inside, a lane of asphalt.
+		_quad("grass", _pt(i, iw), _pt(i, pl - 1.6), _pt(i2, iw), _pt(i2, pl - 1.6), grass * 0.9, up, up)
+		_quad("asphalt", _pt(i, pl - 1.6), _pt(i, bd - 0.3 if barrier else ae), _pt(i2, pl - 1.6), _pt(i2, bd - 0.3 if barrier else ae), road, up, up)
+	if barrier:
+		# Asphalt between the barrier and the apron, then the barrier itself:
+		# concrete with a SAFER-style face and a red and white top.
+		_quad("asphalt", _pt(i, bd + 0.3), _pt(i, ae), _pt(i2, bd + 0.3), _pt(i2, ae), road, up, up)
+		var b0 := _pt(i, bd)
+		var b1 := _pt(i2, bd)
+		var h := 1.0
+		var r0 := right[i] * 0.3
+		var r1 := right[i2] * 0.3
+		_quad("concrete", b0 + r0 + up * h, b0 + r0, b1 + r1 + up * h, b1 + r1, Color(0.92, 0.92, 0.92))
+		_quad("concrete", b0 - r0, b0 - r0 + up * h, b1 - r1, b1 - r1 + up * h, Color(0.86, 0.86, 0.86))
+		var top_col := Color(0.85, 0.12, 0.1) if (i / 6) % 2 == 0 else Color(0.97, 0.97, 0.97)
+		_quad("line", b0 - r0 + up * h, b0 + r0 + up * h, b1 - r1 + up * h, b1 + r1 + up * h, top_col, up, up)
+	elif not zone:
+		_quad("asphalt", _pt(i, bd - 0.3), _pt(i, ae), _pt(i2, bd - 0.3), _pt(i2, ae), road, up, up)
+
+
+## The ends of pit road: the impact attenuator on the barrier's nose, the
+## commitment line (cross it and you're coming in), the blend line out, and the
+## pit road light.
+var pit_light: MeshInstance3D
+var _pit_light_mat: StandardMaterial3D
+
+
+func _build_pit_ends() -> void:
+	var bd := pit_barrier_d()
+	var ae := apron_edge()
+	var up := Vector3.UP
+	var nose_s := pit_in_s() - BARRIER_LEAD
+	var basis := Basis.looking_at(fwd_at(nose_s), up)
+	# The attenuator: yellow and black, in front of the barrier's nose.
+	for k in 4:
+		var p := surface_point(nose_s - 1.0 - k * 1.1, bd) + up * 0.55
+		_box("scenery", p, Vector3(0.9, 1.1, 1.0), basis, Color(1.0, 0.82, 0.1) if k % 2 == 0 else Color(0.08, 0.08, 0.08))
+	# Commitment line across the apron, where the entry lane leaves it.
+	var cs := pit_in_s() - PIT_LANE_EXT + 10.0
+	for k in 3:
+		var a := surface_point(cs + k * 0.2, ae) + up * 0.04
+		var b := surface_point(cs + k * 0.2, -width * 0.5) + up * 0.04
+		var c2 := surface_point(cs + k * 0.2 + 0.2, ae) + up * 0.04
+		var d2 := surface_point(cs + k * 0.2 + 0.2, -width * 0.5) + up * 0.04
+		_quad("line", a, b, c2, d2, Color(1.0, 0.85, 0.1) if k != 1 else Color(0.1, 0.1, 0.1))
+	# Blend line: down the apron from the exit, keep below it until it ends.
+	var bl0 := pit_out_s() + BARRIER_TAIL
+	var steps := int(PIT_LANE_EXT / 2.0)
+	for k in steps:
+		var s0 := bl0 + k * 2.0
+		_quad("line", surface_point(s0, ae + 1.0) + up * 0.04, surface_point(s0, ae + 1.25) + up * 0.04,
+			surface_point(s0 + 2.0, ae + 1.0) + up * 0.04, surface_point(s0 + 2.0, ae + 1.25) + up * 0.04, Color(1.0, 0.85, 0.1))
+	# The pit road light: a pole at the entry, green when pit road is open.
+	var lp := surface_point(cs, bd - 1.0)
+	_box("scenery", lp + up * 2.2, Vector3(0.25, 4.4, 0.25), basis, Color(0.35, 0.35, 0.38))
+	pit_light = MeshInstance3D.new()
+	var bm := BoxMesh.new()
+	bm.size = Vector3(1.4, 0.7, 0.4)
+	pit_light.mesh = bm
+	_pit_light_mat = StandardMaterial3D.new()
+	_pit_light_mat.emission_enabled = true
+	pit_light.material_override = _pit_light_mat
+	pit_light.position = lp + up * 4.6
+	pit_light.basis = basis
+	add_child(pit_light)
+	set_pit_open(true)
+
+
+## Pit road open (green) or closed (red), on the light at the entry.
+func set_pit_open(open: bool) -> void:
+	if _pit_light_mat == null:
+		return
+	var col := Color(0.1, 1.0, 0.25) if open else Color(1.0, 0.12, 0.08)
+	_pit_light_mat.albedo_color = col
+	_pit_light_mat.emission = col
+	_pit_light_mat.emission_energy_multiplier = 2.5
 
 
 func _box(kind: String, center: Vector3, size: Vector3, basis: Basis, col: Color) -> void:
@@ -914,9 +1059,19 @@ func _build_scenery() -> void:
 		var count := 220
 		mm.instance_count = count
 		for k in count:
-			var idx := rng.randi() % n
-			var off := hw + 45.0 + rng.randf() * 260.0
-			var p := pos[idx] + right[idx] * off
+			# Road courses fold back on themselves: a spot outside one stretch can sit
+			# on another, so try a few spots and keep the first that is clear of all of it.
+			var p := Vector3.ZERO
+			var ok := false
+			for _try in 8:
+				var idx := rng.randi() % n
+				var off := hw + 45.0 + rng.randf() * 260.0
+				p = pos[idx] + right[idx] * off
+				if _clear_of_track(p, hw + 30.0):
+					ok = true
+					break
+			if not ok:
+				p = Vector3(0, -500, 0) # nowhere to put it: bury it
 			var sc := 0.7 + rng.randf() * 0.8
 			var b := Basis(Vector3.UP, rng.randf() * TAU).scaled(Vector3(sc, sc * rng.randf_range(0.85, 1.2), sc))
 			mm.set_instance_transform(k, Transform3D(b, p))

@@ -289,7 +289,7 @@ func tick(delta: float) -> void:
 			c.want_pit = true
 			c.pit_plan = "4"
 		elif self_driven and not c.want_pit and c.pit_state == 0 and control and control.enabled and not c.out and not c.finished \
-				and control.flag == control.Flag.GREEN and _fuel_short(c):
+				and (control.flag == control.Flag.GREEN or (control.weather_hold and control.pit_open)) and _fuel_short(c):
 			c.want_pit = true # a green-flag stop before the tank runs dry
 			c.pit_plan = "4" if laps - c.lap() > 8 else "F"
 		elif c.ai and not c.is_player and c.pit_state == 0 and control and control.enabled and not c.out and maxf(maxf(c.tyre_wear4[0], c.tyre_wear4[1]), maxf(c.tyre_wear4[2], c.tyre_wear4[3])) > 0.72 and laps - control.leader().lap() > 2:
