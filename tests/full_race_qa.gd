@@ -57,6 +57,7 @@ func _run() -> void:
 	var ctl: Node = race.control
 	var sim := 0.0
 	var yellow_t := 0.0
+	var rain_caution := false
 	var longest_yellow := 0.0
 	var rain_hold := 0.0
 	var cautions := 0
@@ -80,9 +81,13 @@ func _run() -> void:
 		if yellow and not was_yellow:
 			cautions += 1
 			yellow_t = 0.0
+			rain_caution = false
 		if yellow and ctl.weather_hold:
-			rain_hold += 1.0 / 60.0 # rain: held under yellow until it's dry (by design)
-			yellow_t = 0.0 # (what counts is getting going again once it's dry)
+			rain_caution = true
+		if yellow and rain_caution:
+			# Rain: held under yellow until it's dry, then a lap or two to line up
+			# (by design).
+			rain_hold += 1.0 / 60.0
 		elif yellow:
 			yellow_t += 1.0 / 60.0
 			longest_yellow = max(longest_yellow, yellow_t)
@@ -105,7 +110,16 @@ func _run() -> void:
 	var p: Node3D = race.player
 	print("   sim %.0f s, %d cautions (longest %.0f s, %.0f s held for rain), %d pit calls, place %d of %d" % [sim, cautions, longest_yellow, rain_hold, pit_calls, race.position_of(p), race.cars.size()])
 	_check(main.state == main.State.RESULTS, "the race reaches the results")
-	_check(race.cars.all(func(c): return c.finished or c.out), "every car finished or is out")
+	# (The results come up a few seconds after you finish; the rest of the field
+	# is still running to the line behind them.)
+	var wait := 0
+	while main.state == main.State.RESULTS and not race.cars.all(func(c): return c.finished or c.out) and wait < 60 * 120:
+		await physics_frame
+		wait += 1
+	_check(race.cars.all(func(c): return c.finished or c.out), "every car finished or is out (the last %.0f s after the results)" % (wait / 60.0))
+	for c in race.cars:
+		if not (c.finished or c.out):
+			print("   not finished: #%s lap %d of %d, pit state %d, fuel %.1f, %.0f m/s, at %s, d %.1f" % [c.team.num, c.lap(), race.laps, c.pit_state, c.fuel, c.speed(), race.track.place_name(c.s()), c.d])
 	var places: Array = race.order.map(func(c): return race.position_of(c))
 	_check(places == range(1, race.cars.size() + 1), "positions are 1..%d with no gaps or repeats" % race.cars.size())
 	_check(not bad_numbers, "no NaNs, nothing thrown off the world")
