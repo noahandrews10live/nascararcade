@@ -378,7 +378,7 @@ func _update_tyres_after(delta: float, travelled: float) -> void:
 		# Wets cook themselves on a dry track; water cools any tyre.
 		var heat_mult: float = 1.0 + 2.0 * (1.0 - _wet) if tyre_compound == "wet" else 1.0
 		# (Heat per unit of slip work, calibrated for racing-slick grip.)
-		t += ((p_slip * (0.000074 if i < 2 else 0.00012) + p_roll * 0.00012) * heat_mult - (t - amb) * cool * (1.0 + 2.0 * _wet)) * delta
+		t += ((p_slip * (0.000074 if i < 2 else 0.00012) + p_roll * 0.00023) * heat_mult - (t - amb) * cool * (1.0 + 2.0 * _wet)) * delta
 		tyre_temp[i] = clamp(t, amb - 5.0, 260.0)
 		# A blowout comes from a carcass cooked over a run, not a corner's flash of heat.
 		carcass_temp[i] += (tyre_temp[i] - carcass_temp[i]) * min(delta / 20.0, 1.0)
