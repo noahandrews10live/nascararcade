@@ -284,9 +284,14 @@ func tick(delta: float) -> void:
 			wear.scuff(c)
 		if c.wall_hit > 9.0 or (c.tumbling and randf() < delta * 3.0):
 			spawn_debris(c.s(), c.d, 1 + int(c.wall_hit > 15.0))
+		var self_driven: bool = c.ai and (not c.is_player or c.autopilot_forced)
 		if c.has_flat() and c.ai and not c.is_player and c.pit_state == 0 and control and control.enabled and not c.out:
 			c.want_pit = true
 			c.pit_plan = "4"
+		elif self_driven and not c.want_pit and c.pit_state == 0 and control and control.enabled and not c.out and not c.finished \
+				and control.flag == control.Flag.GREEN and _fuel_short(c):
+			c.want_pit = true # a green-flag stop before the tank runs dry
+			c.pit_plan = "4" if laps - c.lap() > 8 else "F"
 		elif c.ai and not c.is_player and c.pit_state == 0 and control and control.enabled and not c.out and maxf(maxf(c.tyre_wear4[0], c.tyre_wear4[1]), maxf(c.tyre_wear4[2], c.tyre_wear4[3])) > 0.72 and laps - control.leader().lap() > 2:
 			c.want_pit = true # green-flag stop before the tyres go to the cords
 			c.pit_plan = "4"
@@ -1168,6 +1173,15 @@ func _debris_tick(delta: float) -> void:
 				if dd.age > oldest.age:
 					oldest = dd
 			control.throw_caution("DEBRIS", null, track.place_name(float(oldest.s)))
+
+
+## Under two laps of fuel left (at full throttle) and more laps than that to go.
+func _fuel_short(c: Node3D) -> bool:
+	var per_lap: float = track.length / 1000.0 * 0.62 * c.burn_scale
+	if per_lap <= 0.0:
+		return false
+	var fuel_laps: float = c.fuel / per_lap
+	return fuel_laps < 2.0 and float(laps - c.lap()) > fuel_laps
 
 
 func _on_tyre_failed(c: Node3D, wheel: int, kind: String) -> void:
