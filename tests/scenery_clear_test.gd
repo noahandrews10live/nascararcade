@@ -162,7 +162,10 @@ func _run() -> void:
 					var a: Vector3 = mi.global_transform * verts[vi]
 					var b: Vector3 = mi.global_transform * verts[vi + 1]
 					var c: Vector3 = mi.global_transform * verts[vi + 2]
-					var m: int = clampi(int(max(a.distance_to(b), a.distance_to(c)) / 4.0), 1, 80)
+					var edge: float = max(a.distance_to(b), a.distance_to(c))
+					if edge < 45.0 and _where_fast(t, a).is_empty() and _where_fast(t, b).is_empty() and _where_fast(t, c).is_empty():
+						continue # nowhere near the track
+					var m: int = clampi(int(edge / 5.0), 1, 60)
 					for u in m + 1:
 						for v in m + 1 - u:
 							pts.append(a + (b - a) * (float(u) / m) + (c - a) * (float(v) / m))
