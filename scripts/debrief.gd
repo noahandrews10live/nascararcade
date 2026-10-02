@@ -56,6 +56,18 @@ static func coach(sm: Dictionary, cx: Dictionary) -> Array:
 	var my_best: float = float(cx.get("my_best", 0.0))
 	var win_best: float = float(cx.get("winner_best", 0.0))
 	var avg_lap: float = float(cx.get("avg_lap", 30.0))
+	# A run of races, not just this one: offer a better-matched field first.
+	var diff: int = int(cx.get("difficulty", 1))
+	var streak: String = String(cx.get("streak", ""))
+	var offered := false
+	if streak == "struggling" and diff > 0:
+		out.append({"text": "Three tough races in a row at this level. A notch easier makes it a race again (you can always go back).",
+			"action": {"kind": "difficulty", "delta": -1, "label": "MAKE THE FIELD A NOTCH EASIER"}})
+		offered = true
+	elif streak == "dominating" and diff < 2:
+		out.append({"text": "Three wins in a row: you've outgrown this field. Try a tougher one?",
+			"action": {"kind": "difficulty", "delta": 1, "label": "MAKE THE FIELD TOUGHER"}})
+		offered = true
 	# Incidents: where they happened most.
 	var inc := int(sm.get("wall_hits", 0)) + int(sm.get("spins", 0))
 	if inc >= 2 or int(g.get("INCIDENTS", 0)) <= -3:
@@ -69,7 +81,7 @@ static func coach(sm: Dictionary, cx: Dictionary) -> Array:
 			if spots[k] > wn:
 				wn = spots[k]
 				worst = k
-		var t := "Incidents cost you %d places (%d wall hits, %d spins)." % [max(-int(g.get("INCIDENTS", 0)), 0), int(sm.get("wall_hits", 0)), int(sm.get("spins", 0))]
+		var t := "Incidents cost you %s (%s, %s)." % [_n(max(-int(g.get("INCIDENTS", 0)), 0), "place"), _n(int(sm.get("wall_hits", 0)), "wall hit"), _n(int(sm.get("spins", 0)), "spin")]
 		if worst != "" and wn >= 2:
 			t += " %d were in %s: lift a little earlier going in and wait to turn." % [wn, worst]
 		var tip := {"text": t}
@@ -120,10 +132,10 @@ static func coach(sm: Dictionary, cx: Dictionary) -> Array:
 			if best_area != "":
 				out.append({"text": "The winner's best lap was %.2f s faster. Here, the next %s level is worth about %.2f s a lap." % [gap, best_area.to_upper(), best_gain * avg_lap],
 					"action": {"kind": "rnd", "label": "OPEN THE R&D SHOP"}})
-		elif int(cx.get("difficulty", 1)) > 0 and fin > int(field * 0.6):
+		elif not offered and int(cx.get("difficulty", 1)) > 0 and fin > int(field * 0.6):
 			out.append({"text": "The leaders were %.2f s a lap faster. Want a closer race? The field can be a notch easier." % gap,
 				"action": {"kind": "difficulty", "delta": -1, "label": "MAKE THE FIELD A NOTCH EASIER"}})
-	elif fin == 1 and float(cx.get("margin", 0.0)) > 3.0 and int(cx.get("difficulty", 1)) < 2 and not cx.get("career", false):
+	elif not offered and fin == 1 and float(cx.get("margin", 0.0)) > 3.0 and int(cx.get("difficulty", 1)) < 2 and not cx.get("career", false):
 		out.append({"text": "You won by %.1f s. Ready for a tougher field?" % float(cx.margin),
 			"action": {"kind": "difficulty", "delta": 1, "label": "MAKE THE FIELD TOUGHER"}})
 	# Something to feel good about.
@@ -145,13 +157,20 @@ func _clear() -> void:
 
 func _lab(text: String, sz: int, col: Color, pos: Vector2, w := 0.0, align := HORIZONTAL_ALIGNMENT_LEFT) -> Label:
 	var l := Game.make_label(text, sz, col, 4)
-	l.position = pos
 	l.horizontal_alignment = align
 	if w > 0.0:
-		l.size = Vector2(w, 0)
+		# Wrap, then size, then place: in any other order the label keeps its
+		# one-line width.
 		l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		l.size = Vector2(w, 0)
+	l.position = pos
 	add_child(l)
 	return l
+
+
+## "1 spin", "3 spins".
+static func _n(k: int, word: String) -> String:
+	return "%d %s%s" % [k, word, "" if k == 1 else "s"]
 
 
 func _box(r: Rect2, col: Color) -> void:
@@ -205,13 +224,14 @@ func _build() -> void:
 	var st: int = int(s.get("start", 0))
 	var fin: int = int(s.get("finish", 0))
 	var head := "FINISHED %s" % Game.ordinal(fin) if fin > 0 else "RACE DEBRIEF"
-	if st > 0 and fin > 0 and st != fin:
-		head += "   (STARTED %s, %s%d)" % [Game.ordinal(st), "+" if st > fin else "", st - fin]
-	_lab("RACE DEBRIEF", 12, CYAN, Vector2(28, 14))
+	var sub := "RACE DEBRIEF"
+	if st > 0 and fin > 0:
+		sub = "RACE DEBRIEF  -  STARTED %s%s" % [Game.ordinal(st), "" if st == fin else ", %s%d PLACES" % ["+" if st > fin else "", st - fin]]
+	_lab(sub, 12, CYAN, Vector2(28, 14))
 	_lab(head, 24, GOLD, Vector2(28, 28))
 	# Page tabs.
 	for i in PAGES.size():
-		_lab(("> " if i == page else "") + PAGES[i], 11, GOLD if i == page else DIM, Vector2(360 + 0.0, 16 + i * 14))
+		_lab(("> " if i == page else "") + PAGES[i], 11, GOLD if i == page else DIM, Vector2(400, 16 + i * 14))
 	match page:
 		0:
 			_page_race()
@@ -245,15 +265,15 @@ func _page_race() -> void:
 		var col := GOOD if v > 0 else (BAD if v < 0 else DIM)
 		_lab(("+%d" % v) if v > 0 else str(v), 15, col, Vector2(560, y - 1), 50, HORIZONTAL_ALIGNMENT_RIGHT)
 		# A bar either side of a centre line.
-		var bw: float = clamp(abs(v) * 7.0, 0.0, 70.0)
-		_box(Rect2(470 if v >= 0 else 470 - bw, y + 4, bw, 9), col)
-		_box(Rect2(469, y + 2, 2, 13), DIM)
+		var bw: float = clamp(abs(v) * 5.0, 0.0, 40.0)
+		_box(Rect2(520 if v >= 0 else 520 - bw, y + 4, bw, 9), col)
+		_box(Rect2(519, y + 2, 2, 13), DIM)
 		y += 24.0
 	y += 6.0
 	var lines: Array = [
 		"Passed %d cars on track, passed by %d" % [int(s.get("passes_made", 0)), int(s.get("passes_lost", 0))],
-		"Led %d laps" % int(s.get("led", 0)),
-		"%d pit stops, %d cautions" % [s.get("pit_stops", []).size(), int(s.get("cautions", 0))],
+		"Led %s" % _n(int(s.get("led", 0)), "lap"),
+		"%s, %s" % [_n(s.get("pit_stops", []).size(), "pit stop"), _n(int(s.get("cautions", 0)), "caution")],
 	]
 	for l in lines:
 		_lab(l, 12, Color.WHITE, Vector2(376, y), 240)
@@ -303,8 +323,8 @@ func _page_pace() -> void:
 	if run.size() >= 6:
 		var a: float = (float(run[1]) + float(run[2]) + float(run[3])) / 3.0
 		var b: float = (float(run[-1]) + float(run[-2]) + float(run[-3])) / 3.0
-		_lab("Over your longest run (%d laps) you lost %.2f s a lap" % [run.size(), b - a], 12, Color.WHITE, Vector2(376, y2), 236)
-		y2 += 36.0
+		var rl := _lab("Over your longest run (%d laps) you lost %.2f s a lap" % [run.size(), b - a], 12, Color.WHITE, Vector2(376, y2), 236)
+		y2 += rl.get_minimum_size().y + 10.0
 	var pc: Array = s.get("peak_carcass", [0, 0, 0, 0])
 	var names := ["LF", "RF", "LR", "RR"]
 	_lab("HOTTEST EACH TYRE GOT", 11, DIM, Vector2(376, y2))
@@ -326,7 +346,7 @@ func _page_pace() -> void:
 	_lab("TIGHT", 10, DIM, Vector2(28, y + 20))
 	_lab("NEUTRAL", 10, DIM, Vector2(156, y + 20))
 	_lab("LOOSE", 10, DIM, Vector2(296, y + 20))
-	var hl: Array = ["%d wall hits, %d spins" % [int(s.get("wall_hits", 0)), int(s.get("spins", 0))], "%d lock-ups" % int(s.get("lockups", 0))]
+	var hl: Array = ["%s, %s" % [_n(int(s.get("wall_hits", 0)), "wall hit"), _n(int(s.get("spins", 0)), "spin")], _n(int(s.get("lockups", 0)), "lock-up")]
 	var cc: Dictionary = s.get("contacts", {})
 	if not cc.is_empty():
 		var parts: Array = []

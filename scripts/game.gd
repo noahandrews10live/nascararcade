@@ -408,8 +408,130 @@ func career_race(pos: int, field: int, laps_led: int, won_pole: bool) -> String:
 	return career.last
 
 
+## Milestones: the firsts and the big numbers of a career, each celebrated once
+## (with a cash prize from the team owner). Checked after every career race.
+const MILESTONES := [
+	{"id": "first_start", "name": "FIRST START", "desc": "YOU TOOK THE GREEN FLAG IN THE BIG TIME", "cash": 0},
+	{"id": "top10", "name": "FIRST TOP 10", "desc": "A TOP-10 FINISH", "cash": 50000},
+	{"id": "led", "name": "LED A LAP", "desc": "YOUR NAME AT THE TOP OF THE PYLON", "cash": 25000},
+	{"id": "top5", "name": "FIRST TOP 5", "desc": "A TOP-5 FINISH", "cash": 100000},
+	{"id": "podium", "name": "FIRST PODIUM", "desc": "A TOP-3 FINISH", "cash": 150000},
+	{"id": "pole", "name": "FIRST POLE", "desc": "FASTEST IN QUALIFYING", "cash": 75000},
+	{"id": "win", "name": "FIRST WIN", "desc": "VICTORY LANE!", "cash": 250000},
+	{"id": "starts10", "name": "10 STARTS", "desc": "A REGULAR IN THE GARAGE", "cash": 50000},
+	{"id": "wins5", "name": "5 WINS", "desc": "A WINNER, AGAIN AND AGAIN", "cash": 500000},
+	{"id": "led100", "name": "100 LAPS LED", "desc": "OUT FRONT FOR 100 LAPS IN ALL", "cash": 200000},
+	{"id": "goal", "name": "SEASON GOAL", "desc": "YOU MET THE OWNER'S TARGET FOR THE SEASON", "cash": 0},
+	{"id": "title", "name": "CHAMPION", "desc": "THE SEASON CHAMPIONSHIP", "cash": 1000000},
+]
+
+
+func milestone(id: String) -> Dictionary:
+	for m in MILESTONES:
+		if m.id == id:
+			return m
+	return {}
+
+
+## Marks the milestones this race reached (after career_race has counted it);
+## returns the new ones, with their cash already in the bank.
+func check_milestones(pos: int, won_pole: bool, laps_led: int) -> Array:
+	if career.is_empty():
+		return []
+	var st: Dictionary = career.stats
+	var reached := {
+		"first_start": int(st.starts) >= 1, "top10": pos <= 10, "led": laps_led > 0,
+		"top5": pos <= 5, "podium": pos <= 3, "pole": won_pole, "win": pos == 1,
+		"starts10": int(st.starts) >= 10, "wins5": int(st.wins) >= 5, "led100": int(st.laps_led) >= 100,
+	}
+	return _award_milestones(reached)
+
+
+func _award_milestones(reached: Dictionary) -> Array:
+	if not career.has("milestones"):
+		career.milestones = []
+	var got: Array = []
+	for m in MILESTONES:
+		if reached.get(m.id, false) and not career.milestones.has(m.id):
+			career.milestones.append(m.id)
+			career.money = int(career.money) + int(m.cash)
+			got.append(m)
+	if not got.is_empty():
+		save_career()
+	return got
+
+
+## The owner's target for this season: where in the points to finish. Set once a
+## season, from last season's finish (four places better) or, in the first
+## season, from your reputation.
+func season_goal() -> int:
+	if career.is_empty():
+		return 0
+	var field: int = max(standings().size(), field_size())
+	if int(career.get("goal_year", 0)) != int(career.year):
+		var goal: int
+		var hist: Array = career.get("history", [])
+		if not hist.is_empty() and int(hist[-1].pos) > 0:
+			goal = int(hist[-1].pos) - 4
+		else:
+			var rep: int = int(career.rep)
+			goal = int(round(field * (0.6 if rep < 20 else (0.45 if rep < 40 else (0.3 if rep < 60 else (0.15 if rep < 80 else 0.0))))))
+		career.goal = clampi(goal, 1, max(field, 1))
+		career.goal_year = int(career.year)
+		save_career()
+	return int(career.goal)
+
+
+## How the season goal is going: "ON TARGET" / "2 PLACES TO GO".
+func season_goal_text(pos: int) -> String:
+	var g := season_goal()
+	if g <= 0:
+		return ""
+	var target := "WIN THE CHAMPIONSHIP" if g == 1 else "FINISH TOP %d IN POINTS" % g
+	if pos <= 0:
+		return target
+	if pos <= g:
+		return "%s  -  %s: ON TARGET" % [target, ordinal(pos)]
+	return "%s  -  %s: %d %s TO GO" % [target, ordinal(pos), pos - g, "PLACE" if pos - g == 1 else "PLACES"]
+
+
+## Your last few finishes and how big the field was, any mode (for the debrief's
+## "try an easier/harder field" and the weekend preview's form).
+var recent: Array = [] # [{track, pos, field, difficulty}]
+
+
+func add_recent(track_idx: int, pos: int, field: int) -> void:
+	recent.append({"track": track_idx, "pos": pos, "field": field, "difficulty": int(settings.difficulty)})
+	while recent.size() > 10:
+		recent.pop_front()
+	save_settings()
+
+
+## The last three finishes at this difficulty, back to front: a run of struggles
+## (all in the back quarter) or of domination (all wins) - "" otherwise.
+func recent_streak() -> String:
+	var same: Array = recent.filter(func(r): return int(r.difficulty) == int(settings.difficulty))
+	if same.size() < 3:
+		return ""
+	var last3: Array = same.slice(same.size() - 3)
+	if last3.all(func(r): return int(r.pos) == 1):
+		return "dominating"
+	if last3.all(func(r): return float(r.pos) > float(r.field) * 0.75):
+		return "struggling"
+	return ""
+
+
 func career_season_end(final_pos: int, points: int, wins: int) -> void:
-	career.history.append({"year": career.year, "pos": final_pos, "points": points, "wins": wins})
+	var goal := season_goal()
+	career.history.append({"year": career.year, "pos": final_pos, "points": points, "wins": wins, "goal": goal})
+	career.season_end = {"pos": final_pos, "goal": goal, "met": final_pos > 0 and final_pos <= goal, "bonus": 0}
+	if final_pos > 0 and final_pos <= goal:
+		# The owner's bonus for meeting the target, bigger for a tougher one.
+		var bonus: int = 250000 + 750000 * int(goal <= 5) + 1000000 * int(goal == 1)
+		career.money = int(career.money) + bonus
+		career.rep = clampi(int(career.rep) + 8, 0, 100)
+		career.season_end.bonus = bonus
+	career.season_end.milestones = _award_milestones({"goal": career.season_end.met, "title": final_pos == 1}).map(func(m): return m.id)
 	if final_pos == 1:
 		career.stats.titles += 1
 	career.year = int(career.year) + 1
@@ -847,6 +969,7 @@ func load_settings() -> void:
 		for k in setup:
 			setup[k] = cf.get_value("setup", k, setup[k])
 		track_setups = cf.get_value("setup", "per_track", {})
+		recent = cf.get_value("player", "recent", [])
 		modern = cf.get_value("video", "modern_look", modern) and modern_supported
 		scanlines = cf.get_value("video", "scanlines", scanlines)
 		quality = cf.get_value("video", "quality", quality)
@@ -968,6 +1091,7 @@ func save_settings() -> void:
 	for k in setup:
 		cf.set_value("setup", k, setup[k])
 	cf.set_value("setup", "per_track", track_setups)
+	cf.set_value("player", "recent", recent)
 	cf.set_value("video", "modern_look", modern)
 	cf.set_value("video", "scanlines", scanlines)
 	cf.set_value("video", "quality", quality)
@@ -1111,6 +1235,24 @@ func _split_seasons() -> void:
 		out.set_value("season", "data", s)
 		out.save(CAREER_SEASON_PATH)
 	DirAccess.remove_absolute(ProjectSettings.globalize_path(SEASON_PATH))
+
+
+## The next race of a saved career or season, without switching to it:
+## {round, of, track} or {} (for the home screen's one-tap NEXT RACE).
+func peek_next(career_season: bool) -> Dictionary:
+	if career_season and career.is_empty():
+		return {}
+	var cf := ConfigFile.new()
+	if cf.load(CAREER_SEASON_PATH if career_season else SEASON_PATH) != OK:
+		return {}
+	var sn: Dictionary = cf.get_value("season", "data", {})
+	if sn.is_empty() or not sn.has("schedule"):
+		return {}
+	var n: int = sn.schedule.size()
+	var r: int = int(sn.get("round", 0))
+	if r >= n or n == 0:
+		return {}
+	return {"round": r + 1, "of": n, "track": int(sn.schedule[r])}
 
 
 func save_season() -> void:

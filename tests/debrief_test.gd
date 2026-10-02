@@ -95,9 +95,51 @@ func _coach_cases() -> void:
 	_check(t.size() >= 1 and t.size() <= 4, "always something to say, never more than four")
 
 
+## SHOTS: the three pages from a made-up 40-lap race (a real race is too slow
+## to run with a software renderer).
+func _shots_only() -> void:
+	var laps: Array = []
+	var pos := 18
+	for i in 40:
+		pos = clampi(pos + [-1, -1, 0, 1, -2, 0][i % 6] + (6 if i == 22 else 0) - (3 if i == 30 else 0), 1, 24)
+		laps.append({"lap": i + 1, "pos": pos, "time": 15.4 + 0.012 * (i % 20) + (3.0 if i == 22 else 0.0), "gap": 0.2 * pos,
+			"grip": 1.0 - 0.004 * (i % 20), "wear": 0.01 * (i % 20), "fuel": 70.0 - i, "flag": "Y" if i in [12, 13, 14] else "G",
+			"temps": [95, 118, 92, 112], "pit": i == 13})
+	var sm := {"start": 18, "finish": 9, "laps": laps,
+		"events": [{"lap": 1, "kind": "start", "text": "Started 18th", "where": "", "pos": 18},
+			{"lap": 12, "kind": "caution", "text": "Caution: #24 GORDON SPUN IN TURN 2", "where": "TURN 2", "pos": 14},
+			{"lap": 14, "kind": "pit", "text": "Pit stop: 14th to 11th", "where": "", "pos": 11},
+			{"lap": 23, "kind": "contact", "text": "#7 ran into you in TURN 3", "where": "TURN 3", "pos": 10},
+			{"lap": 23, "kind": "spin", "text": "Spun in TURN 3", "where": "TURN 3", "pos": 16, "why": "CONTACT WITH #7"},
+			{"lap": 40, "kind": "finish", "text": "Finished 9th", "where": "", "pos": 9}],
+		"gained": {"START": 3, "ON TRACK": 9, "PIT STOPS": 3, "CAUTIONS": 0, "INCIDENTS": -6},
+		"passes_made": 14, "passes_lost": 5, "wall_hits": 0, "spins": 1, "lockups": 2, "contacts": {"7": 2, "11": 1},
+		"peak_temp": [101, 131, 96, 120], "peak_carcass": [98, 150, 92, 124], "balance": 0.07, "pit_stops": [{"lap": 14, "before": 14, "after": 11}],
+		"cautions": 1, "led": 0, "green_laps": laps.filter(func(l): return l.flag == "G" and not l.pit).map(func(l): return l.time)}
+	var cx := {"field": 24, "my_best": 15.41, "winner_best": 15.33, "fastest": 15.31, "fastest_by": "#24", "margin": 1.2, "avg_lap": 15.55,
+		"difficulty": 1, "assist_level": 0.5, "career": true, "rnd_gain": {"chassis": 0.006, "engine": 0.0015}}
+	main._clear_screen()
+	main.hud.visible = false
+	var d: Control = load("res://scripts/debrief.gd").new()
+	main.screen.add_child(d)
+	d.setup(sm, cx)
+	await _frames(5)
+	await _shot("debrief_1")
+	d.turn(1)
+	await _frames(3)
+	await _shot("debrief_2")
+	d.turn(1)
+	await _frames(3)
+	await _shot("debrief_3")
+	quit(0)
+
+
 func _run() -> void:
 	game = root.get_node("Game")
 	await _frames(20)
+	if OS.get_environment("SHOTS") != "":
+		await _shots_only()
+		return
 	_coach_cases()
 	main.clear_checkpoint()
 	game.settings.weather = 0

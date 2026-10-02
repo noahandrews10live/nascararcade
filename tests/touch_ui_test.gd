@@ -147,7 +147,11 @@ func _run() -> void:
 	await _frames(4)
 	game.settings["auto_gas"] = 1
 	seed(22) # QUICK RACE picks a random track: make it the same one every run
-	await _tap_frame((main._tiles[0][0] as Rect2).get_center())
+	var quick_i := 0
+	for i in main._modes().size():
+		if main._modes()[i][2] == "quick":
+			quick_i = i
+	await _tap_frame((main._tiles[quick_i][0] as Rect2).get_center())
 	print("   quick race at ", game.tracks[game.selected_track].name)
 	_check(main.state == main.State.COUNTDOWN, "the QUICK RACE tile goes straight to the grid")
 	_check(main.tutorial.active and main.tutorial.visible, "the first race on a phone teaches")

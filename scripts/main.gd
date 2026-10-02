@@ -137,6 +137,18 @@ func _modes() -> Array:
 	var ck := resume_info()
 	if not ck.is_empty():
 		list = [["RESUME RACE", "LAP %d OF %d AT %s, RUNNING %s. CARRY ON WHERE YOU LEFT OFF." % [ck.lap, ck.laps, ck.track_name, Game.ordinal(ck.place)], "resume"]] + list
+	else:
+		# One tap to the next race: your career's, your season's, or the last
+		# race again.
+		var nx := Game.peek_next(true)
+		if not nx.is_empty():
+			list = [["NEXT: CAREER RACE %d" % nx.round, "RACE %d OF %d AT %s, YEAR %d. STRAIGHT TO THE WEEKEND." % [nx.round, nx.of, Game.tracks[nx.track].name, int(Game.career.year)], "career_next"]] + list
+		else:
+			nx = Game.peek_next(false)
+			if not nx.is_empty():
+				list = [["NEXT: SEASON RACE %d" % nx.round, "RACE %d OF %d AT %s." % [nx.round, nx.of, Game.tracks[nx.track].name], "season_next"]] + list
+			elif not Game.recent.is_empty() and int(Game.recent[-1].track) < Game.tracks.size():
+				list = [["RACE AGAIN: %s" % Game.tracks[int(Game.recent[-1].track)].short, "SAME TRACK, SAME SETTINGS: YOU FINISHED %s LAST TIME." % Game.ordinal(int(Game.recent[-1].pos)), "again"]] + list
 	return list
 
 
@@ -1032,6 +1044,21 @@ func _start_mode(id: String) -> void:
 	match id:
 		"resume":
 			resume_race()
+		"career_next":
+			mode = "career"
+			Game.use_season(true)
+			_enter_career_hub()
+			_enter_preview()
+		"season_next":
+			mode = "season"
+			Game.use_season(false)
+			_enter_season_hub()
+			_start_weekend()
+		"again":
+			mode = "race"
+			session = "race"
+			_use_track(int(Game.recent[-1].track))
+			_start_weekend()
 		"quick":
 			_quick_race()
 		"arcade", "race":
@@ -1452,6 +1479,8 @@ func _on_finished(car: Node3D, place: int) -> void:
 		clear_checkpoint()
 		if race_log:
 			race_log.finish(place)
+	if session == "race" and car == race.player and mode != "2p" and mode != "arcade" and mode != "online" and mode != "challenge":
+		Game.add_recent(Game.selected_track, place, race.cars.size())
 	if session == "race" and car == race.player and mode != "2p":
 		last_award = Game.award_race(place, race.cars.size(), race.laps, car.total_damage() < 0.08)
 		cloud.push_profile()
@@ -1606,7 +1635,12 @@ func _unhandled_input(event: InputEvent) -> void:
 				_start_session()
 		State.STANDINGS:
 			if (event.is_action_pressed("start") or event.is_action_pressed("back")) and state_time > 0.5:
-				if Game.season.is_empty():
+				var ms: Array = Game.career.get("season_end", {}).get("milestones", []) if mode == "career" else []
+				if not ms.is_empty():
+					Game.career.season_end.milestones = []
+					Game.save_career()
+					_enter_milestones(ms.map(func(id): return Game.milestone(id)), "hub")
+				elif Game.season.is_empty():
 					_enter_title()
 				else:
 					_return_hub()
@@ -1704,6 +1738,7 @@ func _debrief_context() -> Dictionary:
 		"fastest": fastest, "fastest_by": fastest_by, "margin": margin if winner == me else 0.0, "avg_lap": avg,
 		"difficulty": int(Game.settings.difficulty), "assist_level": Game.assist_level if Game.assists else 0.0,
 		"career": mode == "career" and not Game.career.is_empty(),
+		"streak": Game.recent_streak(),
 	}
 	if cx.career:
 		cx.rnd_gain = _rnd_gain_here()
@@ -3014,7 +3049,7 @@ func _enter_season_hub() -> void:
 			pos = i + 1
 			pts = table[i][1]
 	var rows := [
-		{"id": "weekend", "label": "RACE %d/%d:  %s" % [rnd + 1, n, Game.tracks[next_track].short], "hint": "%s  -  %d LAPS" % [Game.tracks[next_track].name, Game.race_laps(next_track)]},
+		{"id": "go", "label": "RACE %d/%d:  %s" % [rnd + 1, n, Game.tracks[next_track].short], "hint": "%s  -  %d LAPS" % [Game.tracks[next_track].name, Game.race_laps(next_track)]},
 		{"id": "settings", "label": "RACE SETTINGS"},
 		{"id": "garage", "label": "GARAGE SETUP"},
 		{"id": "standings", "label": "STANDINGS", "hint": ("YOU ARE %s WITH %d POINTS" % [Game.ordinal(pos), pts]) if pos > 0 else "NO RACES RUN YET"},
@@ -3218,8 +3253,18 @@ func _on_menu_activated(id: String) -> void:
 				_enter_options()
 		return
 	match id:
-		"go", "weekend":
+		"go":
 			_start_weekend()
+		"weekend":
+			_enter_preview()
+		"goal":
+			_enter_standings()
+		"ms_go":
+			_milestones_continue()
+		"pv":
+			pass
+		"pv_back":
+			_enter_career_hub()
 		"garage":
 			_enter_garage("race_setup" if menu_kind == "race_setup" else "hub")
 		"rnd":
@@ -3275,6 +3320,10 @@ func _on_menu_activated(id: String) -> void:
 
 func _on_menu_cancelled() -> void:
 	match menu_kind:
+		"preview":
+			_enter_career_hub()
+		"milestone":
+			_milestones_continue()
 		"career_confirm":
 			_enter_career_hub()
 		"boards":
@@ -3440,12 +3489,116 @@ func _after_season_race() -> void:
 		var c: Node3D = race.order[i]
 		var pts: int = race.control.finishing_points(i + 1, c) if race.control else 0
 		finish.append({"num": c.team.num, "pos": i + 1, "points": pts})
+	var got: Array = []
 	if mode == "career":
 		var p: Node3D = race.player
 		var pole: bool = not qual_grid.is_empty() and qual_grid[0] == Game.selected_team
 		Game.career_race(race.position_of(p), race.cars.size(), p.laps_led, pole)
+		got = Game.check_milestones(race.position_of(p), pole, p.laps_led)
 	Game.record_season_race(Game.selected_track, finish)
-	if int(Game.season.round) >= Game.season.schedule.size():
+	var then := "standings" if int(Game.season.round) >= Game.season.schedule.size() else "hub"
+	if not got.is_empty():
+		_enter_milestones(got, then)
+	elif then == "standings":
+		_enter_standings(true)
+	else:
+		_return_hub()
+
+
+## The weekend ahead (career): what kind of track it is and what wins there,
+## the weather, your form and your record here, the upgrade worth most here and
+## your setup for it - then GO RACING.
+func _enter_preview() -> void:
+	var idx: int = Game.selected_track
+	var cfg: Dictionary = Game.tracks[idx]
+	var miles: float = track.length / 1609.34
+	var kind := "INTERMEDIATE"
+	var key := "SPEED THROUGH THE CORNERS, AND TIRES THAT LAST THE RUN"
+	if cfg.get("road", false):
+		kind = "ROAD COURSE"
+		key = "BRAKING STRAIGHT AND GETTING ON THE GAS EARLY"
+	elif cfg.has("pack_gap"):
+		kind = "SUPERSPEEDWAY"
+		key = "STAY IN THE DRAFT, FIND A PUSH, PICK YOUR MOMENT"
+	elif track.length < 1100.0:
+		kind = "SHORT TRACK"
+		key = "THE BRAKES AND THE CHASSIS: SAVE YOUR TIRES, USE THE BUMPER"
+	var rows: Array = []
+	rows.append({"id": "go", "label": "GO RACING", "hint": "%s:  %s" % [String(Game.WEEKENDS[int(Game.settings.weekend)]), cfg.name]})
+	rows.append({"id": "pv", "label": "%.2f-MILE %s, %d LAPS" % [miles, kind, Game.race_laps(idx)], "hint": "WHAT WINS HERE: " + key})
+	var wx: int = int(Game.settings.get("weather", 0))
+	rows.append({"id": "pv", "label": "WEATHER: %s" % ["DRY", "CHANGEABLE - RAIN POSSIBLE", "RAIN"][wx], "hint": ["", "WATCH THE SKY: ON OVALS RAIN STOPS THE RACE, ON ROAD COURSES PIT FOR WETS", "ROAD COURSES RACE ON WET TIRES; OVALS WAIT FOR THE DRYERS"][wx]})
+	# Form: your last few finishes, and roughly where that puts you.
+	var form := Game.recent.slice(max(Game.recent.size() - 5, 0))
+	if form.is_empty():
+		rows.append({"id": "pv", "label": "YOUR FORM: NO RACES YET", "hint": "START MID-PACK, KEEP IT CLEAN, AND LEARN THE TRACK"})
+	else:
+		var sum := 0.0
+		var lo := 99
+		var hi := 0
+		for r in form:
+			sum += float(r.pos)
+			lo = mini(lo, int(r.pos))
+			hi = maxi(hi, int(r.pos))
+		var avg: float = sum / form.size()
+		var spread: int = maxi(2, int(round((hi - lo) * 0.35)))
+		var a: int = maxi(1, int(round(avg)) - spread)
+		var b: int = int(round(avg)) + spread
+		rows.append({"id": "pv", "label": "YOUR FORM: EXPECT %s-%s" % [Game.ordinal(a), Game.ordinal(b)], "hint": "LAST %d: %s" % [form.size(), ", ".join(form.map(func(r): return Game.ordinal(int(r.pos))))]})
+	var best_lap: float = Game.get_record(idx, "lap")
+	var here: Array = Game.recent.filter(func(r): return int(r.track) == idx)
+	var best_fin: int = 0
+	for r in here:
+		best_fin = int(r.pos) if best_fin == 0 else mini(best_fin, int(r.pos))
+	if best_lap > 0.0 or best_fin > 0:
+		rows.append({"id": "pv", "label": "HERE BEFORE: " + ("BEST FINISH %s" % Game.ordinal(best_fin) if best_fin > 0 else "NO FINISH YET"),
+			"hint": ("YOUR BEST LAP %s" % Game.format_time(best_lap)) if best_lap > 0.0 else ""})
+	else:
+		rows.append({"id": "pv", "label": "HERE BEFORE: FIRST VISIT", "hint": "A PRACTICE SESSION LEARNS THE TRACK FOR YOU: SET IT IN RACE SETTINGS"})
+	# The upgrade worth most here.
+	var gain := _rnd_gain_here()
+	if not gain.is_empty():
+		var best_k: String = gain.keys()[0]
+		for k in gain:
+			if gain[k] > gain[best_k]:
+				best_k = k
+		var cost: int = Game.upgrade_cost(best_k)
+		rows.append({"id": "rnd", "label": "UPGRADE TIP: %s" % best_k.to_upper(), "hint": "WORTH MOST HERE.  $%s, YOU HAVE $%s%s" % [Game.money_text(cost), Game.money_text(int(Game.career.money)), "" if int(Game.career.money) >= cost else " (NOT ENOUGH YET)"]})
+	var saved: bool = Game.track_setups.has(idx) or Game.track_setups.has(str(idx))
+	rows.append({"id": "garage", "label": "SETUP: %s" % ("YOUR SETUP FOR THIS TRACK" if saved else "STANDARD"), "hint": "BALANCE %+d, %s PRESSURES, %s GEARS%s" % [int(Game.setup.balance), ["LOW", "STD", "HIGH"][int(Game.setup.get("pressure", 1))], ["SHORT", "STD", "LONG"][int(Game.setup.get("gearing", 1))], "" if saved else ".  CHANGES ARE REMEMBERED FOR THIS TRACK"]})
+	rows.append({"id": "pv_back", "label": "BACK"})
+	_open_menu("preview", "THIS WEEKEND: %s" % cfg.short, rows, 0)
+
+
+## A milestone reached: a celebration with the prize, and what's next.
+var _milestone_then := "hub"
+
+
+func _enter_milestones(got: Array, then: String) -> void:
+	_milestone_then = then
+	var rows: Array = []
+	var cash := 0
+	for m in got:
+		cash += int(m.cash)
+		rows.append({"id": "ms_go", "label": "%s" % m.name, "hint": m.desc + ("   +$%s FROM THE OWNER" % Game.money_text(int(m.cash)) if int(m.cash) > 0 else "")})
+	# The next ones to chase.
+	var have: Array = Game.career.get("milestones", [])
+	var next: Array = Game.MILESTONES.filter(func(m): return not have.has(m.id)).slice(0, 2)
+	for m in next:
+		rows.append({"id": "ms_go", "label": "NEXT: %s" % m.name, "hint": m.desc, "dim": true})
+	rows.append({"id": "ms_go", "label": "CONTINUE"})
+	_open_menu("milestone", "MILESTONE!" if got.size() == 1 else "%d MILESTONES!" % got.size(), rows, rows.size() - 1)
+	# A fanfare and fireworks.
+	for i in 4:
+		synth.beep([784.0, 988.0, 1175.0, 1568.0][i], 0.12 + 0.1 * int(i == 3), 0.3)
+	if Game.touch_active and int(Game.settings.get("haptics", 1)) != 0:
+		Input.vibrate_handheld(120, 0.7)
+	screen.add_child(load("res://scripts/confetti.gd").new())
+	_sub("$%s BONUS" % Game.money_text(cash) if cash > 0 else "", 3.0)
+
+
+func _milestones_continue() -> void:
+	if _milestone_then == "standings":
 		_enter_standings(true)
 	else:
 		_return_hub()
@@ -3592,7 +3745,8 @@ func _enter_career_hub() -> void:
 			pts = table[i][1]
 	var sp: Dictionary = cr.sponsor
 	var rows := [
-		{"id": "weekend", "label": "RACE %d/%d:  %s" % [rnd + 1, n, Game.tracks[next_track].short], "hint": "%s  -  %d LAPS" % [Game.tracks[next_track].name, Game.race_laps(next_track)]},
+		{"id": "weekend", "label": "RACE %d/%d:  %s" % [rnd + 1, n, Game.tracks[next_track].short], "hint": "%s  -  %d LAPS.  SEE THE WEEKEND AHEAD" % [Game.tracks[next_track].name, Game.race_laps(next_track)]},
+		{"id": "goal", "label": "SEASON GOAL: %s" % ("WIN THE TITLE" if Game.season_goal() == 1 else "TOP %d" % Game.season_goal()), "hint": Game.season_goal_text(pos) + ("   (MET LAST YEAR: +$%s)" % Game.money_text(int(cr.season_end.bonus)) if cr.has("season_end") and cr.season_end.met and int(cr.season_end.bonus) > 0 else "")},
 		{"id": "rnd", "label": "R&D SHOP", "hint": "BANK: $%s" % Game.money_text(cr.money)},
 		{"id": "sponsors", "label": "SPONSOR: %s" % sp.name, "hint": "$%s PER RACE, $%s FOR A WIN" % [Game.money_text(sp.per_race), Game.money_text(sp.bonus_win)]},
 		{"id": "garage", "label": "GARAGE SETUP"},
