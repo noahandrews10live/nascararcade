@@ -1102,8 +1102,8 @@ func _build_infield(rng: RandomNumberGenerator) -> void:
 		g_s += gseg
 	# Media centre: a glass tower by start/finish (nearer the track on a small
 	# infield, or none if there's no room at all).
-	for back in [70.0, 50.0, 38.0]:
-		var mt := pos[0] + right[0] * (iw - back) + fwd[0] * 40.0
+	for back: float in [70.0, 50.0, 38.0]:
+		var mt: Vector3 = pos[0] + right[0] * (iw - back) + fwd[0] * 40.0
 		if _clear_of_track(mt, infield_clear() + 14.0):
 			_box("scenery", mt + up * 11.0, Vector3(16.0, 22.0, 16.0), Basis(up, atan2(fwd[0].x, fwd[0].z)), Color(0.35, 0.45, 0.55))
 			_box("scenery", mt + up * 22.4, Vector3(17.0, 0.8, 17.0), Basis(up, atan2(fwd[0].x, fwd[0].z)), Color(0.85, 0.85, 0.88))
