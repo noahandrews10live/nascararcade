@@ -34,6 +34,7 @@ func _run() -> void:
 	await _frames(20)
 	game.settings.field = 0 # 20 cars
 	game.settings.cautions = 0
+	game.settings.weather = 0 # (not whatever another test left saved)
 	game.tracks[2].full_laps = 100 # 10 laps at SHORT
 	main.mode = "race"
 	main.session = "race"
