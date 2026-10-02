@@ -318,7 +318,7 @@ func _process(delta: float) -> void:
 		l_draft.label_settings.font_color = Color(0.4, 1.0, 0.4)
 		l_draft.visible = int(blink * 6.0) % 2 == 0
 	elif a.state != "":
-		l_draft.text = String(a.state) + ("  +%d MPH" % int(a.closing) if a.state == "DRAFT" and a.closing >= 1.0 else "")
+		l_draft.text = String(a.state) + ("  CLOSING +%d" % int(a.closing) if a.state == "DRAFT" and a.closing >= 1.0 else "")
 		l_draft.label_settings.font_color = {"DRAFT": Color(0.3, 1.0, 1.0), "PUSH": Color(1.0, 0.8, 0.25), "SIDE DRAFT": Color(1.0, 0.4, 0.3)}[a.state]
 	# mini leaderboard of the top 5
 	var lines := PackedStringArray()
@@ -393,23 +393,7 @@ func _draw() -> void:
 	# The air meter: the tow from the car ahead (cyan), the push from the car
 	# behind (gold), and the side-draft holding you back (red, from the right).
 	var am := air(p, race)
-	var dm := Rect2(Vector2(W - 162, H - 14), Vector2(150, 8))
-	draw_rect(dm, Color(0, 0, 0, 0.6))
-	var tw: float = dm.size.x * clamp(p.draft, 0.0, 1.0)
-	draw_rect(Rect2(dm.position, Vector2(tw, dm.size.y)), Color(0.3, 1.0, 1.0))
-	var pw: float = min(dm.size.x - tw, dm.size.x * 0.5 * clamp(am.push, 0.0, 1.0))
-	if pw > 0.5:
-		draw_rect(Rect2(dm.position + Vector2(tw, 0), Vector2(pw, dm.size.y)), Color(1.0, 0.8, 0.25))
-	var sw: float = dm.size.x * 0.4 * clamp(am.side, 0.0, 1.0)
-	if sw > 0.5:
-		draw_rect(Rect2(dm.end - Vector2(sw, dm.size.y), Vector2(sw, dm.size.y)), Color(1.0, 0.3, 0.25))
-	# The mark past which the tow is strong enough to slingshot.
-	draw_rect(Rect2(dm.position + Vector2(dm.size.x * 0.55, -2), Vector2(1, dm.size.y + 4)), Color(1, 1, 1, 0.7))
-	if am.cue:
-		var ax: float = dm.position.x - 14.0
-		var ay: float = dm.position.y + 4.0
-		var side_dir: float = -1.0 if am.out_side < 0 else 1.0
-		draw_colored_polygon(PackedVector2Array([Vector2(ax + 6 * side_dir, ay), Vector2(ax - 4 * side_dir, ay - 6), Vector2(ax - 4 * side_dir, ay + 6)]), Color(0.4, 1.0, 0.4))
+	_draw_draft_meter(p, am)
 	# Time of day, track temperature and the weather.
 	if race.weather and control:
 		var wr := _banner_rect()
@@ -473,6 +457,81 @@ const LAP_BLOCK_W := 150.0
 func map_rect() -> Rect2:
 	var mm: float = clamp(H * 0.24, 64.0, 116.0)
 	return Rect2(LAP_BLOCK_W, 8.0 + top, mm, mm)
+
+
+## The draft meter: a column under the pause button, above the speedometer.
+func draft_meter_rect() -> Rect2:
+	var st := status_rect()
+	var top_y: float = st.position.y + 36.0 # under the II pause button
+	var bottom_y: float = H - 140.0 # over the DRAFT label and the speedometer
+	return Rect2(st.position.x - 12.0 - 48.0, top_y, 48.0, max(bottom_y - top_y, 0.0))
+
+
+var _cut_shown := 0.0 # the meter's needle, eased
+
+
+## What the draft is doing to car p, from the numbers the physics uses: `cut` is
+## how much less drag it has than in clean air (the tow and a push from behind;
+## negative when a side-draft or the turbulent edge of a line adds drag), `max`
+## the most this track's air can cut it, `frac` the cut as a share of that (the
+## meter's height), and `hp` what it's worth: the drag force it saves (the same
+## force the physics applies, q * CdA * the cut) times the speed, in horsepower.
+func draft_reading(p: Node3D) -> Dictionary:
+	var dm: float = p.drag_mult
+	var cut: float = 1.0 - dm
+	var mx: float = race.draft_max() if race and race.has_method("draft_max") else 0.5
+	var frac: float = clamp(cut / max(mx, 0.005), -0.35, 1.0)
+	var v: float = p.speed()
+	var dmg_aero: float = float(p.damage.front) + float(p.damage.rear)
+	var force: float = 0.5 * p.RHO * v * v * float(p.cda) * cut * (1.0 + 0.25 * dmg_aero)
+	return {"cut": cut, "max": mx, "frac": frac, "hp": force * v / 745.7}
+
+
+func _draw_draft_meter(p: Node3D, am: Dictionary) -> void:
+	var r := draft_meter_rect()
+	if r.size.y < 60.0:
+		return # no room on this screen (the DRAFT label still says it)
+	var f: Font = Game.arcade_font
+	var rd := draft_reading(p)
+	_cut_shown = lerp(_cut_shown, float(rd.frac), 0.25)
+	var cx: float = r.get_center().x
+	draw_string(f, Vector2(r.position.x - 10, r.position.y + 9), "DRAFT", HORIZONTAL_ALIGNMENT_CENTER, r.size.x + 20, 10, Color(0.3, 1.0, 1.0))
+	# The bar: zero a fifth of the way up, the track's strongest draft at the top,
+	# extra drag (side-draft, the air wall) in red below zero.
+	var bar := Rect2(cx - 8.0, r.position.y + 14.0, 16.0, r.size.y - 44.0)
+	var zero_y: float = bar.end.y - bar.size.y * 0.2
+	var up: float = zero_y - bar.position.y
+	var down: float = bar.end.y - zero_y
+	draw_rect(bar.grow(2.0), Color(0, 0, 0, 0.55))
+	draw_rect(bar, Color(0.12, 0.14, 0.2, 0.75))
+	var v: float = _cut_shown
+	if v > 0.0:
+		var h: float = up * v
+		# Cyan in a light tow, green in a good one, white-hot at the most there is.
+		var col := Color(0.3, 0.9, 1.0).lerp(Color(0.35, 1.0, 0.4), clamp(v * 1.6, 0.0, 1.0)).lerp(Color(1, 1, 0.85), clamp((v - 0.8) * 5.0, 0.0, 1.0))
+		draw_rect(Rect2(bar.position.x, zero_y - h, bar.size.x, h), col)
+	elif v < 0.0:
+		draw_rect(Rect2(bar.position.x, zero_y, bar.size.x, down * min(-v / 0.35, 1.0)), Color(1.0, 0.3, 0.25))
+	# Ticks every quarter, and the zero line.
+	for k in [0.25, 0.5, 0.75]:
+		var ty: float = zero_y - up * k
+		draw_line(Vector2(bar.position.x - 3, ty), Vector2(bar.position.x, ty), Color(1, 1, 1, 0.55), 1.0)
+	draw_line(Vector2(bar.position.x - 4, zero_y), Vector2(bar.end.x + 4, zero_y), Color(1, 1, 1, 0.85), 1.5)
+	# The numbers: the drag cut now, and what it's worth.
+	var pct: float = float(rd.cut) * 100.0
+	var pct_txt := ("%+.0f%%" % -pct) if abs(pct) >= 10.0 else ("%+.1f%%" % -pct)
+	if abs(pct) < 0.05:
+		pct_txt = "0%"
+	draw_string(f, Vector2(r.position.x - 12, bar.end.y + 13), pct_txt + " DRAG", HORIZONTAL_ALIGNMENT_CENTER, r.size.x + 24, 10, Color(0.85, 0.95, 1.0) if pct >= 0.0 else Color(1.0, 0.5, 0.45))
+	var hp: float = rd.hp
+	if abs(hp) >= 1.0:
+		draw_string(f, Vector2(r.position.x - 12, bar.end.y + 25), "%+d HP" % roundi(hp), HORIZONTAL_ALIGNMENT_CENTER, r.size.x + 24, 10, Color(0.35, 1.0, 0.4) if hp > 0.0 else Color(1.0, 0.5, 0.45))
+	# PULL OUT: an arrow beside the meter toward the side with room.
+	if am.cue:
+		var side_dir: float = -1.0 if am.out_side < 0 else 1.0
+		var ay: float = zero_y - up * 0.5
+		var ax: float = bar.position.x - 12.0
+		draw_colored_polygon(PackedVector2Array([Vector2(ax + 6 * side_dir, ay), Vector2(ax - 4 * side_dir, ay - 6), Vector2(ax - 4 * side_dir, ay + 6)]), Color(0.4, 1.0, 0.4))
 
 
 ## The speedometer and tachometer, bottom right (the phone's brake sits to its left).

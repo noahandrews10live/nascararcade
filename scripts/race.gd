@@ -556,6 +556,22 @@ func position_of(c: Node3D) -> int:
 ## push from the car behind, side-drafting. Intermediates and short tracks: a small
 ## draft on the straights but dirty air that takes front downforce off a trailing car,
 ## so it pushes (gets tight) in the corners.
+
+## The wake model's drag cuts: a full tow (1.0 in the wake sample; it stacks to
+## 1.3 in a line) and a full push, times the track's draft strength; never more
+## than half the drag.
+const TOW_CUT := 0.13
+const PUSH_CUT := 0.05
+const MAX_CUT := 0.5
+
+
+## The most this track's air can cut a car's drag: the tow stacked in a line plus
+## a push from behind (what the HUD's draft meter reads full at).
+func draft_max() -> float:
+	var strength: float = float(track.cfg.draft)
+	return min(1.3 * TOW_CUT * strength * float(track.cfg.get("tow", 1.0)) + PUSH_CUT * strength * float(track.cfg.get("push", 1.0)), MAX_CUT)
+
+
 func _aero(delta: float) -> void:
 	## Every car leaves a wake: a velocity deficit strongest right behind it, widening
 	## and fading with distance, and stronger when that car is itself in a draft (so
@@ -618,7 +634,7 @@ func _aero(delta: float) -> void:
 				loosen = max(loosen, exp(-xb / 4.0) * clamp((y - 0.4) / 0.6, 0.0, 1.0) * clamp((2.6 - y) / 0.6, 0.0, 1.0))
 		tow = min(tow, 1.3)
 		draft_amt[i] = tow
-		var reduction: float = min(tow * 0.13 * strength * tow_x + push * 0.05 * strength * push_x, 0.5)
+		var reduction: float = min(tow * TOW_CUT * strength * tow_x + push * PUSH_CUT * strength * push_x, MAX_CUT)
 		drag[i] = (1.0 - reduction) * (1.0 + side * 0.07 * strength) * (1.0 + wall * 0.04 * strength)
 		# Dirty air matters most where the draft doesn't dominate.
 		front[i] = 1.0 - dirty * 0.38 * (1.2 - strength)

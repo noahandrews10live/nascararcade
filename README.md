@@ -113,10 +113,17 @@ The game tells you what happened, why, and what to change.
   for blowout temperature, worn tyres, not enough fuel to finish, the water temperature
   climbing. Each call is made once and again only if it gets worse; urgent ones are red
   and buzz the phone. Each tyre on the HUD has a traffic light for its health.
-- **The air.** The draft meter shows the tow from the car ahead (cyan), the push from
-  behind (gold) and the side-draft holding you back (red), with your closing speed. When
-  you're closing fast in the tow with room to go, it says PULL OUT and ticks (Options →
-  DRAFT SOUNDS).
+- **The air.** The draft strength meter, a column between the pause button and the
+  speedometer, reads the same number the physics uses: how much less drag your car has
+  than in clean air right now (the tow from the car ahead plus the push from the one
+  behind; below the zero line, in red, when a side-draft or the turbulent edge of a line
+  adds drag). Full is the strongest draft this track's air can give, so it means the same
+  at every track: up to half the drag at the superspeedways, a few per cent at a short
+  track. Under it, the drag cut (-29% DRAG) and what it's worth: the drag force saved
+  times your speed, in horsepower (+52 HP). The label by the speedometer says DRAFT,
+  PUSH or SIDE DRAFT with your closing speed. When you're closing fast in the tow with
+  room to go, it says PULL OUT, an arrow beside the meter shows the side with room, and
+  it ticks (Options → DRAFT SOUNDS).
 - **After the race: the debrief** (CONTINUE on the results). Three pages: your position
   lap by lap with pit stops, cautions and incidents marked, and where you gained and lost
   places (the start, passing on track, pit stops, cautions, incidents); your pace against
@@ -648,7 +655,7 @@ Each test also runs on its own, headless (`godot --headless --fixed-fps 60 --pat
 | `tests/smoke_test.gd` | Arcade game flow on every track |
 | `tests/debrief_test.gd` | The race recorder and debrief: every place gained or lost has a cause, the advice fits the race, APPLY changes the setup and the track remembers it (`SHOTS=dir` with a renderer for screenshots) |
 | `tests/why_test.gd` | Caution reasons (who, what, where), why you spun, tyre failure causes, the crew chief's early warnings and the HUD tyre lights |
-| `tests/draft_cue_test.gd` | The air meter (DRAFT, PUSH, SIDE DRAFT, closing speed) and the PULL OUT cue |
+| `tests/draft_cue_test.gd` | The draft strength meter (it reads the physics' drag multiplier every frame, never past the track's most, DRAFT means less drag, its horsepower is the drag force saved times the speed, it sits between pause and the speedometer), the air label (DRAFT, PUSH, SIDE DRAFT, closing speed) and the PULL OUT cue |
 | `tests/career_ux_test.gd` | The weekend preview, the season goal and its bonus, milestones, and the easier/tougher field offer |
 | `tests/friction_test.gd` | One-tap NEXT RACE, the pause status, the one-tap pit call, the tilt preview, and REPORT A PROBLEM online and offline (with `tests/tools/fake_cloud.py`) |
 | `tests/replica_test.gd` | Every replica builds, closes, is the real length and laps on autopilot; the picker's groups; a full season is the calendar; only a few tracks stay built |
