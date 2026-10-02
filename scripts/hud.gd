@@ -502,7 +502,6 @@ func _draw_map(p: Node3D) -> void:
 	var r := map_rect()
 	var mm_size := r.size.x
 	var mm_pos := r.position
-	draw_rect(r.grow(5.0), Color(0, 0, 0, 0.4))
 	var pts: PackedVector2Array = track.minimap
 	var poly := PackedVector2Array()
 	for q in pts:
