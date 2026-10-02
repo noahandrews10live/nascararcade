@@ -1019,12 +1019,14 @@ func _start_mode(id: String) -> void:
 			_enter_track_select()
 		"season":
 			mode = "season"
+			Game.use_season(false)
 			if Game.season.is_empty():
 				_enter_car_select()
 			else:
 				_enter_season_hub()
 		"career":
 			mode = "career"
+			Game.use_season(true)
 			if Game.career.is_empty():
 				_enter_car_select()
 			else:
@@ -2353,6 +2355,7 @@ func resume_race() -> void:
 		return
 	var d: Dictionary = info.data
 	mode = String(d.mode)
+	Game.use_season(mode == "career")
 	session = "race"
 	Game.selected_team = int(d.team)
 	_use_track(int(d.track))
@@ -2796,6 +2799,7 @@ func _enter_season_setup() -> void:
 
 func _enter_season_hub() -> void:
 	mode = "season"
+	Game.use_season(false)
 	var sn: Dictionary = Game.season
 	Game.selected_team = int(sn.team)
 	var n: int = sn.schedule.size()
@@ -3365,8 +3369,9 @@ func _start_challenge(idx: int) -> void:
 
 func _enter_career_hub() -> void:
 	mode = "career"
+	Game.use_season(true)
 	var cr: Dictionary = Game.career
-	if Game.season.is_empty():
+	if Game.season.is_empty() or int(Game.season.get("team", -1)) != int(cr.team):
 		Game.new_season(int(cr.team), 1)
 		Game.season.career = true
 		Game.save_season()

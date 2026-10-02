@@ -34,7 +34,7 @@ var enabled := true
 var _base := URL
 var _registering := false
 ## The game's files that make up a saved game (settings stay with the device).
-const SYNC_FILES := ["progress.cfg", "custom_car.cfg", "career.cfg", "season.cfg", "challenges.cfg", "records.cfg"]
+const SYNC_FILES := ["progress.cfg", "custom_car.cfg", "career.cfg", "season.cfg", "career_season.cfg", "challenges.cfg", "records.cfg"]
 var last_sync := "" # when this device last saved online (server time)
 var _save_t := -1.0 # counting down to the next online save
 signal restored # a saved game came down and was loaded

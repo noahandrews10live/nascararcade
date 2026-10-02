@@ -307,6 +307,7 @@ func new_career(team_idx: int) -> void:
 		"history": [], "last": "",
 	}
 	career.offers = sponsor_offers()
+	use_season(true)
 	new_season(team_idx, 1)
 	season.career = true
 	save_season()
@@ -737,6 +738,7 @@ func _ready() -> void:
 	modern_supported = true
 	modern = true
 	load_settings()
+	_split_seasons()
 	load_season()
 	load_custom()
 	load_progress()
@@ -885,6 +887,7 @@ func reload_saved_game() -> void:
 	load_progress()
 	load_challenges()
 	load_career()
+	_split_seasons()
 	load_season()
 
 
@@ -1048,22 +1051,58 @@ func new_season(team_idx: int, length_idx: int) -> void:
 	save_season()
 
 
+## Season mode and the career each have their own season (schedule, points, the
+## car in it), in their own file: `season` is whichever one is in use. Before
+## they were split, a Season in one car would take over the career's season, and
+## the career's standings and results showed the other car.
+const CAREER_SEASON_PATH := "user://career_season.cfg"
+var _season_career := false
+
+
+func _season_path() -> String:
+	return CAREER_SEASON_PATH if _season_career else SEASON_PATH
+
+
+## Switch to the career's season (true) or Season mode's (false).
+func use_season(career_season: bool) -> void:
+	if career_season == _season_career:
+		return
+	_season_career = career_season
+	load_season()
+
+
 func load_season() -> void:
+	season = {}
 	var cf := ConfigFile.new()
-	if cf.load(SEASON_PATH) == OK:
+	if cf.load(_season_path()) == OK:
 		season = cf.get_value("season", "data", {})
+
+
+## Saves from before the split kept the career's season in season.cfg: move it.
+func _split_seasons() -> void:
+	var cf := ConfigFile.new()
+	if cf.load(SEASON_PATH) != OK:
+		return
+	var s: Dictionary = cf.get_value("season", "data", {})
+	if not s.get("career", false):
+		return
+	if not FileAccess.file_exists(CAREER_SEASON_PATH):
+		var out := ConfigFile.new()
+		out.set_value("season", "data", s)
+		out.save(CAREER_SEASON_PATH)
+	DirAccess.remove_absolute(ProjectSettings.globalize_path(SEASON_PATH))
 
 
 func save_season() -> void:
 	var cf := ConfigFile.new()
 	cf.set_value("season", "data", season)
-	cf.save(SEASON_PATH)
+	cf.save(_season_path())
 	save_changed.emit()
 
 
 func clear_season() -> void:
 	season = {}
-	DirAccess.remove_absolute(ProjectSettings.globalize_path(SEASON_PATH))
+	DirAccess.remove_absolute(ProjectSettings.globalize_path(_season_path()))
 
 
 ## Records a race into the season: points by car number, wins, top 5s.
