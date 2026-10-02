@@ -836,11 +836,12 @@ func _build_scenery() -> void:
 		# roof
 		var roof_h := 2.0 + rows * 1.3 + 3.0
 		_quad("scenery", pos[i] + right[i] * (hw + 14.0) + up * roof_h, bt + up * roof_h, pos[i2] + right[i2] * (hw + 14.0) + up * roof_h, bt2 + up * roof_h, Color(0.75, 0.75, 0.8))
-	# Scoring pylon in the infield at start/finish.
+	# Scoring pylon in the infield at start/finish (if there's room for it).
 	var pyl := pos[0] + right[0] * (inner_wall() - 30.0)
-	_box("scenery", pyl + up * 16.0, Vector3(4, 32, 4), Basis.IDENTITY, Color(0.2, 0.2, 0.25))
-	for k in 10:
-		_box("lamp" if night else "scenery", pyl + up * (3.0 + k * 2.8) + right[0] * 2.05, Vector3(0.1, 2.2, 3.2), Basis(up, atan2(right[0].x, right[0].z)), crowd[k % crowd.size()])
+	if _clear_of_track(pyl, infield_clear() + 4.0):
+		_box("scenery", pyl + up * 16.0, Vector3(4, 32, 4), Basis.IDENTITY, Color(0.2, 0.2, 0.25))
+		for k in 10:
+			_box("lamp" if night else "scenery", pyl + up * (3.0 + k * 2.8) + right[0] * 2.05, Vector3(0.1, 2.2, 3.2), Basis(up, atan2(right[0].x, right[0].z)), crowd[k % crowd.size()])
 	# Flag stand gantry over the start/finish line.
 	var b0 := Basis(up, atan2(fwd[0].x, fwd[0].z))
 	var p_in := surface_point(0.0, -hw - 1.5)
@@ -1072,26 +1073,41 @@ func _build_infield(rng: RandomNumberGenerator) -> void:
 		var yaw := atan2(right[hi].x, right[hi].z) # nose towards the track
 		var bs := Basis(up, yaw)
 		var base := pos[hi] + right[hi] * (near - 14.0)
+		var fwd_v := bs * Vector3(0, 0, 1)
+		if not _clear_of_track(base, infield_clear() + 8.0) or not _clear_of_track(base + fwd_v * 10.0, infield_clear() + 3.0):
+			s_h += 7.5
+			continue # a short track's infield has no room here
 		# Trailer: body in the first colour, a band of the second along the bottom.
 		_box("scenery", base + up * 2.4, Vector3(2.6, 3.2, 15.0), bs, t.c1)
 		_box("scenery", base + up * 0.9, Vector3(2.62, 0.6, 15.0), bs, t.c2)
 		# Tractor cab in front (towards the track), chrome-grey tanks, black tyres.
-		var fwd_v := bs * Vector3(0, 0, 1)
 		_box("scenery", base + fwd_v * 9.4 + up * 1.9, Vector3(2.5, 2.8, 3.2), bs, t.c2.lerp(t.c1, 0.3))
 		_box("scenery", base + fwd_v * 9.4 + up * 0.5, Vector3(2.6, 1.0, 3.4), bs, Color(0.05, 0.05, 0.06))
 		_box("scenery", base + up * 0.5, Vector3(2.64, 1.0, 13.0), bs, Color(0.05, 0.05, 0.06))
 		s_h += 7.5
 		k += 1
-	# Garage: a long low building with a light roof behind the haulers.
-	var gs := lot0 + lot_len * 0.5
-	var gi: int = idx_at.call(gs)
-	var gb := Basis(up, atan2(fwd[gi].x, fwd[gi].z))
-	_box("scenery", pos[gi] + right[gi] * (far + 6.0) + up * 3.0, Vector3(9.0, 6.0, lot_len * 0.8), gb, Color(0.82, 0.83, 0.86))
-	_box("scenery", pos[gi] + right[gi] * (far + 6.0) + up * 6.2, Vector3(10.0, 0.4, lot_len * 0.82), gb, Color(0.55, 0.12, 0.1))
-	# Media centre: a glass tower by start/finish.
-	var mt := pos[0] + right[0] * (iw - 70.0) + fwd[0] * 40.0
-	_box("scenery", mt + up * 11.0, Vector3(16.0, 22.0, 16.0), Basis(up, atan2(fwd[0].x, fwd[0].z)), Color(0.35, 0.45, 0.55))
-	_box("scenery", mt + up * 22.4, Vector3(17.0, 0.8, 17.0), Basis(up, atan2(fwd[0].x, fwd[0].z)), Color(0.85, 0.85, 0.88))
+	# Garage: a long low building with a light roof behind the haulers, built in
+	# short sections that follow the track (on a short track the lot runs round a
+	# turn, and one straight building would cut across it). Sections with no room
+	# are left out.
+	var gseg := 10.0
+	var g_s := lot0 + lot_len * 0.1
+	while g_s < lot0 + lot_len * 0.9:
+		var gi: int = idx_at.call(g_s)
+		var gp := pos[gi] + right[gi] * (far + 6.0)
+		if _clear_of_track(gp, infield_clear() + 8.0):
+			var gb := Basis(up, atan2(fwd[gi].x, fwd[gi].z))
+			_box("scenery", gp + up * 3.0, Vector3(9.0, 6.0, gseg + 0.4), gb, Color(0.82, 0.83, 0.86))
+			_box("scenery", gp + up * 6.2, Vector3(10.0, 0.4, gseg + 0.6), gb, Color(0.55, 0.12, 0.1))
+		g_s += gseg
+	# Media centre: a glass tower by start/finish (nearer the track on a small
+	# infield, or none if there's no room at all).
+	for back in [70.0, 50.0, 38.0]:
+		var mt := pos[0] + right[0] * (iw - back) + fwd[0] * 40.0
+		if _clear_of_track(mt, infield_clear() + 14.0):
+			_box("scenery", mt + up * 11.0, Vector3(16.0, 22.0, 16.0), Basis(up, atan2(fwd[0].x, fwd[0].z)), Color(0.35, 0.45, 0.55))
+			_box("scenery", mt + up * 22.4, Vector3(17.0, 0.8, 17.0), Basis(up, atan2(fwd[0].x, fwd[0].z)), Color(0.85, 0.85, 0.88))
+			break
 	# The car park outside the backstretch: rows and rows of fans' cars.
 	var hw := width * 0.5
 	var pk0 := length * 0.42
@@ -1342,6 +1358,13 @@ func _build_motorhomes() -> void:
 	mmi.multimesh = mm
 	mmi.material_override = Game.make_mat("crowd", Color(1, 1, 1))
 	add_child(mmi)
+
+
+## How far from the centreline the track (and its inside wall) reaches on the
+## infield side: anything in the infield keeps at least this far from every point
+## of the centreline.
+func infield_clear() -> float:
+	return abs(inner_wall()) + 2.0
 
 
 func _clear_of_track(p: Vector3, clear: float) -> bool:

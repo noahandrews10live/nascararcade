@@ -34,6 +34,12 @@ func build(t: Node3D) -> void:
 		_commit(m)
 
 
+## Infield props keep clear of the track (on a short track the paddock runs round
+## the turns, close to the other side).
+func _infield_ok(p: Vector3, size: float) -> bool:
+	return track._clear_of_track(p, track.infield_clear() + size)
+
+
 func _put(model: String, pos: Vector3, yaw: float, extra_scale := 1.0) -> void:
 	var s: float = SCALE.get(model, 1.0) * extra_scale
 	var b := Basis(Vector3.UP, yaw).scaled(Vector3.ONE * s)
@@ -62,14 +68,16 @@ func _paddock() -> void:
 	while s < lot0 + lot_len - 10.0:
 		var fr: Array = _frame(s)
 		var p: Vector3 = fr[0] + fr[1] * (iw - 9.0)
-		_put("tentLong" if k % 3 == 1 else "tent", Vector3(p.x, -0.1, p.z), fr[2])
+		if _infield_ok(p, 4.0):
+			_put("tentLong" if k % 3 == 1 else "tent", Vector3(p.x, -0.1, p.z), fr[2])
 		s += 16.0
 		k += 1
 	s = lot0 + 4.0
 	while s < lot0 + lot_len - 4.0:
 		var fr: Array = _frame(s)
 		var p: Vector3 = fr[0] + fr[1] * (iw - 4.0)
-		_put("pylon", Vector3(p.x, -0.1, p.z), fr[2])
+		if _infield_ok(p, 0.5):
+			_put("pylon", Vector3(p.x, -0.1, p.z), fr[2])
 		s += 6.0
 
 
@@ -95,7 +103,8 @@ func _media() -> void:
 	var fr: Array = _frame(0.0)
 	var iw: float = track.inner_wall()
 	var p: Vector3 = fr[0] + fr[1] * (iw - 58.0) + track.fwd[0] * 62.0
-	_put("radarEquipment", Vector3(p.x, 0.0, p.z), fr[2] + PI * 0.75)
+	if _infield_ok(p, 8.0):
+		_put("radarEquipment", Vector3(p.x, 0.0, p.z), fr[2] + PI * 0.75)
 
 
 ## Road courses: red / white barrier sections lining the track's edge on the
@@ -106,7 +115,8 @@ func _runoff() -> void:
 	while s < track.length:
 		var kk: float = track.curvature_at(s)
 		if abs(kk) > 1.0 / 150.0:
-			var d: float = track.outer_edge() - 0.7 if kk > 0.0 else track.inner_edge() + 0.7
+			# Just off the edge of the racing surface, never on it.
+			var d: float = track.outer_edge() + 1.2 if kk > 0.0 else track.apron_edge() - 1.2
 			var t: Transform3D = track.car_transform(s, d, 0.0)
 			var m := "barrierRed" if k % 2 == 0 else "barrierWhite"
 			var sc: float = SCALE[m]

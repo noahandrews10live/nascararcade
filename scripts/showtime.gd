@@ -598,7 +598,8 @@ func camera(delta: float) -> bool:
 	if photo_finish:
 		var tr: Node3D = main.track
 		var i := 0
-		var p: Vector3 = tr.pos[i] + tr.right[i] * (tr.outer_edge() + 6.0) + Vector3.UP * 1.6
+		# Up on the wall at the line (inside the fence), looking across it.
+		var p: Vector3 = tr.surface_point(0.0, tr.outer_edge() - 0.5) + Vector3.UP * 3.0
 		cam.global_position = p
 		cam.fov = 38.0
 		cam.look_at(tr.pos[i] + tr.right[i] * (tr.width * -0.1) + Vector3.UP * 0.8, Vector3.UP)
@@ -683,7 +684,9 @@ func _intro_camera(_delta: float) -> void:
 		var i := 0
 		var k: float = clamp((t - 8.0) / 3.0, 0.0, 1.0)
 		cam.fov = 60.0
-		cam.global_position = tr.pos[i] + tr.right[i] * (tr.outer_edge() + 25.0 - 10.0 * k) + Vector3.UP * lerp(12.0, 45.0, k)
+		var wall_top: float = tr.surface_point(0.0, tr.outer_edge()).y
+		cam.global_position = tr.pos[i] + tr.right[i] * (tr.outer_edge() + 25.0 - 10.0 * k)
+		cam.global_position.y = wall_top + lerp(20.0, 45.0, k)
 		cam.look_at(tr.pos[i] + tr.fwd[i] * 60.0 + Vector3.UP * lerp(8.0, 40.0, k), Vector3.UP)
 
 

@@ -2660,11 +2660,13 @@ func _tv_camera(delta: float, fixed := false) -> void:
 		0, 1:
 			_chase_camera(t, delta, 0)
 		2:
-			# Trackside camera on the outside wall, leapfrogging ahead of the car.
+			# Trackside camera on a pole over the outside wall, leapfrogging ahead of
+			# the car. It leans in over the track so the wall and the fence (tall on
+			# a banked short track) are beside it, not in front of the lens.
 			var ahead: float = fposmod(tv_anchor.x - t.s() + track.length * 0.5, track.length) - track.length * 0.5
 			if tv_anchor == Vector3.ZERO or ahead < -60.0 or ahead > 260.0:
 				tv_anchor.x = t.s() + 180.0
-			cam.global_position = track.surface_point(tv_anchor.x, track.outer_edge()) + Vector3.UP * 7.0
+			cam.global_position = track.surface_point(tv_anchor.x, track.outer_edge() - 2.0) + Vector3.UP * 7.0
 			cam.look_at(t.global_position + Vector3.UP, Vector3.UP)
 			cam.fov = 55.0
 		3:
