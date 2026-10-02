@@ -47,7 +47,9 @@ run_one() {
 	local home="$OUT/home/$tag"
 	mkdir -p "$home"
 	local log="$OUT/$tag.txt"
-	local env=(XDG_DATA_HOME="$home" ST_NO_INTRO=1)
+	# (-u OUT: some tests take OUT as "save screenshots there", which headless
+	# would wait on for ever.)
+	local env=(-u OUT -u SHOTS XDG_DATA_HOME="$home" ST_NO_INTRO=1)
 	local code=0
 	local start=$(date +%s)
 	case $kind in
