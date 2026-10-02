@@ -78,6 +78,58 @@ Motion smoothing), and Options → VSync off gives the lowest input delay.
 | **Online** | Race friends from any phone or tablet: **HOST A RACE** gives you a 4-digit room code, friends pick **JOIN WITH A CODE** and type it. Everyone connects out to a relay (a Supabase Realtime channel for the room), so nobody needs to open a port. Full rules with an AI field: the host's race control throws the cautions and runs the pace car for everyone, each player makes their own pit call on their own screen (20 seconds, then the crew chief decides), and the whole field lines up for the restart. (A desktop can still host on its own network by address.) |
 | **Track Editor** | Build a track from straights and turns (radius, angle, banking), see it drawn live, test-drive it and save it as a mod. |
 
+## Knowing why
+
+The game tells you what happened, why, and what to change.
+
+- **In the moment.** A caution says who, what and where ("#24 GORDON SPUN IN TURN 2";
+  debris cautions say where the debris is). Your own spins and wall hits say why:
+  contact, locked brakes, loose on the throttle, or too fast into the corner. A failed
+  tyre says what killed it (overheated, worn out, or cut).
+- **Before trouble.** The crew chief watches your car and calls it early: a tyre heading
+  for blowout temperature, worn tyres, not enough fuel to finish, the water temperature
+  climbing. Each call is made once and again only if it gets worse; urgent ones are red
+  and buzz the phone. Each tyre on the HUD has a traffic light for its health.
+- **The air.** The draft meter shows the tow from the car ahead (cyan), the push from
+  behind (gold) and the side-draft holding you back (red), with your closing speed. When
+  you're closing fast in the tow with room to go, it says PULL OUT and ticks (Options →
+  DRAFT SOUNDS).
+- **After the race: the debrief** (CONTINUE on the results). Three pages: your position
+  lap by lap with pit stops, cautions and incidents marked, and where you gained and lost
+  places (the start, passing on track, pit stops, cautions, incidents); your pace against
+  the winner's, tyre fall-off over your longest run, the hottest each tyre got, and how
+  the car handled (tight or loose); the key moments with the lap and the corner, and up to
+  four pieces of crew-chief advice with a one-tap APPLY (a setup click, more steering help,
+  an easier or tougher field, the R&D area worth most at that track). After three tough
+  races in a row, or three straight wins, it offers a better-matched field first.
+- **Setups remember the track.** Garage changes are kept for each track and come back
+  when you race there again.
+
+## The career
+
+- **The weekend ahead.** RACE n/m on the career hub opens a preview: the kind of track and
+  what wins there, the weather, your form as a finish range, your best here, the upgrade
+  worth most here, and your setup. Then GO RACING.
+- **The owner's season goal**, on the hub with progress ("TOP 15 IN POINTS - 17TH: 2
+  PLACES TO GO"). Meet it for a bonus ($250,000 and up); next year's target is four places
+  better.
+- **Milestones**: first top 10, top 5, podium, pole and win, leading a lap, 10 starts, 5
+  wins, 100 laps led, the season goal and the title. Each is celebrated once, with
+  confetti and prize money from the owner, and shows what to chase next.
+- **One tap to the next race**: the home screen leads with NEXT: CAREER RACE n, NEXT:
+  SEASON RACE n or RACE AGAIN.
+
+## Report a problem
+
+Pause → REPORT A PROBLEM (or F8, or Options): tap what went wrong (car handling,
+controls, looks wrong, crash/freeze, race rules, menus, sound, something else), add a
+note if you like, and SEND. It sends a small screenshot of the moment (taken without the
+pause screen over it), the race so far (the recorder's log, your car's state, the crew
+chief's calls), your settings and the kind of device. Nothing personal. Reports go to a
+private `reports` table through the game's server function, which caps their size and
+allows 20 a day per player. Made offline, a report is kept on the device and sent the next
+time the game is online.
+
 ## On a phone
 
 - **The garage** is home: your car on the turntable, big tiles for every mode, your level and XP.
@@ -85,6 +137,8 @@ Motion smoothing), and Options → VSync off gives the lowest input delay.
 - **Your first race teaches you**: steering (tilt or drag), the gas, braking into the turns, the draft and the map, each prompt once you need it.
 - **AUTO GAS** (Options): the car takes each corner at a safe speed and you just steer, with one thumb (drag anywhere) or none (tilt). The brake still works.
 - **Vibration** on hits and locked wheels, a click on each gear change, and a rhythm when you run off the edge (Options).
+- **The pause screen** shows the lap, your place, your tyres and fuel, with big RESUME and QUIT buttons, steering, and REPORT A PROBLEM. **The pit call** has TAKE THE CREW CHIEF'S CALL as a one-tap row on top.
+- **Options → TILT STEERING** previews itself: while it's picked, a phone on screen turns with yours and shows how much steering that angle gives.
 - **A call or another app pauses the race** (and mutes the sound). RESUME counts 3-2-1 back in. Online races carry on, as the others are still racing.
 - **Carry on later**: full races (Single Race, Season, Career) save a checkpoint every lap under green. If the app is closed, the garage leads with RESUME RACE: every car goes back where it was (fuel, tyres, damage, the clock) and it counts you back in. Quitting a race on purpose throws the checkpoint away.
 - **BATTERY SAVER** (Options): OFF, AUTO or ON. ON runs at 30 fps to save battery and heat; the race still runs 60 steps a second, so it drives the same. AUTO switches it on at 20% battery or less, not charging, in browsers that report the battery (Chrome on Android). The phone apps can't read the battery, so there it's OFF or ON.
@@ -444,6 +498,12 @@ scripts/showtime.gd        intro, showroom, TV package, commentary, wreck replay
 scripts/props.gd           race-day props (Kenney Racing Kit): tents, cones, billboards, barriers
 scripts/music.gd           the synthesised score (anthem, menu, last lap, victory)
 scripts/ghost.gd           best-lap ghost recording and playback
+scripts/race_log.gd        the race recorder: laps, positions, key moments, why places changed
+scripts/debrief.gd         the post-race debrief and the crew chief's advice
+scripts/crew_watch.gd      the crew chief's early warnings, and each tyre's health
+scripts/report.gd          REPORT A PROBLEM
+scripts/confetti.gd        confetti for milestones
+scripts/steer_preview.gd   the live tilt-steering preview in Options
 tests/                     headless test benches and screenshot scripts (see below)
 ```
 
@@ -463,11 +523,30 @@ catch small slides. Hard hits switch that help off, so real wrecks still happen.
 
 ## Tests
 
-All tests run headless (`godot --headless --fixed-fps 60 --path . -s <script>`):
+`tests/run_all.sh` runs every test, a few at a time, each in its own clean saved-game
+folder (so tests can't see each other's careers or settings, or yours). The cloud tests
+get their own stand-in server, online racing runs a host and a client (direct and through
+the relay), and tests that need a renderer run under `xvfb-run`. `--qa` adds the
+full-race QA (`tests/full_race_qa.gd`): a full-rules race at every track, checking every
+car finishes or is out, positions stay whole, no car sits stopped under green, every
+caution ends, your car never runs dry, the crew chief doesn't nag, and the debrief adds
+up. It prints a summary and exits with the number of failures:
+
+```
+GODOT=/path/to/godot tests/run_all.sh -j 2 --qa
+```
+
+Each test also runs on its own, headless (`godot --headless --fixed-fps 60 --path . -s <script>`):
 
 | Script | What it checks |
 |---|---|
 | `tests/smoke_test.gd` | Arcade game flow on every track |
+| `tests/debrief_test.gd` | The race recorder and debrief: every place gained or lost has a cause, the advice fits the race, APPLY changes the setup and the track remembers it (`SHOTS=dir` with a renderer for screenshots) |
+| `tests/why_test.gd` | Caution reasons (who, what, where), why you spun, tyre failure causes, the crew chief's early warnings and the HUD tyre lights |
+| `tests/draft_cue_test.gd` | The air meter (DRAFT, PUSH, SIDE DRAFT, closing speed) and the PULL OUT cue |
+| `tests/career_ux_test.gd` | The weekend preview, the season goal and its bonus, milestones, and the easier/tougher field offer |
+| `tests/friction_test.gd` | One-tap NEXT RACE, the pause status, the one-tap pit call, the tilt preview, and REPORT A PROBLEM online and offline (with `tests/tools/fake_cloud.py`) |
+| `tests/full_race_qa.gd` | A full-rules race at one track (`TRACK=n`) watched for anything a player would notice |
 | `tests/weather_test.gd` | Rain on an oval (held under caution until dry) and a road course (wet tyres), and the moving clock |
 | `tests/director_test.gd` | Replay director, photo mode and the highlight reel |
 | `tests/net_test.gd` | Online: run with ROLE=host and ROLE=client together; includes a caution, the client's pit call and the restart. RELAY=1 goes through the room-code relay (`tests/tools/fake_realtime.py` stands in for Supabase offline) |
