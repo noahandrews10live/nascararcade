@@ -246,6 +246,7 @@ var _slip_power := PackedFloat32Array([0, 0, 0, 0]) # energy put into each tyre 
 var _track_grip := 1.0
 # Tyres, per corner (FL, FR, RL, RR): temperature (C), pressure (psi), wear (0 = new)
 var tyre_temp := PackedFloat32Array([60, 60, 60, 60])
+var carcass_temp := PackedFloat32Array([60, 60, 60, 60]) # the tyre's body: follows the tread slowly
 var tyre_psi := PackedFloat32Array([0, 0, 0, 0])
 var tyre_wear4 := PackedFloat32Array([0, 0, 0, 0])
 var cold_psi := 1.0 # garage pressure setting (1 = standard)
@@ -332,6 +333,7 @@ func _update_tyres_before() -> void:
 			for i in 4:
 				tyre_wear4[i] = 0.0
 				tyre_temp[i] = amb + 12.0
+				carcass_temp[i] = amb + 12.0
 		elif _wear_avg > 0.0:
 			var f: float = tyre_wear / _wear_avg
 			for i in 4:
@@ -358,6 +360,12 @@ func _update_tyres_before() -> void:
 		_tyre_factor[i] *= (0.12 + 0.88 * tyre_air[i]) * (1.0 - 0.04 * flat_spot[i])
 
 
+## Tyre wear: a set lasts a real fuel run (a few percent of grip over 50-80 laps
+## at a short track or an intermediate). Short races speed fuel burn up so a tank
+## lasts part of the race; tyres get at most TYRE_SCALE_MAX of that.
+const TYRE_WEAR_PER_KM := 0.0012
+const TYRE_WEAR_PER_J := 0.8e-8
+const TYRE_SCALE_MAX := 3.0
 func _update_tyres_after(delta: float, travelled: float) -> void:
 	var amb: float = track.track_temp()
 	var cool: float = 0.004 + 0.0004 * abs(v)
@@ -370,11 +378,13 @@ func _update_tyres_after(delta: float, travelled: float) -> void:
 		# Wets cook themselves on a dry track; water cools any tyre.
 		var heat_mult: float = 1.0 + 2.0 * (1.0 - _wet) if tyre_compound == "wet" else 1.0
 		# (Heat per unit of slip work, calibrated for racing-slick grip.)
-		t += ((p_slip * (0.0000925 if i < 2 else 0.000155) + p_roll * 0.00012) * heat_mult - (t - amb) * cool * (1.0 + 2.0 * _wet)) * delta
+		t += ((p_slip * (0.000074 if i < 2 else 0.00012) + p_roll * 0.00012) * heat_mult - (t - amb) * cool * (1.0 + 2.0 * _wet)) * delta
 		tyre_temp[i] = clamp(t, amb - 5.0, 260.0)
+		# A blowout comes from a carcass cooked over a run, not a corner's flash of heat.
+		carcass_temp[i] += (tyre_temp[i] - carcass_temp[i]) * min(delta / 20.0, 1.0)
 		var hot: float = 1.0 + max(t - 115.0, 0.0) / 20.0
 		var psi_wear: float = 1.0 + (1.0 - (psi_l if i % 2 == 0 else psi_r)) * 3.5
-		tyre_wear4[i] += (travelled / 1000.0 * 0.004 + _slip_power[i] * 2.2e-8 * hot) * burn_scale * wear_mult * psi_wear
+		tyre_wear4[i] += (travelled / 1000.0 * TYRE_WEAR_PER_KM + _slip_power[i] * TYRE_WEAR_PER_J * hot) * min(burn_scale, TYRE_SCALE_MAX) * wear_mult * psi_wear
 		_slip_power[i] = 0.0
 		total += tyre_wear4[i]
 		# Locking a wheel at speed grinds a flat spot into it.
@@ -382,7 +392,7 @@ func _update_tyres_after(delta: float, travelled: float) -> void:
 			flat_spot[i] = min(flat_spot[i] + delta * abs(v) / 60.0, 1.0)
 		# Blowouts: cooked or corded tyres let go (right front most often).
 		if tyre_air[i] > 0.0 and tyre_leak[i] == 0.0:
-			var risk: float = max(tyre_temp[i] - 170.0, 0.0) * 0.02 + max(tyre_wear4[i] - 1.0, 0.0) * 0.6
+			var risk: float = max(carcass_temp[i] - 175.0, 0.0) * 0.01 + max(tyre_wear4[i] - 1.0, 0.0) * 0.6
 			if risk > 0.0 and randf() < risk * delta:
 				fail_tyre(i, "blowout")
 		if tyre_leak[i] > 0.0:
@@ -452,6 +462,7 @@ func change_tyres(corners: Array, compound := "") -> void:
 		tyre_leak[i] = 0.0
 		flat_spot[i] = 0.0
 		tyre_temp[i] = amb + 12.0
+		carcass_temp[i] = amb + 12.0
 	tyre_wear = (tyre_wear4[0] + tyre_wear4[1] + tyre_wear4[2] + tyre_wear4[3]) * 0.25
 	_wear_avg = tyre_wear
 

@@ -174,7 +174,10 @@ stand-in for the server.
     turn-entry bumps upset it;
   - **tyre temperature, pressure and wear per tyre**: grip peaks around 100 °C,
     fresh tyres are cold for a lap, overheated ones go greasy, right sides run
-    hottest on ovals. The HUD shows all four;
+    hottest on ovals. The HUD shows all four. A set lasts a real fuel run: about
+    0.4 s of lap time lost over 60 laps at an intermediate, 1-1.5 s at a short
+    track (`tests/wear_bench.gd`). Short races speed fuel burn up so stops still
+    matter, but tyres wear at most 3x the real rate;
   - **the track changes**: a rubbered-in groove gets faster, marbles build up high,
     night tracks grip more;
   - **aero** that depends on ride height and yaw: downforce fades as the car turns
@@ -240,7 +243,7 @@ stand-in for the server.
 ## Race day
 
 - **Tyre failures and damage rules.**
-  - Tyres cut from debris or bent fenders and leak down; overheated or worn-out tyres blow (a right front at turn entry sends you up the track).
+  - Tyres cut from debris or bent fenders and leak down; a tyre whose carcass stays cooked (over about 175 °C) or that is worn out blows (a right front at turn entry sends you up the track).
   - Locking a wheel grinds a flat spot you can feel.
   - Water temperature climbs when you run tucked in a draft or pick up debris on the grille. Clean air can blow small pieces off; the crew clears the rest at a stop. Past 145 °C the engine fails.
   - Wrecks leave debris on the track (enough of it brings out a caution).
