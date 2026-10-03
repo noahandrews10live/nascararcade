@@ -870,7 +870,38 @@ func _gov_reset() -> void:
 	_gov_frames = 0
 
 
+## Every green (the start and each restart) packs the whole field together: the
+## most physics work of the race, for about the first ten seconds. Rather than
+## wait to fall behind, the governor goes to its cheapest level for PACK_BOOST
+## seconds of racing, then hands back the level it had.
+const PACK_BOOST := 12.0
+var _boost_green := -2.0 # the green this boost was for (race_control.green_at)
+var _boost_from := -1 # the level to go back to (-1: no boost on)
+var _boost_until := 0.0
+
+
+func _pack_boost() -> void:
+	if race == null or _fixed_fps or not race.running or state != State.RACE:
+		return
+	var g: float = float(race.control.green_at) if race.control else 0.0
+	if g != _boost_green:
+		_boost_green = g
+		if _boost_from < 0:
+			_boost_from = race.sim_level
+		race.set_sim_level(race.MAX_SIM_LEVEL)
+		_boost_until = race.time + PACK_BOOST
+		_gov_reset()
+	elif _boost_from >= 0 and race.time >= _boost_until:
+		race.set_sim_level(_boost_from)
+		_boost_from = -1
+		_gov_reset()
+
+
 func _sim_governor() -> void:
+	_pack_boost()
+	if _boost_from >= 0:
+		_gov_reset() # (the boost is on: nothing to judge)
+		return
 	if race == null or state != State.RACE or paused or not race.running or Engine.time_scale != 1.0 or showtime.replay_active or (pit_show and pit_show.showing) or _fixed_fps:
 		_gov_reset()
 		return
@@ -965,6 +996,8 @@ func _on_race_incident(c: Node3D, kind: String) -> void:
 
 
 func _new_race(player_team: int) -> void:
+	_boost_green = -2.0
+	_boost_from = -1
 	if race:
 		race.queue_free()
 		race = null
@@ -2243,6 +2276,7 @@ func _player_input() -> void:
 	if race.player2:
 		_player2_input()
 	var p: Node3D = race.player
+	hud.auto_reason = ""
 	if autopilot:
 		p.ai = true
 		p.autopilot_forced = true
@@ -2276,6 +2310,17 @@ func _player_input() -> void:
 		p.manual_pedals = to_pits and pit_drive_manual()
 		var auto: bool = ctl.flag == ctl.Flag.YELLOW or to_pits or p.launch_hold > 0.0
 		p.ai = auto
+		# Say so whenever the car is driving itself (and why, and until when).
+		if not auto:
+			hud.auto_reason = ""
+		elif p.penalty != "":
+			hud.auto_reason = "PENALTY: DOWN PIT ROAD - THE CAR STEERS"
+		elif to_pits:
+			hud.auto_reason = "PIT ROAD: THE CAR STEERS%s" % (" - YOUR PEDALS" if p.manual_pedals else "")
+		elif ctl.flag == ctl.Flag.YELLOW:
+			hud.auto_reason = "CAUTION: THE CAR FOLLOWS THE PACE CAR - YOURS AGAIN AT THE GREEN"
+		else:
+			hud.auto_reason = "GREEN! HIT THE GAS - IT'S YOURS"
 		if p.manual_pedals:
 			p.throttle = Input.get_action_strength("accelerate")
 			p.brake = Input.get_action_strength("brake")
@@ -3296,25 +3341,28 @@ func _restart_input(p: Node3D, ctl: Node) -> void:
 		if _restart_gas_held and not gas_down:
 			_restart_gas_held = false # lifted: the next press counts
 		var pressed: bool = gas_down and not _restart_gas_held
+		# (On a phone the gas is half the screen: a touch before the green is
+		# ignored, never a jump.)
+		var forgiving: bool = Game.touch_active
 		if leading:
 			if auto_gas and ctl.restart_to_zone < -ctl.RESTART_ZONE * 0.5:
 				pressed = true
 			if pressed:
-				if ctl.restart_to_zone > 0.0:
-					ctl.jumped_restart(p) # before the zone: that's a jump too
-				else:
+				if ctl.restart_to_zone <= 0.0:
 					ctl.player_go = true
+				elif not forgiving:
+					ctl.jumped_restart(p) # before the zone: that's a jump too
 			_restart_cue("YOU LEAD: HIT THE GAS IN THE ZONE" if ctl.restart_to_zone > 0.0 else "IN THE ZONE: GO WHEN YOU WANT")
 		else:
-			if pressed and not auto_gas:
+			if pressed and not auto_gas and not forgiving:
 				ctl.jumped_restart(p)
 				_restart_gas_held = true
-			_restart_cue("HOLD IT... WAIT FOR THE LEADER" if not _restart_gas_held or auto_gas else "LIFT OFF THE GAS")
+			_restart_cue("WAIT FOR THE GREEN - THEN THE GAS" if forgiving or auto_gas or not _restart_gas_held else "LIFT OFF THE GAS")
 		return
 	if p.launch_hold > 0.0:
 		# Green: the gas launches you.
 		var waited: float = race.time - float(ctl.green_at)
-		var go: bool = (gas_down and not _restart_gas_held) or (auto_gas and waited >= 0.3) or waited > 2.0 or (_restart_gas_held and gas_down and waited >= 0.35)
+		var go: bool = (gas_down and not _restart_gas_held) or (auto_gas and waited >= 0.3) or waited > 1.0 or (_restart_gas_held and gas_down and waited >= 0.2)
 		if _restart_gas_held and not gas_down:
 			_restart_gas_held = false
 		if go:

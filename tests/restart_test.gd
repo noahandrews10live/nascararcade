@@ -82,12 +82,16 @@ func _run() -> void:
 	var race = main.race
 	var ctl = race.control
 	ctl.debris_rate = 0.0
+	ctl.stage_ends.assign([]) # (no stage breaks: they set their own restart order)
 	await _frames(60 * 25)
 	var p: Node3D = race.player
 
 	# 1. A normal restart: wait for the green, then the gas.
 	_check(await _to_window(ctl), "a caution comes round to the restart window")
 	_human(p)
+	await _frames(2)
+	print("   under caution the HUD says: '%s'" % main.hud.auto_reason)
+	_check(String(main.hud.auto_reason).begins_with("CAUTION") and main.hud.l_auto.visible, "the HUD says the car is following the pace car until the green")
 	var go_at: float = ctl.restart_go_at
 	var n := 0
 	while ctl.flag == ctl.Flag.YELLOW and n < 60 * 30:
@@ -107,6 +111,7 @@ func _run() -> void:
 	_check(p.launch_hold > 1.0, "your car waits for your gas")
 	await _frames(12)
 	_check(p.ai and p.launch_hold > 0.0, "and rolls on at pace until then")
+	_check(String(main.hud.auto_reason).contains("HIT THE GAS"), "with the HUD saying so")
 	Input.action_press("accelerate")
 	await _frames(3)
 	var react: float = float(p.get_meta("restart_reaction", -1.0))
@@ -137,24 +142,52 @@ func _run() -> void:
 	_check(states.has(ctl.Pit.LANE) and states.has(ctl.Pit.EXIT) and not states.has(ctl.Pit.SERVICE) and p.pit_state == 0 and p.penalty == "", "served as a pass-through: down pit road, no stop")
 	await _frames(60 * 10)
 
-	# 3. Leading the restart.
+	# 2b. On a phone (the gas is half the screen), a touch before the green is
+	# never a jump: it's ignored, and the car is yours a moment after the green.
+	_check(await _to_window(ctl), "a restart on a phone")
+	main.touch.active = true
+	_human(p)
+	await _frames(2)
+	Input.action_press("accelerate")
+	await _frames(3)
+	Input.action_release("accelerate")
+	_check(p.penalty == "" and not p.want_pit, "a touch on the gas before the green isn't a jump")
+	n = 0
+	while ctl.flag == ctl.Flag.YELLOW and n < 60 * 30:
+		await physics_frame
+		n += 1
+	await _frames(int(60 * 1.2))
+	_check(p.launch_hold == 0.0 and not p.ai, "and the car is yours within a second of the green, gas or not")
+	main.touch.active = false
+	_robot()
+	await _frames(60 * 10)
+
+	# 3. Leading the restart: the gas before the zone is a jump, even for the
+	# leader (served like any other)...
 	race.give_lap(p) # (a lap up: you'll lead the field to the green)
 	race._update_order()
 	_check(await _to_window(ctl, true), "a restart with you in the lead")
 	_check(race.order[0] == p, "you lead it")
 	_human(p)
 	await _frames(2)
-	# The gas before the zone is a jump, even for the leader.
 	if ctl.restart_to_zone > 5.0:
 		Input.action_press("accelerate")
 		await _frames(2)
 		Input.action_release("accelerate")
 		_check(p.penalty == "PT", "leading, the gas before the zone is a jump")
-		p.penalty = ""
-		p.want_pit = false
-		if p.pit_state == ctl.Pit.APPROACH:
-			p.pit_state = ctl.Pit.NONE # (the test lets you off: no trip down pit road)
-		await _frames(2)
+	_robot()
+	n = 0
+	while (p.penalty != "" or p.pit_state != 0) and n < 60 * 200:
+		await physics_frame
+		n += 1
+	await _frames(60 * 10)
+
+	# ... and in the zone, your gas throws the green.
+	race.give_lap(p)
+	race.give_lap(p) # (well clear in front again)
+	race._update_order()
+	_check(await _to_window(ctl, true), "another restart with you in the lead")
+	_human(p)
 	n = 0
 	while ctl.restart_to_zone > -10.0 and ctl.flag == ctl.Flag.YELLOW and n < 60 * 30:
 		await physics_frame

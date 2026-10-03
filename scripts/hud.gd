@@ -41,6 +41,8 @@ var l_spot: Label
 var l_flag: Label
 var spot_time := 0.0
 var l_crew: Label
+var l_auto: Label # the car is driving itself: why (main sets auto_reason)
+var auto_reason := ""
 var l_goal: Label # in-race goals ticker (goals.gd), under the flag banner
 var goals: Node = null
 var crew_time := 0.0
@@ -96,6 +98,11 @@ func _ready() -> void:
 	l_crew.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	l_crew.visible = false
 	add_child(l_crew)
+	l_auto = Game.make_label("", 15, Color(0.55, 0.9, 1.0), 5)
+	l_auto.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	l_auto.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	l_auto.visible = false
+	add_child(l_auto)
 	l_goal = Game.make_label("", 13, Color(0.85, 0.95, 1.0), 4)
 	l_goal.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	l_goal.clip_text = true
@@ -135,6 +142,9 @@ func _layout() -> void:
 		var cw: float = clamp(band.y - band.x, 200.0, 460.0)
 		l_crew.size = Vector2(cw, 0)
 		l_crew.position = Vector2(max((band.x + band.y - cw) * 0.5, band.x), 58 + top)
+	if l_auto:
+		l_auto.size = Vector2(W - 80.0, 0)
+		l_auto.position = Vector2(40, H * 0.22)
 	if l_goal:
 		var gb := top_band()
 		l_goal.size = Vector2(max(gb.y - gb.x, 160.0), 20)
@@ -258,6 +268,7 @@ func crew_call(text: String, urgent := false) -> void:
 
 
 func clear_messages() -> void:
+	auto_reason = ""
 	crew_time = 0.0
 	if l_crew:
 		l_crew.visible = false
@@ -305,6 +316,9 @@ func _process(delta: float) -> void:
 		return
 	var p: Node3D = race.player if player_idx == 1 or race.player2 == null else race.player2
 	l_board.visible = H > 440.0 and not ticker_on
+	l_auto.visible = auto_reason != "" and player_idx == 1 and race.running and not race.player.finished
+	if l_auto.visible:
+		l_auto.text = auto_reason
 	# In-race goals: one line, the goal just done in gold.
 	var gt: Dictionary = goals.ticker() if goals and is_instance_valid(goals) and player_idx == 1 else {}
 	l_goal.visible = String(gt.get("text", "")) != "" and not l_crew.visible
