@@ -112,7 +112,7 @@ func _run() -> void:
 	me.carcass_temp[1] = 90.0
 	await _frames(40)
 	calls.clear()
-	var per_lap: float = race.track.length / 1000.0 * 0.62 * me.burn_scale
+	var per_lap: float = cw.fuel_per_lap(me, false) # (what the crew chief reckons a lap takes)
 	me.fuel = per_lap * 3.5
 	await _frames(40)
 	_check(calls.any(func(c): return String(c[0]).begins_with("FUEL FOR 3 LAPS")), "short on fuel: how many laps are left in it (%s)" % str(calls))
