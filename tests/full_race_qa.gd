@@ -116,6 +116,10 @@ func _run() -> void:
 	while main.state == main.State.RESULTS and not race.cars.all(func(c): return c.finished or c.out) and wait < 60 * 120:
 		await physics_frame
 		wait += 1
+		if OS.get_environment("QA_TRACE") != "" and wait % 600 == 1:
+			for c in race.cars:
+				if not (c.finished or c.out):
+					print("   [%.0f s: #%s lap %d, pit %d want %s plan %s pen '%s', fuel %.1f (lap %.2f), flat %s, %.0f m/s, %s, flag %d]" % [wait / 60.0, c.team.num, c.lap(), c.pit_state, c.want_pit, c.pit_plan, c.penalty, c.fuel, race.fuel_per_lap(c), c.has_flat(), c.speed(), race.track.place_name(c.s()), race.control.flag])
 	_check(race.cars.all(func(c): return c.finished or c.out), "every car finished or is out (the last %.0f s after the results)" % (wait / 60.0))
 	for c in race.cars:
 		if not (c.finished or c.out):

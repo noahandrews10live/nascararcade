@@ -18,6 +18,8 @@ var race: Node3D
 var me: Node3D
 var _t := 0.0
 var _level := {} # what -> the level already called (0 none, 1 warned, 2 urgent)
+var _said_t := {} # what -> when it was last called
+const REPEAT_GAP := 90.0 # s before a warning that cleared is made again
 var log: Array = [] # [{t, text, urgent}] (for tests and problem reports)
 var _time := 0.0
 
@@ -138,6 +140,11 @@ func _call(what: String, level: int, reset: int, text1: String, text2: String) -
 		_level[what] = 0
 		return
 	if level > said:
+		# The same warning again soon after it went away (a temperature hovering
+		# round the line) isn't news: give it a while. Urgent calls always go.
+		if said == 0 and level == 1 and _time - float(_said_t.get(what, -1e9)) < REPEAT_GAP:
+			return
+		_said_t[what] = _time
 		_level[what] = level
 		var text := text2 if level == 2 else text1
 		log.append({"t": _time, "text": text, "urgent": level == 2})
