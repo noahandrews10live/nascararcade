@@ -356,6 +356,16 @@ stand-in for the server.
 
 ## Race day
 
+- **Restarts are a skill.** The leader picks the spot to go inside the restart zone. When you're leading, your gas in the zone throws the green; before the zone it's a jump. Behind the leader, your car rolls on at pace after the green until you hit the gas, and the crew calls your reaction time ("RESTART: 0.20 s - GREAT JUMP!"). The AI field reacts in its own time (sharp drivers first). Hitting the gas before the green is jumping it: a pass-through penalty, served on your next trip down pit road (no stop).
+- **Fuel and tyre saving (SAVE).** V, the pause screen or the crew chief's offer turns it on: lift and coast into the corners and run lean. It burns about 12 to 23% less fuel and wears the tyres less, for roughly 0.4 to 1.2 s a lap. Fuel burn comes from the power you use (about 0.3 kg per kWh, plus idle), and each car measures its own fuel per lap. The crew chief's numbers come from what your car actually burned: "FUEL FOR 11 LAPS, 12 TO GO - SAVE AND WE MAKE IT (0.6 LAPS SPARE)", then "FUEL'S GOOD NOW - YOU CAN RACE IT". The HUD shows SV next to FUEL while you save. AI drivers save too when they're a little short.
+- **Drive pit road yourself.** Options → PIT ROAD: YOU DRIVE (the default) or AUTO. Race control steers; the pedals are yours from the approach to the blend line. Brake to the speed limit by the line and stop in your stall. Over the limit on pit road (with a small tolerance) means a pass-through next time. Stop past your box and the crew pushes you back (+3 s). Miss it by 30 m and there's no stop. AUTO GAS on a phone means AUTO.
+- **Pack tools at the superspeedways.** At Daytona- and Talladega-type tracks the crew names a drafting partner before the green (a car of your make). PUSH (G, the right stick, or PUSH on the phone when a car is in line behind you) asks the car behind for a push. Whether it helps depends on its trust in you: your partner almost always helps, a car of your make often does, and other cars only help if you've pushed them before. When a car helps, it rides your line onto your bumper and you feel the push in the draft meter. When it doesn't, it hangs you out: it pulls out of line and goes, or, if it's boxed in, backs out of your draft. Nobody is your friend on the last lap, though your partner is the least selfish. A clean bump-draft on someone's bumper builds their trust ("THEY'LL RETURN THE FAVOUR"), and your partner asks you for a push now and then.
+- **In-race goals.** Every race (Single Race, Season, Career) sets goals on a ticker under the flag banner. Each one pays XP the moment it's done, shown in gold:
+  - gain three spots in the stage, or win it if you start the stage near the front. A new goal is set each stage, from where you finished the last one;
+  - lead a lap;
+  - beat a rival who starts just ahead of you (a car that wrecks you becomes the rival).
+
+  The XP goes into the race's award ("+420 XP (GOALS +125)").
 - **Tyre failures and damage rules.**
   - Tyres cut from debris or bent fenders and leak down; a tyre whose carcass stays cooked (over about 175 °C) or that is worn out blows (a right front at turn entry sends you up the track).
   - Locking a wheel grinds a flat spot you can feel.
@@ -575,6 +585,8 @@ Rebuild after changes: export the **Web App** preset (`godot --headless --export
 | Quit race (while paused) | Q | — |
 | Pit this lap / change pit plan (Single Race, Season, Career) | Tab / O | X / D-pad up |
 | Choose restart lane at "one to go" | ← / → | Left stick |
+| Fuel/tyre saving on or off | V | D-pad down |
+| Call for a push (superspeedways) | G | Right stick click |
 | Shift up / down (manual gearbox) | E / Q | RB / LB |
 | Watch replay / highlights (results screen) | R / H | Right stick click / — |
 | Telemetry overlay | T | Left stick click |
@@ -677,6 +689,11 @@ Each test also runs on its own, headless (`godot --headless --fixed-fps 60 --pat
 | `tests/field_test.gd` | Full-field AI race with incident tracing (`TRACK=n SECS=s TRACE=car#`) |
 | `tests/rules_test.gd` | A full rules race: cautions, pits, stages and points |
 | `tests/pit_test.gd` | Pit road: the barrier walls on both sides, a green-flag stop that stays on the pit side of the barrier with no hard hits, the stop panel and summary, the jack drop (wait, release, push-off, jumping it), the light under caution, the quick-caution replay. TRACK=n picks the track |
+| `tests/restart_test.gd` | Restarts: the AI leader goes inside the zone, the field reacts in its own time, your reaction is timed and called, the gas before the green is a jump and a pass-through you then serve, and when you lead your gas in the zone throws the green |
+| `tests/save_test.gd` | SAVE: clearly less fuel and tyre wear for a modest lap time cost, the car measures its own fuel per lap, the crew chief's numbers are what it burned, "SAVE AND WE MAKE IT" and "RACE IT" (`TRACK=n`) |
+| `tests/pit_drive_test.gd` | PIT ROAD: YOU DRIVE: a clean stop, speeding (called, and a pass-through served next time), overshooting the stall (pushed back), never stopping (no service) |
+| `tests/pack_test.gd` | Superspeedway pack tools: the drafting partner, a push that comes onto your bumper, being hung out, last-lap selfishness, pushing builds trust, the partner's ask |
+| `tests/goals_test.gd` | In-race goals: stage gain (judged at a real stage end, the next one set), lead a lap (paid at once, gold on the ticker and HUD), a new rival when wrecked, the rival at the flag, the XP in the award |
 | `tests/caution_test.gd` | Quick cautions: the pit call screen, AI pit calls, the restart order, about 15 s yellow to green |
 | `tests/race_mode_test.gd` | Single Race through the real game flow |
 | `tests/weekend_test.gd` | Practice → qualifying → race, plus a season round |

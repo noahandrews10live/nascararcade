@@ -31,6 +31,7 @@ var arcade_setup := false # set before setup() for arcade races (ignores sim set
 var career := false # apply the career car's R&D level to the player
 var debug_no_lane_changes := false
 var control: Node = null # race_control.gd when the full rules are on
+var pack: Node = null # pack.gd: superspeedway push calls and drafting partners
 var _tick_count := 0
 
 # Replay recording: per frame, for every car (and the pace car): dist, d, yaw, v, visible.
@@ -177,6 +178,10 @@ func setup(trk: Node3D, player_team: int, lap_count: int, size := 25, grid: Arra
 			if career:
 				Game.apply_career(c)
 	order = cars.duplicate()
+	pack = load("res://scripts/pack.gd").new()
+	pack.name = "Pack"
+	add_child(pack)
+	pack.setup(self)
 
 
 ## Turns on cautions, pit stops, stages and points.
@@ -242,6 +247,8 @@ func go_green() -> void:
 	running = true
 	for c in cars:
 		c.pace_mode = false
+	if pack:
+		pack.announce()
 
 
 func tick(delta: float) -> void:
@@ -263,6 +270,8 @@ func tick(delta: float) -> void:
 	Game.pt("race.control", t0)
 	t0 = Time.get_ticks_usec()
 	_aero(delta)
+	if pack and running:
+		pack.tick(delta)
 	Game.pt("race.aero", t0)
 	t0 = Time.get_ticks_usec()
 	var t_ai := 0
@@ -307,6 +316,10 @@ func tick(delta: float) -> void:
 			wear.scuff(c)
 		if c.wall_hit > 9.0 or (c.tumbling and randf() < delta * 3.0):
 			spawn_debris(c.s(), c.d, 1 + int(c.wall_hit > 15.0))
+		if c.penalty != "" and c.pit_state == 0 and not c.out and not c.finished:
+			c.want_pit = true # a penalty owed: served on the next trip down pit road
+		if self_saver(c):
+			_ai_fuel_save(c)
 		var self_driven: bool = c.ai and (not c.is_player or c.autopilot_forced)
 		if c.has_flat() and c.ai and not c.is_player and c.pit_state == 0 and control and control.enabled and not c.out:
 			c.want_pit = true
@@ -351,9 +364,19 @@ func tick(delta: float) -> void:
 	if not debris.is_empty():
 		_debris_tick(delta)
 	# Laps / finish
+	var green_now: bool = control == null or control.flag != control.Flag.YELLOW
 	for c in cars:
 		var li: int = c.lap()
+		if not green_now or c.pit_state != 0 or c.saving:
+			c._fuel_lap_ok = false
 		if li > c.lap_idx:
+			# Fuel per green lap at normal pace (no caution, no pit, no saving).
+			if c._fuel_lap_ok and c._fuel_lap0 > 0.0 and li == c.lap_idx + 1:
+				var used: float = c._fuel_lap0 - c.fuel
+				if used > 0.02:
+					c.fuel_lap = used if c.fuel_lap <= 0.0 else lerp(c.fuel_lap, used, 0.4)
+			c._fuel_lap0 = c.fuel
+			c._fuel_lap_ok = true
 			c.lap_idx = li
 			track.rubber_laps = max(track.rubber_laps, float(li))
 			if li == 0:
@@ -712,6 +735,11 @@ func _aero(delta: float) -> void:
 	for i in n:
 		var c: Node3D = cars[i]
 		c.drag_mult = drag[i]
+		if c.push_t > 0.0 and c.push_for and pack:
+			# Going with the car that asked: tucked right in, driving to its bumper.
+			var pg: float = _gap(c, c.push_for)
+			if pg > Car.LENGTH and pg < 40.0:
+				c.drag_mult *= pack.COMMIT_DRAG
 		c.df_front_mult = move_toward(c.df_front_mult, front[i], delta * 3.0)
 		c.df_rear_mult = move_toward(c.df_rear_mult, 1.0 - 0.28 * float(c.get_meta("loosen", 0.0)), delta * 3.0)
 		c.draft = move_toward(c.draft, clamp(draft_amt[i], 0.0, 1.0), delta * 2.0)
@@ -823,6 +851,19 @@ func _drive_ai(c: Node3D, delta: float) -> void:
 		if pg > 0.0 and pg < ahead_gap:
 			ahead = control.pace_car
 			ahead_gap = pg - 36.0
+	# Pushing a car that asked (pack.gd): ride its line, onto its bumper.
+	if c.push_t > 0.0:
+		c.push_t -= delta
+		var pf: Node3D = c.push_for
+		var pg: float = _gap(c, pf) if pf and is_instance_valid(pf) else -1.0
+		if pf == null or controlled or pf.out or pf.spinning or pf.pit_state != 0 or pg < 0.0 or pg > 60.0:
+			c.push_t = 0.0
+			c.push_for = null
+		else:
+			c.ai_lane = pf.d
+			ahead = pf
+			ahead_gap = pg
+	c.hang_t = max(c.hang_t - delta, 0.0)
 	var drafting_track: bool = float(track.cfg.draft) > 0.8
 	# Stuck behind someone: patient drivers ride, impatient ones force it sooner.
 	if ahead and ahead_gap < 20.0 and not controlled:
@@ -830,7 +871,7 @@ func _drive_ai(c: Node3D, delta: float) -> void:
 	else:
 		c._stuck_behind = 0.0
 	var laps_left: int = laps - c.lap()
-	if c.ai_lane_timer <= 0.0 and not debug_no_lane_changes and not controlled:
+	if c.ai_lane_timer <= 0.0 and not debug_no_lane_changes and not controlled and c.push_t <= 0.0 and c.hang_t <= 0.0:
 		c.ai_lane_timer = rng.randf_range(0.4, 1.0)
 		var blocked: bool = ahead != null and ahead_gap < 20.0 and (ahead.v < c.v + 0.8 or ahead_gap < 9.0)
 		if blocked and not drafting_track and c._stuck_behind > c.ai_patience * 4.0:
@@ -880,6 +921,9 @@ func _drive_ai(c: Node3D, delta: float) -> void:
 		if not controlled and ((short_track and laps_left <= 3 and c.ai_aggression > 0.7) or grudge > 0.6) and abs(ahead.yaw) < 0.1:
 			bump_ok = true
 			want_gap = min(want_gap, 5.5)
+		if c.push_t > 0.0 and ahead == c.push_for:
+			bump_ok = true # (abs(k) aside: a push goes on through the turns at a superspeedway)
+			want_gap = 5.0
 		var err: float = ahead_gap - want_gap
 		# Never close faster than we could stop behind it.
 		var av: float = max(ahead.v, 0.0)
@@ -891,6 +935,15 @@ func _drive_ai(c: Node3D, delta: float) -> void:
 		if bump_ok and ahead_gap < 8.0:
 			match_v = ahead.v + (1.6 if c.rivals.get(ahead, 0.0) > 0.6 else 1.0)
 		target = min(target, match_v)
+		if c.push_t > 0.0 and ahead == c.push_for:
+			# Going with you: close at a few mph, then lean on the bumper (past the
+			# speed this driver would cruise the pack at).
+			target = max(target, ahead.v + (clamp(err * 0.25, 1.0, 4.0) if ahead_gap > Car.LENGTH + 0.4 else 0.6))
+	# Hung you out, boxed in (or the way out closed): backs out of your draft.
+	if c.hang_t > 0.0 and c.hang_t < pack.HANG_TIME - 1.0 and abs(c.d - float(c.get_meta("hang_from", 1e9))) < 1.5:
+		c.set_meta("hang_back", true)
+	if c.hang_t > 0.0 and c.get_meta("hang_back", false):
+		target = min(target, c.v - 1.0)
 	# Avoid spinning cars ahead.
 	for q in range(0, nbl.size(), 2):
 		var o: Node3D = nbl[q]
@@ -927,6 +980,10 @@ func _drive_ai(c: Node3D, delta: float) -> void:
 			# pressure slips up about once every few minutes.)
 			if abs(k) > 0.002 and rng.randf() < (1.0 - c.ai_consistency) * 0.02 * pressure * delta:
 				c._mistake = rng.randf_range(0.6, 1.4)
+	# A restart: until this driver reacts to the green, the car rolls on at pace.
+	if c.launch_hold > 0.0:
+		c.launch_hold = max(c.launch_hold - delta, 0.0)
+		target = min(target, c.v)
 	# Pedals, eased in and out like a driver's feet.
 	var want_thr := 0.0
 	var want_brk := 0.0
@@ -945,8 +1002,9 @@ func _drive_ai(c: Node3D, delta: float) -> void:
 	if c.slide > 0.2:
 		want_thr = 0.0 # catch it
 		want_brk = 0.0
-	c.throttle = move_toward(c.throttle, want_thr, delta * (6.0 if want_thr < c.throttle else 2.5))
-	c.brake = move_toward(c.brake, want_brk, delta * 4.0)
+	if not c.manual_pedals:
+		c.throttle = move_toward(c.throttle, want_thr, delta * (6.0 if want_thr < c.throttle else 2.5))
+		c.brake = move_toward(c.brake, want_brk, delta * 4.0)
 	# Steering: ask the assist for the yaw rate that follows the lane, with the
 	# track curvature fed forward.
 	var r_track: float = -k * cos(track.bank_at(ss)) * c.v / (1.0 + k * c.d)
@@ -1128,6 +1186,11 @@ func _contact(a: Node3D, b: Node3D, rel: Vector2) -> void:
 		# bumpers are built for it: a firm push, next to no twist or damage.
 		lever = 0.05
 		soft_push = true
+		if pack:
+			if n.x > 0.3:
+				pack.on_push(a, b)
+			else:
+				pack.on_push(b, a)
 	else:
 		# The hook: a nose into the rear quarter, off to one side, turns the car
 		# ahead around even at a few mph (a lever arm from the rear axle).
@@ -1260,9 +1323,40 @@ func _debris_tick(delta: float) -> void:
 			control.throw_caution("DEBRIS", null, track.place_name(float(oldest.s)))
 
 
-## Under two laps of fuel left (at full throttle) and more laps than that to go.
+## Fuel a car uses a green lap at normal pace: what it measured, or until it has,
+## a careful estimate (the most any track uses per km, plus a margin).
+const FUEL_PER_KM_GUESS := 0.85
+
+
+func fuel_per_lap(c: Node3D) -> float:
+	if c.fuel_lap > 0.0:
+		return c.fuel_lap
+	return track.length / 1000.0 * FUEL_PER_KM_GUESS * c.burn_scale
+
+
+## An AI driver who'd run dry just short of the finish saves instead of pitting:
+## SAVE on when saving makes it, off again once there's enough (or it won't).
+func self_saver(c: Node3D) -> bool:
+	return c.ai and (not c.is_player or c.autopilot_forced) and control != null and control.enabled and c.pit_state == 0 and not c.out and not c.finished
+
+
+func _ai_fuel_save(c: Node3D) -> void:
+	var to_go: float = float(laps - c.lap()) - fposmod(c.dist, track.length) / track.length
+	if to_go > 45.0 or control.flag == control.Flag.YELLOW:
+		c.saving = false
+		return
+	var need: float = to_go * fuel_per_lap(c)
+	if c.fuel >= need * 1.02:
+		c.saving = false
+	elif c.fuel >= need * (1.0 - 0.13) + fuel_per_lap(c) * 0.3:
+		c.saving = true
+	else:
+		c.saving = false # can't make it either way: it'll pit
+
+
+## Under two laps of fuel left and more laps than that to go.
 func _fuel_short(c: Node3D) -> bool:
-	var per_lap: float = track.length / 1000.0 * 0.62 * c.burn_scale
+	var per_lap: float = fuel_per_lap(c) * (1.0 - 0.15 if c.saving else 1.0)
 	if per_lap <= 0.0:
 		return false
 	if c.fuel <= 0.0 or c.speed() < 10.0:

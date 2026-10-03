@@ -166,6 +166,13 @@ var ai_patience := 0.5
 var ai_consistency := 0.8
 var ai_racecraft := 0.6
 var rivals := {}
+# Pack racing (pack.gd): trust in the player, the drafting partner, and a push
+# being given (push_for: the car being pushed) or the player hung out.
+var trust := 0.35
+var partner := false
+var push_for: Node3D = null
+var push_t := 0.0
+var hang_t := 0.0
 var _stuck_behind := 0.0
 var _mistake := 0.0 # seconds left of an overcooked corner
 
@@ -189,6 +196,27 @@ var _tr_cur := Transform3D()
 var _has_tr := false
 var _tr_frame := 0
 var tick_span := 1 # physics ticks between this car's steps (see race.gd's sim_level)
+var launch_hold := 0.0 # seconds after a restart's green before this car goes (its reaction)
+var penalty := "" # "PT": a pass-through on pit road owed (jumped a restart, sped on pit road)
+## SAVE mode (fuel and tyres): the engine runs leaner (a little less power, a
+## good deal less fuel for the work it does) and the driver lifts and coasts for
+## a moment before each turn. Less power and less throttle spin the rears less
+## too. It costs some lap time (tests/save_test.gd measures it).
+var manual_pedals := false # the player's pedals while race control steers (pit road)
+const PIT_ACCEL := 6.0 # m/s^2 on pit road, full throttle in a low gear
+const PIT_BRAKE := 11.0 # m/s^2 full brake
+var saving := false
+var fuel_lap := 0.0 # L a green lap at normal pace, as measured (0: not yet)
+var _fuel_lap0 := -1.0
+var _fuel_lap_ok := false
+const SAVE_POWER := 0.96
+const SAVE_EFF := 0.9 # fuel per unit of work, lean
+var _energy := 0.0 # J the engine delivered this step
+const FUEL_PER_J := 1.13e-7 # L of fuel per J of work (0.3 kg/kWh at 0.74 kg/L)
+const FUEL_IDLE := 0.0012 # L/s with the throttle shut
+const SAVE_LIFT_AHEAD := 0.5 # s: lift this long before the turn
+const SAVE_COAST := 0.0 # throttle while coasting in
+const SAVE_K := 0.0012 # curvature (1/m) that counts as a turn
 var player_steps := 4 # sub-steps per tick for a player's car (2 from the governor's level 2)
 var nb: Array = [] # neighbours [car, gap, ...] from race.gd
 # Chassis state: heave (m, + = up), pitch (rad, + = nose up), roll (rad, + = right
@@ -710,16 +738,22 @@ func step(delta: float) -> void:
 		return
 
 	if pit_state >= 2:
-		# Pit road (automatic): follow race control's speed and lane directly.
-		v = move_toward(v, kin_v, (9.0 if kin_v < v else 5.0) * delta)
+		# Pit road: race control steers (the lanes, into the stall); the speed is
+		# race control's too, or the player's own pedals (Options -> PIT ROAD).
+		if manual_pedals and pit_state != 3:
+			v = clamp(v + (throttle * PIT_ACCEL - brake * PIT_BRAKE - 0.4) * delta, 0.0, 70.0)
+			kin_v = v
+		else:
+			v = move_toward(v, kin_v, (9.0 if kin_v < v else 5.0) * delta)
 		vy = 0.0
 		r = -k * v
 		var dd: float = clamp(kin_d - d, -3.0 * delta, 3.0 * delta)
 		d += dd
 		yaw = lerp(yaw, clamp(dd / max(v * delta, 0.01), -0.3, 0.3), min(6.0 * delta, 1.0))
 		dist += v * delta / (1.0 + k * d)
-		throttle = 0.4 if kin_v > v else 0.0
-		brake = 0.3 if kin_v < v else 0.0
+		if not manual_pedals:
+			throttle = 0.4 if kin_v > v else 0.0
+			brake = 0.3 if kin_v < v else 0.0
 		rpm_now = clamp(v * RPM_PER_MPS[1], 2800.0, 9000.0)
 		gear = 2
 		reset_chassis()
@@ -730,6 +764,8 @@ func step(delta: float) -> void:
 		throttle = 0.0
 		brake = 1.0
 		steer_in = 0.0
+	if saving and not out:
+		_save_lift(ss, k)
 
 	var tq := Time.get_ticks_usec()
 	_update_static_loads()
@@ -779,13 +815,24 @@ func step(delta: float) -> void:
 	_update_tyres_after(delta, travelled)
 	Game.pt("car.tyres_after", tq)
 	tq = Time.get_ticks_usec()
-	fuel = max(0.0, fuel - travelled / 1000.0 * 0.62 * (0.3 + 0.7 * throttle) * burn_scale)
+	# Fuel goes with the work the engine does (a racing V8 burns about 0.3 kg of
+	# fuel per kWh), plus a little at idle: so a lift saves real fuel, which is
+	# what lift-and-coast is about.
+	fuel = max(0.0, fuel - (_energy * FUEL_PER_J + FUEL_IDLE * delta) * burn_scale)
+	_energy = 0.0
 	spinning = abs(yaw) > 0.6 and speed() > 8.0
 	if total_damage() > 0.72 and not out:
 		out = true
 		out_reason = "ACCIDENT"
 	_update_visual(delta)
 	Game.pt("car.visual", tq)
+
+
+func _save_lift(ss: float, k: float) -> void:
+	# Off the gas from about a second before each turn until it's in the turn.
+	var k_ahead: float = track.curvature_at(ss + max(v, 10.0) * SAVE_LIFT_AHEAD)
+	if abs(k) < SAVE_K * 0.6 and abs(k_ahead) > SAVE_K:
+		throttle = min(throttle, SAVE_COAST)
 
 
 ## Full model: four tyres with their own loads, a spool rear axle with stagger, and
@@ -809,7 +856,10 @@ func _integrate(h: float) -> void:
 	var p_avail: float = _engine_power(rpm_now) * dmg_power * engine_derate()
 	if rpm_now >= REDLINE or fuel <= 0.0:
 		p_avail = 0.0
+	if saving:
+		p_avail *= SAVE_POWER # leaner: a little less power
 	var fx_drive: float = throttle * p_avail * 0.88 / max(abs(u), 4.0)
+	_energy += throttle * p_avail * h * (SAVE_EFF if saving else 1.0) # the work done burns the fuel
 	if _shift_t > 0.0:
 		_shift_t -= h
 		fx_drive = 0.0 # the dog box between gears

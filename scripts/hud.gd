@@ -41,6 +41,8 @@ var l_spot: Label
 var l_flag: Label
 var spot_time := 0.0
 var l_crew: Label
+var l_goal: Label # in-race goals ticker (goals.gd), under the flag banner
+var goals: Node = null
 var crew_time := 0.0
 var crew_urgent := false
 var msg_time := 0.0
@@ -94,6 +96,12 @@ func _ready() -> void:
 	l_crew.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	l_crew.visible = false
 	add_child(l_crew)
+	l_goal = Game.make_label("", 13, Color(0.85, 0.95, 1.0), 4)
+	l_goal.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	l_goal.clip_text = true
+	l_goal.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	l_goal.visible = false
+	add_child(l_goal)
 	_layout()
 
 
@@ -127,6 +135,10 @@ func _layout() -> void:
 		var cw: float = clamp(band.y - band.x, 200.0, 460.0)
 		l_crew.size = Vector2(cw, 0)
 		l_crew.position = Vector2(max((band.x + band.y - cw) * 0.5, band.x), 58 + top)
+	if l_goal:
+		var gb := top_band()
+		l_goal.size = Vector2(max(gb.y - gb.x, 160.0), 20)
+		l_goal.position = Vector2(gb.x, 32 + top)
 
 
 func _place(l: Label, p: Vector2, corner: int) -> void:
@@ -293,6 +305,12 @@ func _process(delta: float) -> void:
 		return
 	var p: Node3D = race.player if player_idx == 1 or race.player2 == null else race.player2
 	l_board.visible = H > 440.0 and not ticker_on
+	# In-race goals: one line, the goal just done in gold.
+	var gt: Dictionary = goals.ticker() if goals and is_instance_valid(goals) and player_idx == 1 else {}
+	l_goal.visible = String(gt.get("text", "")) != "" and not l_crew.visible
+	if l_goal.visible:
+		l_goal.text = gt.text
+		l_goal.label_settings.font_color = Color(1.0, 0.82, 0.2) if gt.gold else Color(0.85, 0.95, 1.0)
 	# Flag / race-control strip (Single Race mode); the TV ticker shows it instead.
 	l_flag.visible = control != null and not ticker_on
 	if control:
@@ -435,6 +453,10 @@ func _draw() -> void:
 	draw_string(f, cc + Vector2(36, 14), "TIRE", HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color(0.8, 0.9, 1.0))
 	draw_string(f, cc + Vector2(36, 28), "%d%%" % int(p.tyre_grip() * 100.0), HORIZONTAL_ALIGNMENT_LEFT, -1, 12, dc.call(p.tyre_wear * 0.7))
 	draw_string(f, cc + Vector2(36, 44), "FUEL", HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color(0.8, 0.9, 1.0))
+	if p.saving:
+		# SAVE mode on: a green tag by the fuel.
+		draw_rect(Rect2(cc + Vector2(60, 35), Vector2(18, 11)), Color(0.15, 0.6, 0.25, 0.9))
+		draw_string(f, cc + Vector2(60, 44), "SV", HORIZONTAL_ALIGNMENT_CENTER, 18, 9, Color.WHITE)
 	draw_string(f, cc + Vector2(36, 58), "%.1f" % (p.fuel / 3.785), HORIZONTAL_ALIGNMENT_LEFT, -1, 12, dc.call(1.0 - p.fuel / 75.0))
 	# Water temperature (F, like the real dash), and the DVP clock when it's running.
 	var wt: float = p.engine_temp

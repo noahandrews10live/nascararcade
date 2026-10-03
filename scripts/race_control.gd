@@ -15,6 +15,7 @@ signal pit_report(lines: Array)
 signal remote_pit_call(car: Node3D, info: Dictionary)
 signal remote_answer(call: String, wedge_change: float)
 signal lined_up(rows: Array)
+signal stage_done(n: int, order: Array) # a stage's finishing order (cars, towed left out)
 
 enum Flag { GREEN, YELLOW, WHITE, CHECKERED }
 enum Pit { NONE, APPROACH, LANE, SERVICE, EXIT }
@@ -285,6 +286,7 @@ func on_leader_lap(lap_done: int) -> void:
 func _end_stage(caution := true) -> void:
 	var top: Array = []
 	var i := 0
+	stage_done.emit(stage, race.order.filter(func(c): return not c.towed))
 	for c in race.order:
 		if c.towed:
 			continue
@@ -511,6 +513,7 @@ func _caution_tick(delta: float) -> void:
 			choosing = true
 		if caution_laps >= caution_needed_laps:
 			restart_armed = true
+			_arm_restart()
 			choosing = false
 			if overtime:
 				var lead := leader()
@@ -518,15 +521,92 @@ func _caution_tick(delta: float) -> void:
 				message.emit("OVERTIME  -  GREEN-WHITE-CHECKERED", "flag")
 	if one_to_go and choosing:
 		_assign_lanes()
-	# Restart: the leader goes when the field reaches the restart zone.
+	# Restart: the leader goes somewhere in the restart zone, at a point of their
+	# choosing (you choose, when you lead: hit the gas in the zone).
 	if restart_armed:
 		var lead := leader()
 		var to_line: float = fposmod(-lead.s(), track.length)
-		if to_line < 80.0 and to_line > 5.0:
+		restart_window = to_line < RESTART_WINDOW
+		restart_to_zone = to_line - RESTART_ZONE
+		if _is_human(lead) and lead == race.player:
+			if player_go and to_line < RESTART_ZONE:
+				_go_green()
+			elif to_line < 5.0:
+				_go_green() # didn't go: the flagman throws it anyway
+		elif to_line < restart_go_at and to_line > 2.0:
 			_go_green()
+	else:
+		restart_window = false
+
+
+## Driving pit road yourself: the stall is this long either side of the mark,
+## and overshooting it costs this much while the crew pushes you back.
+const STALL_HALF := 3.5
+const OVERSHOOT_TIME := 3.0
+## Over the limit by more than this (m/s, about 2 mph) on pit road is speeding.
+const SPEED_TOLERANCE := 0.9
+
+
+## The pit road speed trap, for a car you drive: from the line in to the line
+## out. Once a stop: a pass-through penalty, served on the next trip down pit
+## road (not this one: the stop still gets made).
+func pit_speed_check(c: Node3D) -> void:
+	if c.pit_state < Pit.LANE or c.pit_state == Pit.SERVICE or c.has_meta("sped"):
+		return
+	if not track.in_pit_zone(c.s()):
+		return
+	if c.v > pit_speed + SPEED_TOLERANCE:
+		c.set_meta("sped", true)
+		message.emit("SPEEDING ON PIT ROAD (%d MPH IN A %d)  -  PASS-THROUGH PENALTY" % [roundi(c.v * 2.237), roundi(pit_speed * 2.237)], "flag")
+
+
+## The restart zone (from the line back): the leader must go inside it.
+const RESTART_ZONE := 80.0
+## From here (leader to the line) the field is on the restart: a gas press now
+## from anyone but the leader is jumping it.
+const RESTART_WINDOW := 220.0
+var restart_go_at := 40.0 # where an AI leader goes, this restart
+var restart_window := false
+var restart_to_zone := 0.0 # metres until the leader reaches the zone (<0: in it)
+var player_go := false # the player leads and has hit the gas
+var green_at := -1.0 # race time of the last restart's green (for the reaction)
+
+
+var restart_id := 0 # counts restarts (main tracks the gas pedal per restart)
+
+
+func _arm_restart() -> void:
+	restart_go_at = randf_range(12.0, RESTART_ZONE - 6.0)
+	player_go = false
+	restart_id += 1
+
+
+## Someone hit the gas before the leader went: the black flag, a pass-through.
+func jumped_restart(c: Node3D) -> void:
+	if c.penalty != "":
+		return
+	c.penalty = "PT"
+	c.want_pit = true
+	message.emit(("YOU JUMPED THE RESTART" if c.is_player else "#%s %s JUMPED THE RESTART" % [c.team.num, c.team.driver]) + "  -  PASS-THROUGH PENALTY", "flag")
 
 
 func _go_green() -> void:
+	green_at = race.time
+	restart_window = false
+	player_go = false
+	# Everyone reacts to the green in their own time: the leader goes when they
+	# choose; sharp, aggressive drivers get a jump on it, the rest a beat later.
+	# (main times the player's own reaction.)
+	var lead_c := leader()
+	for c in race.cars:
+		if c.out or c.towed or c.pit_state != Pit.NONE:
+			continue
+		if c == lead_c:
+			c.launch_hold = 0.0
+		elif _is_human(c):
+			c.launch_hold = 99.0
+		else:
+			c.launch_hold = randf_range(0.12, 0.3) + 0.35 * (1.0 - c.ai_racecraft) + randf() * 0.15 * (1.0 - c.ai_consistency)
 	flag = Flag.GREEN
 	quick_phase = ""
 	one_to_go = false
@@ -570,7 +650,7 @@ func _ai_pit_decisions() -> void:
 			continue
 		if not c.ai and c.is_player:
 			continue # the player chooses
-		var fuel_need: float = laps_left * track.length / 1000.0 * 0.5 * c.burn_scale
+		var fuel_need: float = laps_left * race.fuel_per_lap(c)
 		var wants: bool = c.tyre_wear > 0.12 or c.fuel < fuel_need + 5.0 or c.total_damage() > 0.12
 		if laps_left < 6 and c.fuel > fuel_need:
 			wants = false
@@ -651,6 +731,8 @@ func caution_drive(c: Node3D) -> Array:
 
 
 func pit_drive(c: Node3D) -> Array:
+	if c.manual_pedals:
+		pit_speed_check(c)
 	var res := _pit_drive(c)
 	if c.pit_state >= Pit.LANE and c.pit_state != Pit.SERVICE:
 		# Queue behind the car ahead on pit road.
@@ -673,7 +755,9 @@ func _pit_drive(c: Node3D) -> Array:
 	match c.pit_state:
 		Pit.APPROACH:
 			var to_entry: float = fposmod(pin - ss, L)
-			if (to_entry > L * 0.5 or to_entry < track.PIT_LANE_EXT - 10.0) and c.d < track.inner_edge():
+			# (On the entry lane: just short of the line, or just past it. Not "the
+			# line is behind me", which is also true just after leaving pit road.)
+			if (to_entry < track.PIT_LANE_EXT - 10.0 or fposmod(ss - pin, L) < 60.0) and c.d < track.inner_edge():
 				# Onto the pit entry lane: pit road driving is automatic from here.
 				c.pit_state = Pit.LANE
 				message_for(c, "ON PIT ROAD", "pit")
@@ -698,6 +782,32 @@ func _pit_drive(c: Node3D) -> Array:
 			if to_line < L * 0.5 and to_line > 0.0:
 				# Still on the entry lane: slow to pit road speed by the line.
 				return [max(pit_speed, sqrt(pit_speed * pit_speed + 2.0 * 6.0 * to_line) * 0.9), lane_d + 1.6]
+			if c.penalty == "PT":
+				# A pass-through: down pit road at the limit, no stop.
+				c.penalty = ""
+				c.pit_state = Pit.EXIT
+				message_for(c, "PASS-THROUGH: STAY ON THE LIMIT", "pit")
+				return [pit_speed, lane_d + 1.6]
+			if c.manual_pedals:
+				# You drive it in: stop in the stall. Past it, the crew pushes you
+				# back (it costs time).
+				var rel: float = fposmod(box_s(c) - ss + L * 0.5, L) - L * 0.5
+				if abs(rel) < STALL_HALF and c.v < 0.8:
+					_start_service(c)
+					return [0.0, lane_d - 1.6]
+				if rel < -30.0:
+					# Never stopped: no service. On down pit road (call it again).
+					c.pit_state = Pit.EXIT
+					c.want_pit = false
+					message_for(c, "MISSED YOUR STALL - NO STOP", "pit")
+					return [c.v, lane_d + 1.6]
+				if rel < -STALL_HALF and c.v < 3.0:
+					c.dist += rel # pushed back into the box
+					c.set_meta("overshoot", OVERSHOOT_TIME)
+					message_for(c, "PAST THE BOX: THE CREW PUSHES YOU BACK", "pit")
+					_start_service(c)
+					return [0.0, lane_d - 1.6]
+				return [c.v, lane_d - 1.6 if (rel < 30.0) else lane_d + 1.6]
 			if to_box < 1.5 and c.v < 3.0:
 				_start_service(c)
 				return [0.0, lane_d - 1.6]
@@ -730,6 +840,9 @@ func _pit_drive(c: Node3D) -> Array:
 				if past_exit > track.PIT_LANE_EXT and race._lane_clear(c, race.lanes[0]):
 					c.pit_state = Pit.NONE
 					c.want_pit = false
+					if c.has_meta("sped"):
+						c.remove_meta("sped")
+						c.penalty = "PT" # served next time pit road is open
 					if c.is_player and not c.autopilot_forced:
 						c.ai = false
 					return [pit_speed * 3.0, race.lanes[0]]
@@ -746,7 +859,8 @@ func _start_service(c: Node3D) -> void:
 	c.vy = 0.0
 	c.r = 0.0
 	c.pitted_this_caution = true
-	c.pit_timer = _service(c)
+	c.pit_timer = _service(c) + float(c.get_meta("overshoot", 0.0))
+	c.remove_meta("overshoot")
 	message_for(c, "PIT STOP  %s  %.1fs" % [{"4": "4 TIRES + FUEL", "2": "2 TIRES + FUEL", "F": "FUEL ONLY"}.get(c.pit_plan, "FUEL"), c.pit_timer], "pit")
 
 
@@ -880,7 +994,7 @@ func player_info(who: Node3D = null) -> Dictionary:
 		_calls[p] = o
 		est[o] = _compute_order().find(p) + 1
 	_calls.erase(p)
-	var per_lap: float = track.length / 1000.0 * 0.5 * max(p.burn_scale, 0.01)
+	var per_lap: float = max(race.fuel_per_lap(p), 0.001)
 	return {
 		"options": options,
 		"names": options.map(func(o): return PLAN_NAMES[o]),
@@ -935,7 +1049,7 @@ func ai_pit_call(c: Node3D, advice := false) -> String:
 	var laps_left: int = max(race.laps - lead.lap(), 0)
 	var pos: int = max(_freeze.find(c) + 1, 1)
 	var field: int = max(_freeze.size(), 1)
-	var per_lap: float = track.length / 1000.0 * 0.5 * max(c.burn_scale, 0.01)
+	var per_lap: float = max(race.fuel_per_lap(c), 0.001)
 	var fuel_laps: float = c.fuel / max(per_lap, 0.001)
 	# Running dry within a few laps makes a stop compulsory. Otherwise topping up is
 	# worth what it saves later: nothing if it'll make the finish, and in proportion
@@ -1129,6 +1243,7 @@ func _quick_apply() -> void:
 			pit_open = true # a long hold: anyone short of fuel can stop
 	else:
 		restart_armed = true
+		_arm_restart()
 	# The board: who pitted, who stayed out, and how it came out for the player.
 	var p: Node3D = race.player
 	var stay_out := 0

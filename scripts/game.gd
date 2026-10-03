@@ -715,11 +715,11 @@ func add_streak_day() -> Dictionary:
 	return {"streak": int(progress.streak), "xp": bonus, "unlocked_scheme": not had and scheme_unlocked(SCHEME_LEVEL.size())}
 
 
-## XP for a race: the result, the laps run, a clean race, a win. Returns
-## {xp, total, level, levelled_up}.
-func award_race(place: int, field: int, laps: int, clean: bool) -> Dictionary:
+## XP for a race: the result, the laps run, a clean race, a win, and the
+## in-race goals done (`goals`). Returns {xp, total, level, levelled_up, goals}.
+func award_race(place: int, field: int, laps: int, clean: bool, goals := 0) -> Dictionary:
 	var before := level()
-	var xp: int = 60 + maxi(field - place, 0) * 8 + laps * 6
+	var xp: int = 60 + maxi(field - place, 0) * 8 + laps * 6 + goals
 	if place == 1:
 		xp += 200
 	elif place <= 3:
@@ -728,7 +728,7 @@ func award_race(place: int, field: int, laps: int, clean: bool) -> Dictionary:
 		xp += 40
 	progress.xp = int(progress.xp) + xp
 	save_progress()
-	return {"xp": xp, "total": progress.xp, "level": level(), "levelled_up": level() > before}
+	return {"xp": xp, "total": progress.xp, "level": level(), "levelled_up": level() > before, "goals": goals}
 
 
 func daily_challenge() -> Dictionary:
@@ -863,7 +863,7 @@ var settings := {
 	# field: -1 = AUTO (see field_size), else an index into FIELDS.
 	"length": 1, "difficulty": 1, "field": -1, "auto_field": 0, "cautions": 1, "damage": 1, "wear": 1, "weather": 0,
 	"assists": 2, "manual": 0, "weekend": 1, "touch_tilt": true, "tilt_sens": 1, "res_mode": 0, "commentary": 1, "catchup": 0,
-	"auto_gas": 0, "tutorial_done": 0, "share_stats": 1, "haptics": 1, "battery": 1, "draft_cue": 1, "tv_graphics": 1, "rewinds": 1, "pit_view": 1,
+	"auto_gas": 0, "tutorial_done": 0, "share_stats": 1, "haptics": 1, "battery": 1, "draft_cue": 1, "tv_graphics": 1, "rewinds": 1, "pit_view": 1, "pit_drive": 1,
 	"big_text": 0, "map_contrast": 0, "hand": 0, # accessibility: larger text, high-contrast map, left-handed controls
 }
 ## Garage setup (applied to the player's car): -3..3 balance (tight..loose),
@@ -1766,6 +1766,8 @@ func _setup_input() -> void:
 		"replay": [KEY_R, "btn:%d" % JOY_BUTTON_RIGHT_STICK],
 		"pit": [KEY_TAB, "btn:%d" % JOY_BUTTON_X],
 		"pit_option": [KEY_O, "btn:%d" % JOY_BUTTON_DPAD_UP],
+		"save_fuel": [KEY_V, "btn:%d" % JOY_BUTTON_DPAD_DOWN],
+		"push": [KEY_G, "btn:%d" % JOY_BUTTON_RIGHT_STICK],
 		"shift_up": [KEY_E, "btn:%d" % JOY_BUTTON_RIGHT_SHOULDER],
 		"shift_down": [KEY_Q, "btn:%d" % JOY_BUTTON_LEFT_SHOULDER],
 		"pause": [KEY_ESCAPE, KEY_P, "btn:%d" % JOY_BUTTON_BACK],

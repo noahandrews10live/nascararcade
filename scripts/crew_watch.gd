@@ -27,9 +27,55 @@ func begin(r: Node3D) -> void:
 	me = r.player
 
 
+## Fuel per lap as your car actually burns it, measured lap by lap (green laps
+## with no pit stop), separately for normal laps and SAVE laps. Until a SAVE lap
+## has been run, saving is reckoned at SAVE_CUT less (tests/save_test.gd).
+const SAVE_CUT := 0.13
+var _fpl := {false: 0.0, true: 0.0}
+var _lap_seen := -1
+var _lap_fuel0 := 0.0
+var _lap_clean := true
+var _lap_saving := true
+var _lap_normal := true
+signal offer_save(on: bool) # the crew chief says saving makes it (the HUD offers a button)
+
+
+func fuel_per_lap(c: Node3D, saving: bool) -> float:
+	var m: float = _fpl[saving]
+	if m > 0.0:
+		return m
+	var normal: float = _fpl[false] if _fpl[false] > 0.0 else race.fuel_per_lap(c)
+	if saving:
+		return _fpl[true] if _fpl[true] > 0.0 else normal * (1.0 - SAVE_CUT)
+	return normal
+
+
+func _measure() -> void:
+	var lap: int = me.lap()
+	var ctl: Node = race.control
+	if me.pit_state != 0 or (ctl and ctl.flag == ctl.Flag.YELLOW):
+		_lap_clean = false
+	if me.saving:
+		_lap_normal = false
+	else:
+		_lap_saving = false
+	if lap != _lap_seen:
+		if _lap_seen >= 1 and lap == _lap_seen + 1 and _lap_clean and (_lap_saving or _lap_normal):
+			var used: float = _lap_fuel0 - me.fuel
+			if used > 0.05:
+				var k: bool = _lap_saving
+				_fpl[k] = used if _fpl[k] <= 0.0 else lerp(_fpl[k], used, 0.5)
+		_lap_seen = lap
+		_lap_fuel0 = me.fuel
+		_lap_clean = true
+		_lap_saving = me.saving
+		_lap_normal = not me.saving
+
+
 func tick(delta: float) -> void:
 	if race == null or me == null or not is_instance_valid(me) or not race.running:
 		return
+	_measure()
 	_time += delta
 	_t += delta
 	if _t < CHECK:
@@ -52,18 +98,31 @@ func tick(delta: float) -> void:
 			worn_i = i
 	var w: float = me.tyre_wear4[worn_i]
 	_call("worn", 2 if w > VERY_WORN else (1 if w > WORN else 0), 0 if w < 0.3 else -1,
-		"TIRES ARE ABOUT DONE (%s %d%%) - PIT WHEN YOU CAN" % [NAMES[worn_i], int(w * 100.0)],
+		"TIRES ARE ABOUT DONE (%s %d%%) - SAVE THEM OR PIT WHEN YOU CAN" % [NAMES[worn_i], int(w * 100.0)],
 		"TIRES ARE GONE - THEY COULD BLOW, PIT NOW")
-	# Fuel: enough to get to the end?
-	var per_lap: float = race.track.length / 1000.0 * 0.62 * me.burn_scale
-	var fuel_laps: int = int(me.fuel / max(per_lap, 0.001))
-	var to_go: int = race.laps - me.lap()
+	# Fuel: enough to get to the end? If saving would make it, say so (and by how
+	# much); if not, when to pit.
+	var normal_laps: float = me.fuel / max(fuel_per_lap(me, false), 0.001)
+	var save_laps: float = me.fuel / max(fuel_per_lap(me, true), 0.001)
+	var to_go: float = float(race.laps - me.lap()) - fposmod(me.dist, race.track.length) / race.track.length
+	var fuel_laps: int = int(normal_laps)
 	var fl := 0
-	if fuel_laps < to_go:
-		fl = 2 if fuel_laps <= 1 else (1 if fuel_laps <= 4 else 0)
-	_call("fuel", fl, 0 if fuel_laps > 6 else -1,
-		"FUEL FOR %d LAPS, %d TO GO - PIT IN THE NEXT %d" % [fuel_laps, to_go, max(fuel_laps - 1, 1)],
-		"YOU'RE ABOUT TO RUN DRY - PIT THIS LAP")
+	if normal_laps < to_go:
+		fl = 2 if normal_laps <= 1.5 else (1 if normal_laps <= 4.5 else 0)
+	var can_save: bool = normal_laps < to_go and save_laps >= to_go + 0.3 and to_go <= 45.0
+	if can_save:
+		if not me.saving:
+			_call("save", 1, -1,
+				"FUEL FOR %d LAPS, %d TO GO - SAVE AND WE MAKE IT (%.1f LAPS SPARE)" % [fuel_laps, ceili(to_go), save_laps - to_go], "")
+			offer_save.emit(true)
+		else:
+			_call("save", 2, -1, "", "KEEP SAVING - WE MAKE IT BY %.1f LAPS" % (save_laps - to_go))
+	elif me.saving and normal_laps >= to_go + 0.5:
+		_call("saved", 1, -1, "FUEL'S GOOD NOW - YOU CAN RACE IT", "")
+	else:
+		_call("fuel", fl, 0 if normal_laps > 6.5 else -1,
+			"FUEL FOR %d LAPS, %d TO GO - PIT IN THE NEXT %d" % [fuel_laps, ceili(to_go), max(fuel_laps - 1, 1)],
+			"YOU'RE ABOUT TO RUN DRY - PIT THIS LAP")
 	# Water temperature (a grille full of grass or rubber, or too long in the draft).
 	var wt: float = me.engine_temp
 	_call("water", 2 if wt > 130.0 else (1 if wt > 118.0 else 0), 0 if wt < 108.0 else -1,

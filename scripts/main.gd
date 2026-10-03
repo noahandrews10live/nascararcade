@@ -66,6 +66,7 @@ var tutorial: Control # first race on a phone: short prompts
 var cloud: Node # leaderboards, friends, events, progress online
 var rival: Node3D # someone else's best lap to chase (a ghost)
 var last_award := {} # the XP the last race earned
+var goals: Node = null # goals.gd: this race's in-race goals
 var _frame_ms: PackedFloat32Array = [] # this race's frame times (for the stats)
 var frame_timer: Node # times our own work each frame (for AUTO field sizes)
 var _script_ms := 0.0 # this race's script time, summed over _frame_ms's frames
@@ -1053,6 +1054,16 @@ func _new_race(player_team: int) -> void:
 		race.incident.connect(func(c: Node3D, _kind: String):
 			if c == race.player:
 				_offer_rewind())
+	# In-race goals (stage gains, lead a lap, beat a rival) for XP.
+	if goals and is_instance_valid(goals):
+		goals.queue_free()
+	goals = null
+	if race.player and race.player2 == null and session == "race" and mode not in ["arcade", "online", "2p", "challenge"]:
+		goals = load("res://scripts/goals.gd").new()
+		add_child(goals)
+		goals.begin(race)
+	if hud:
+		hud.goals = goals
 	# The crew chief watching your car (full-rules races and practice).
 	if crew_watch and is_instance_valid(crew_watch):
 		crew_watch.queue_free()
@@ -1062,6 +1073,7 @@ func _new_race(player_team: int) -> void:
 		add_child(crew_watch)
 		crew_watch.begin(race)
 		crew_watch.warn.connect(_on_crew_warn)
+		crew_watch.offer_save.connect(_on_offer_save)
 	if mode == "online":
 		net.attach(race)
 	# Time of day for every race; weather for the full-rules races.
@@ -1572,6 +1584,8 @@ func _enter_results() -> void:
 		var txt := "+%d XP     LEVEL %d  (%d / %d)" % [int(last_award.xp), int(last_award.level), int(lp[0]), int(lp[1])]
 		if last_award.levelled_up:
 			txt = "LEVEL UP!  LEVEL %d     +%d XP" % [int(last_award.level), int(last_award.xp)]
+		if int(last_award.get("goals", 0)) > 0:
+			txt += "   (GOALS +%d)" % int(last_award.goals)
 		_label("", txt, 16, Color(1.0, 0.85, 0.2), Vector2(0, min(y2, 412)), HORIZONTAL_ALIGNMENT_CENTER, 5)
 	_label("start", _press("CONTINUE"), 20, Color.WHITE, Vector2(0, 440), HORIZONTAL_ALIGNMENT_CENTER, 5)
 	if race.rec_times.size() > 20:
@@ -1594,7 +1608,7 @@ func _on_lap(car: Node3D, laps_done: int, lap_time: float) -> void:
 		var pos: int = race.position_of(car)
 		var lead: Node3D = race.order[0]
 		var gap: float = (lead.dist - car.dist) / max(car.v, 20.0)
-		var fuel_laps: int = int(car.fuel / max(track.length / 1000.0 * 0.62 * car.burn_scale, 0.001))
+		var fuel_laps: int = int(car.fuel / max(race.fuel_per_lap(car), 0.001))
 		var tyre: String = "tires are good" if car.tyre_grip() > 0.95 else ("tires are going away" if car.tyre_grip() > 0.88 else "tires are gone")
 		var where: String = "you're the leader" if pos == 1 else "P%d, %.1f back of the leader" % [pos, gap]
 		_radio("%s. %s, fuel for %d laps." % [where, tyre, fuel_laps])
@@ -1661,7 +1675,7 @@ func _on_finished(car: Node3D, place: int) -> void:
 	if session == "race" and car == race.player and mode != "2p" and mode != "arcade" and mode != "online" and mode != "challenge":
 		Game.add_recent(Game.selected_track, place, race.cars.size())
 	if session == "race" and car == race.player and mode != "2p":
-		last_award = Game.award_race(place, race.cars.size(), race.laps, car.total_damage() < 0.08)
+		last_award = Game.award_race(place, race.cars.size(), race.laps, car.total_damage() < 0.08, goals.earned if goals and is_instance_valid(goals) else 0)
 		cloud.push_profile()
 		_send_stats()
 	_set_state(State.FINISHED)
@@ -2232,11 +2246,16 @@ func _player_input() -> void:
 	if autopilot:
 		p.ai = true
 		p.autopilot_forced = true
+		p.manual_pedals = false
 		return
+	if Input.is_action_just_pressed("push"):
+		call_push()
 	var ctl: Node = race.control
 	if ctl:
 		if Input.is_action_just_pressed("pit"):
 			toggle_pit()
+		if Input.is_action_just_pressed("save_fuel"):
+			toggle_save()
 		if Input.is_action_just_pressed("pit_option"):
 			var cycle := {"4": "2", "2": "F", "F": "4"}
 			if track.cfg.get("road", false) and race.weather and race.weather.mode > 0:
@@ -2249,9 +2268,17 @@ func _player_input() -> void:
 		elif ctl.choosing and Input.is_action_just_pressed("steer_right"):
 			ctl.player_lane_choice = 1
 			_sub("RESTART: OUTSIDE LANE", 2.0)
-		# The car drives itself under caution and on pit road (auto pit / auto caution).
-		var auto: bool = ctl.flag == ctl.Flag.YELLOW or p.pit_state != 0 or (p.want_pit and _near_pit_entry(p))
+		_restart_input(p, ctl)
+		# The car drives itself under caution and on pit road (auto pit / auto caution),
+		# and rolls on at pace after a restart's green until you hit the gas. With
+		# PIT ROAD: YOU DRIVE the pedals on pit road are yours (it still steers).
+		var to_pits: bool = p.pit_state != 0 or (p.want_pit and _near_pit_entry(p))
+		p.manual_pedals = to_pits and pit_drive_manual()
+		var auto: bool = ctl.flag == ctl.Flag.YELLOW or to_pits or p.launch_hold > 0.0
 		p.ai = auto
+		if p.manual_pedals:
+			p.throttle = Input.get_action_strength("accelerate")
+			p.brake = Input.get_action_strength("brake")
 		if auto:
 			return
 	p.throttle = Input.get_action_strength("accelerate")
@@ -2651,7 +2678,7 @@ func _pause_status_text() -> String:
 		for i in 4:
 			worst = max(worst, CrewWatch.tyre_health(p, i))
 		bits.append("TIRES " + ("GOOD" if worst < 0.34 else ("WATCH THEM" if worst < 0.7 else "IN TROUBLE")))
-		var per_lap: float = track.length / 1000.0 * 0.62 * p.burn_scale
+		var per_lap: float = race.fuel_per_lap(p)
 		bits.append("FUEL %d LAPS" % int(p.fuel / max(per_lap, 0.001)))
 	return "  -  ".join(bits)
 
@@ -3006,6 +3033,7 @@ func _apply_resume() -> void:
 
 
 func _process(delta: float) -> void:
+	save_offer_t = max(save_offer_t - delta, 0.0)
 	var tp := Time.get_ticks_usec()
 	if race:
 		pit_show.update(delta)
@@ -3237,6 +3265,111 @@ func _fov_for(h_deg: float, max_v: float) -> float:
 	var aspect: float = sz.x / max(sz.y, 1.0)
 	var v: float = rad_to_deg(2.0 * atan(tan(deg_to_rad(h_deg) * 0.5) / max(aspect, 0.5)))
 	return clamp(v, 40.0, max_v)
+
+
+## Restarts are yours to time. In the restart window (the leader's last 220 m to
+## the line) the field rolls at pace: hit the gas before the green and you've
+## jumped it (a pass-through); when the green comes, the gas launches you and
+## the time it took is your restart. Leading, you choose: the gas anywhere in the
+## zone (the last 80 m) throws the green. A thumb already on the gas when the
+## window opens isn't a jump (lift and press again); AUTO GAS goes for you.
+var _restart_gas_held := false
+var _restart_seen := 0
+var _restart_cue_t := 0.0
+
+
+func _restart_input(p: Node3D, ctl: Node) -> void:
+	var gas_down: bool = Input.get_action_strength("accelerate") > 0.5
+	var auto_gas: bool = int(Game.settings.get("auto_gas", 0)) == 1 and Game.touch_active
+	if not (ctl.restart_armed and ctl.flag == ctl.Flag.YELLOW) and p.launch_hold <= 0.0:
+		_restart_gas_held = gas_down # (no restart on: just track the pedal)
+		return
+	if ctl.restart_id != _restart_seen:
+		# A new restart: a foot already on the gas isn't a jump (until it lifts).
+		_restart_seen = ctl.restart_id
+		_restart_gas_held = gas_down
+	if ctl.restart_armed and ctl.flag == ctl.Flag.YELLOW:
+		var leading: bool = race.order.size() > 0 and race.order[0] == p
+		if not ctl.restart_window:
+			_restart_gas_held = gas_down
+			return
+		if _restart_gas_held and not gas_down:
+			_restart_gas_held = false # lifted: the next press counts
+		var pressed: bool = gas_down and not _restart_gas_held
+		if leading:
+			if auto_gas and ctl.restart_to_zone < -ctl.RESTART_ZONE * 0.5:
+				pressed = true
+			if pressed:
+				if ctl.restart_to_zone > 0.0:
+					ctl.jumped_restart(p) # before the zone: that's a jump too
+				else:
+					ctl.player_go = true
+			_restart_cue("YOU LEAD: HIT THE GAS IN THE ZONE" if ctl.restart_to_zone > 0.0 else "IN THE ZONE: GO WHEN YOU WANT")
+		else:
+			if pressed and not auto_gas:
+				ctl.jumped_restart(p)
+				_restart_gas_held = true
+			_restart_cue("HOLD IT... WAIT FOR THE LEADER" if not _restart_gas_held or auto_gas else "LIFT OFF THE GAS")
+		return
+	if p.launch_hold > 0.0:
+		# Green: the gas launches you.
+		var waited: float = race.time - float(ctl.green_at)
+		var go: bool = (gas_down and not _restart_gas_held) or (auto_gas and waited >= 0.3) or waited > 2.0 or (_restart_gas_held and gas_down and waited >= 0.35)
+		if _restart_gas_held and not gas_down:
+			_restart_gas_held = false
+		if go:
+			p.launch_hold = 0.0
+			_restart_gas_held = false
+			var verdict: String = "GREAT JUMP!" if waited < 0.25 else ("GOOD" if waited < 0.45 else ("SLOW" if waited < 0.8 else "ASLEEP AT THE GREEN"))
+			hud.crew_call("RESTART: %.2f s  -  %s" % [waited, verdict])
+			p.set_meta("restart_reaction", waited)
+		else:
+			_restart_cue("GREEN! GREEN! GREEN!")
+
+
+func _restart_cue(text: String) -> void:
+	if Time.get_ticks_msec() / 1000.0 - _restart_cue_t > 0.9:
+		_restart_cue_t = Time.get_ticks_msec() / 1000.0
+		_sub(text, 1.0)
+
+
+## Options -> PIT ROAD: YOU DRIVE (your pedals on pit road: brake to the limit,
+## stop in the stall, hold the limit out) or AUTO. AUTO GAS on a phone means AUTO.
+func pit_drive_manual() -> bool:
+	if int(Game.settings.get("pit_drive", 1)) != 1:
+		return false
+	return not (Game.touch_active and int(Game.settings.get("auto_gas", 0)) == 1)
+
+
+## SAVE (V, the pause screen, or the crew chief's offer): lift and coast and run
+## lean, to stretch the fuel and spare the tyres for a little lap time.
+var save_offer_t := 0.0 # seconds the phone's SAVE FUEL button stays up
+
+
+func toggle_save() -> void:
+	if race == null or race.player == null:
+		return
+	var p: Node3D = race.player
+	p.saving = not p.saving
+	save_offer_t = 0.0
+	if p.saving:
+		var cut: float = crew_watch.SAVE_CUT if crew_watch else 0.13
+		_sub("SAVING: LIFT AND COAST, RUNNING LEAN (ABOUT %d%% LESS FUEL)" % int(cut * 100.0), 2.5)
+	else:
+		_sub("SAVING OFF: RACE IT", 1.8)
+
+
+## The push call at a superspeedway (G, the right stick, PUSH on the phone):
+## the car behind decides whether to go with you (pack.gd).
+func call_push() -> String:
+	if race == null or race.player == null or race.pack == null:
+		return "none"
+	return race.pack.call_push(race.player)
+
+
+func _on_offer_save(on: bool) -> void:
+	if on and race and race.player and not race.player.saving:
+		save_offer_t = 8.0
 
 
 ## Pit this lap, or cancel it (the PIT key, and PIT on the phone's pause screen).
@@ -3486,6 +3619,7 @@ func _enter_options() -> void:
 		{"id": "draft_cue", "label": "DRAFT SOUNDS", "values": ["OFF", "ON"], "index": int(Game.settings.get("draft_cue", 1)), "hint": "A TICK WHEN YOU CATCH THE DRAFT, A DOUBLE TICK WHEN IT'S TIME TO PULL OUT AND PASS"},
 		{"id": "haptics", "label": "VIBRATION", "values": ["OFF", "ON"], "index": int(Game.settings.get("haptics", 1)), "hint": "PHONES: A BUZZ ON HITS AND LOCKED WHEELS"},
 		{"id": "share_stats", "label": "SHARE STATS", "values": ["OFF", "ON"], "index": int(Game.settings.get("share_stats", 1)), "hint": "SENDS YOUR FRAME RATE AND DEVICE TYPE AFTER A RACE (NOTHING PERSONAL) TO HELP TUNE THE GAME"},
+		{"id": "pit_drive", "label": "PIT ROAD", "values": ["AUTO", "YOU DRIVE"], "index": int(Game.settings.get("pit_drive", 1)), "hint": "YOU DRIVE: YOUR PEDALS ON PIT ROAD (IT STEERS): BRAKE TO THE LIMIT BY THE LINE, STOP IN YOUR STALL, HOLD THE LIMIT OUT. SPEEDING IS A PASS-THROUGH"},
 		{"id": "auto_gas", "label": "PEDALS", "values": ["MANUAL GAS + BRAKE", "AUTO GAS, YOU BRAKE"], "index": int(Game.settings.get("auto_gas", 0)), "hint": "MANUAL: HOLD ANYWHERE ON THE RIGHT HALF OF THE SCREEN FOR GAS. AUTO: THE CAR TAKES EACH CORNER AT A SAFE SPEED, YOU STEER. THE BRAKE IS BESIDE THE SPEEDOMETER EITHER WAY"},
 		{"id": "tilt_sens", "label": "TILT STEERING", "values": ["GENTLE", "NORMAL", "QUICK", "VERY QUICK"], "index": int(Game.settings.get("tilt_sens", 1)), "hint": "PHONES: HOW FAR YOU TILT FOR FULL LOCK (18 / 12 / 9 / 6 DEGREES)"},
 		{"id": "radio", "label": "CREW CHIEF VOICE", "values": ["OFF", "ON"], "index": 1 if Game.radio_voice else 0, "hint": "THE CREW CHIEF'S CALLS, SPOKEN"},
@@ -3602,7 +3736,7 @@ func _on_menu_changed(id: String, idx: int) -> void:
 			elif id == "map_contrast" or id == "hand":
 				Game.settings[id] = idx
 				Game.save_settings()
-			elif id == "auto_gas" or id == "share_stats" or id == "haptics" or id == "draft_cue" or id == "tv_graphics" or id == "rewinds" or id == "pit_view":
+			elif id == "auto_gas" or id == "pit_drive" or id == "share_stats" or id == "haptics" or id == "draft_cue" or id == "tv_graphics" or id == "rewinds" or id == "pit_view":
 				Game.settings[id] = idx
 				Game.save_settings()
 			elif id == "vsync":
