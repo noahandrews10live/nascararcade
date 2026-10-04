@@ -203,6 +203,95 @@ Deno.serve(async (req: Request) => {
       }
       return reply({ error: "couldn't make a code" }, 500);
     }
+    // --- private leagues ---------------------------------------------------------
+    case "league_create": {
+      const rounds = Array.isArray(body.rounds) ? (body.rounds as unknown[]).map((t) => Math.floor(Number(t)))
+        .filter((t) => t >= 0 && t < TRACK_M.length).slice(0, LEAGUE_MAX_ROUNDS) : [];
+      if (rounds.length < 1) return reply({ error: "a league needs at least one round" }, 400);
+      const { count } = await db.from("leagues").select("id", { count: "exact", head: true }).eq("owner_id", me.id);
+      if ((count ?? 0) >= LEAGUES_PER_PLAYER) return reply({ error: "you run too many leagues already" }, 429);
+      for (let tries = 0; tries < 5; tries++) {
+        const code = randomCode(6);
+        const { data: lg, error } = await db.from("leagues").insert({
+          code, name: cleanName(body.name) || "MY LEAGUE", owner_id: me.id, rounds,
+          length: Math.max(0, Math.min(Math.floor(Number(body.length) || 1), 4)), weekly: body.weekly !== false,
+        }).select("*").single();
+        if (!error && lg) {
+          await db.from("league_members").insert({ league_id: lg.id, player_id: me.id });
+          return reply({ ok: true, league: leagueOut(lg) });
+        }
+      }
+      return reply({ error: "couldn't make a league" }, 500);
+    }
+    case "league_join": {
+      const code = String(body.code ?? "").toUpperCase().trim();
+      const { data: lg } = await db.from("leagues").select("*").eq("code", code).maybeSingle();
+      if (!lg) return reply({ error: "no league with that code" }, 404);
+      const { count } = await db.from("league_members").select("player_id", { count: "exact", head: true }).eq("league_id", lg.id);
+      if ((count ?? 0) >= LEAGUE_MAX_MEMBERS) return reply({ error: "that league is full" }, 409);
+      await db.from("league_members").upsert({ league_id: lg.id, player_id: me.id });
+      return reply({ ok: true, league: leagueOut(lg) });
+    }
+    case "league_mine": {
+      const { data: rows } = await db.from("league_members").select("leagues(*)").eq("player_id", me.id);
+      return reply({ ok: true, leagues: (rows ?? []).map((r: any) => leagueOut(r.leagues)).filter(Boolean) });
+    }
+    case "league_result": {
+      const { data: lg } = await db.from("leagues").select("*").eq("id", String(body.league_id ?? "")).maybeSingle();
+      if (!lg) return reply({ error: "no such league" }, 404);
+      const { data: mem } = await db.from("league_members").select("player_id").eq("league_id", lg.id).eq("player_id", me.id).maybeSingle();
+      if (!mem) return reply({ error: "you're not in that league" }, 403);
+      const round = Math.floor(Number(body.round));
+      if (!(round >= 0 && round < lg.rounds.length)) return reply({ error: "no such round" }, 400);
+      if (round > currentRound(lg)) return reply({ error: "that round isn't open yet" }, 400);
+      const field = Math.max(1, Math.min(Math.floor(Number(body.field) || 1), 43));
+      const place = Math.max(1, Math.min(Math.floor(Number(body.place) || field), field));
+      const points = LEAGUE_POINTS[place - 1] ?? 1;
+      const { data: old } = await db.from("league_results").select("points").eq("league_id", lg.id).eq("player_id", me.id).eq("round", round).maybeSingle();
+      if (old && old.points >= points) return reply({ ok: true, points: old.points, improved: false });
+      await db.from("league_results").upsert({
+        league_id: lg.id, player_id: me.id, round, place, field, points,
+        race_ms: Math.floor(Number(body.race_ms) || 0) || null, best_lap_ms: Math.floor(Number(body.best_lap_ms) || 0) || null,
+        updated_at: new Date().toISOString(),
+      });
+      return reply({ ok: true, points, improved: true });
+    }
+    case "league_table": {
+      const { data: lg } = await db.from("leagues").select("*").eq("id", String(body.league_id ?? "")).maybeSingle();
+      if (!lg) return reply({ error: "no such league" }, 404);
+      const { data: mem } = await db.from("league_members").select("player_id, players(name, num)").eq("league_id", lg.id);
+      if (!(mem ?? []).some((m: any) => m.player_id === me.id)) return reply({ error: "you're not in that league" }, 403);
+      const { data: res } = await db.from("league_results").select("player_id, round, place, points").eq("league_id", lg.id);
+      const table = (mem ?? []).map((m: any) => {
+        const mine = (res ?? []).filter((r: any) => r.player_id === m.player_id);
+        return {
+          id: m.player_id, name: m.players?.name ?? "?", num: m.players?.num ?? "",
+          points: mine.reduce((a: number, r: any) => a + r.points, 0),
+          rounds: Object.fromEntries(mine.map((r: any) => [r.round, { place: r.place, points: r.points }])),
+        };
+      }).sort((a: any, b: any) => b.points - a.points);
+      return reply({ ok: true, league: leagueOut(lg), table });
+    }
   }
   return reply({ error: "unknown action" }, 400);
 });
+
+// --- leagues ----------------------------------------------------------------------
+const LEAGUE_MAX_ROUNDS = 36;
+const LEAGUE_MAX_MEMBERS = 43;
+const LEAGUES_PER_PLAYER = 10;
+const LEAGUE_POINTS = [40, 35, 34, 33, 32, 31, 30, 29, 28, 27, 26, 25, 24, 23, 22, 21, 20, 19, 18, 17, 16, 15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1];
+
+// The round that's open now: a round a week from the day the league was made
+// (every round at once if it isn't weekly).
+function currentRound(lg: any): number {
+  if (!lg.weekly) return lg.rounds.length - 1;
+  const weeks = Math.floor((Date.now() - new Date(lg.created_at).getTime()) / (7 * 24 * 3600_000));
+  return Math.max(0, Math.min(weeks, lg.rounds.length - 1));
+}
+
+function leagueOut(lg: any) {
+  if (!lg) return null;
+  return { id: lg.id, code: lg.code, name: lg.name, rounds: lg.rounds, length: lg.length, weekly: lg.weekly,
+    created_at: lg.created_at, current: currentRound(lg), owner: lg.owner_id };
+}

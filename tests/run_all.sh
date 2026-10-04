@@ -35,7 +35,7 @@ rm -rf "$OUT"
 mkdir -p "$OUT/home"
 : > "$OUT/results.txt"
 
-CLOUD_TESTS="cloud_test cloud_save_test friction_test"
+CLOUD_TESTS="cloud_test cloud_save_test friction_test league_test"
 TOUCH_TESTS="touch_ui_test access_test"
 RENDER_TESTS="scenery_clear_test"
 SPECIAL="net_test"

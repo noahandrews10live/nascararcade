@@ -372,6 +372,41 @@ func add_friend(code: String, done: Callable) -> void:
 			done.call(false, String(data.get("error", "COULDN'T REACH THE SERVER")).to_upper() if data is Dictionary else "COULDN'T REACH THE SERVER"))
 
 
+# --- private leagues ------------------------------------------------------------------
+## A league: a name, a 6-character code to share, a schedule of rounds (one
+## track each, a round a week or all open now), and a points table. Each member
+## races each round against the AI field; the best result in a round counts.
+## done(ok, data_or_error_text)
+
+func _league(action: String, fields: Dictionary, done: Callable) -> void:
+	_act(action, fields, func(ok: bool, data):
+		if ok and data is Dictionary and not data.has("error"):
+			done.call(true, data)
+		else:
+			done.call(false, String(data.get("error", "COULDN'T REACH THE SERVER")).to_upper() if data is Dictionary else "COULDN'T REACH THE SERVER"))
+
+
+func league_create(name: String, rounds: Array, length: int, weekly: bool, done: Callable) -> void:
+	_league("league_create", {"name": name, "rounds": rounds, "length": length, "weekly": weekly}, done)
+
+
+func league_join(code: String, done: Callable) -> void:
+	_league("league_join", {"code": code.strip_edges().to_upper()}, done)
+
+
+func league_mine(done: Callable) -> void:
+	_league("league_mine", {}, done)
+
+
+func league_result(league_id: String, round: int, place: int, field: int, race_s: float, best_s: float, done := Callable()) -> void:
+	_league("league_result", {"league_id": league_id, "round": round, "place": place, "field": field,
+		"race_ms": int(race_s * 1000.0), "best_lap_ms": int(best_s * 1000.0)}, done if done.is_valid() else func(_ok, _d): pass)
+
+
+func league_table(league_id: String, done: Callable) -> void:
+	_league("league_table", {"league_id": league_id}, done)
+
+
 # --- how the game runs --------------------------------------------------------------------
 
 ## After a race: frame rate and the device (no names, no location).

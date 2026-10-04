@@ -208,7 +208,7 @@ const PALETTE := [
 const FIRST_NAMES := ["ACE", "BILLY", "BO", "CHARLIE", "CODY", "DALE", "DUSTY", "HANK", "JESSE", "JOHNNY", "LUKE", "MAX", "RAY", "ROCKY", "SAM", "TEX", "TOMMY", "WYATT", "ZEKE", "YOU"]
 const LAST_NAMES := ["BLAZE", "BOLT", "BURNETT", "CARVER", "DAWSON", "FIELDS", "GRANGER", "HOLT", "JAMESON", "KNOX", "MCCALL", "PARKER", "RHODES", "SHELBY", "STEELE", "THORNE", "WALLACE", "WILDER", "YATES", "RACER"]
 const SPONSORS := ["THUNDER COLA", "BIG RIG TIRES", "SIZZLE BURGERS", "GATOR JUICE", "MOTORHEAD OIL", "CRUNCHY O'S", "HOG WILD BBQ", "ROCKET PARTS", "NITRO GUM", "PEAK AUTO PARTS", "RIVER BANK", "MOONSHINE ENERGY", "TITAN TOOLS", "GOLD STAR PIZZA", "VELOCITY SODA", "YOUR NAME HERE"]
-var custom := {"num": 1, "first": 0, "last": 0, "sponsor": 0, "c1": 7, "c2": 11, "cn": 2, "make": 0, "scheme": 0}
+var custom := {"num": 1, "first": 0, "last": 0, "sponsor": 0, "c1": 7, "c2": 11, "cn": 2, "make": 0, "scheme": 0, "sponsor_text": ""}
 var custom_team_idx := -1
 
 
@@ -233,9 +233,48 @@ func save_custom() -> void:
 func custom_team() -> Dictionary:
 	return {
 		"num": str(custom.num), "driver": "%s %s" % [FIRST_NAMES[custom.first], LAST_NAMES[custom.last]],
-		"sponsor": SPONSORS[custom.sponsor], "c1": PALETTE[custom.c1][1], "c2": PALETTE[custom.c2][1],
+		"sponsor": sponsor_name(), "c1": PALETTE[custom.c1][1], "c2": PALETTE[custom.c2][1],
 		"cn": PALETTE[custom.cn][1], "speed": 1.0, "accel": 1.0, "handling": 1.0, "custom": true, "make": custom.make, "scheme": custom.scheme,
 	}
+
+
+## Your sponsor: the one you typed, else the one picked from the list.
+func sponsor_name() -> String:
+	var t: String = clean_text(String(custom.get("sponsor_text", "")), 18)
+	return t if t != "" else SPONSORS[custom.sponsor]
+
+
+## Typed text for the car: capitals, letters, digits and a little punctuation.
+static func clean_text(t: String, n: int) -> String:
+	var out := ""
+	for ch in t.to_upper():
+		if ch in "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 &'!-.":
+			out += ch
+	return out.strip_edges().substr(0, n)
+
+
+## The paint as a short code to share ("PT1:..."), and back.
+func paint_code() -> String:
+	return "PT1:" + Marshalls.utf8_to_base64(JSON.stringify(custom))
+
+
+func paint_from_code(code: String) -> bool:
+	code = code.strip_edges()
+	if not code.begins_with("PT1:"):
+		return false
+	var d = JSON.parse_string(Marshalls.base64_to_utf8(code.substr(4)))
+	if not (d is Dictionary):
+		return false
+	var lim := {"num": [1, 99], "first": [0, FIRST_NAMES.size() - 1], "last": [0, LAST_NAMES.size() - 1], "sponsor": [0, SPONSORS.size() - 1],
+		"c1": [0, PALETTE.size() - 1], "c2": [0, PALETTE.size() - 1], "cn": [0, PALETTE.size() - 1], "make": [0, CarBody.MAKES.size() - 1], "scheme": [0, CarBody.SCHEMES.size() - 1]}
+	for k in lim:
+		if d.has(k):
+			custom[k] = clampi(int(d[k]), lim[k][0], lim[k][1])
+	custom.sponsor_text = clean_text(String(d.get("sponsor_text", "")), 18)
+	# (A scheme you haven't unlocked yet comes over as the basic one.)
+	if not scheme_unlocked(int(custom.scheme)):
+		custom.scheme = 0
+	return true
 
 
 func _apply_custom() -> void:
@@ -1147,9 +1186,24 @@ func save_settings() -> void:
 	cf.save(SETTINGS_PATH)
 
 
+## A league round sets its own race length (-1: the player's setting).
+var league_length := -1
+
+
 func race_laps(track_idx: int) -> int:
 	var full: int = tracks[track_idx].get("full_laps", 200)
-	return max(5, int(round(full * float(LENGTHS[settings.length][1]))))
+	var li: int = league_length if league_length >= 0 else int(settings.length)
+	return max(5, int(round(full * float(LENGTHS[clampi(li, 0, LENGTHS.size() - 1)][1]))))
+
+
+## A league's schedule: `n` rounds from the 2026 calendar, starting somewhere in it.
+func league_schedule(n: int) -> Array:
+	var cal: Array = ReplicaTracks.CALENDAR
+	var start: int = randi() % cal.size()
+	var out: Array = []
+	for i in n:
+		out.append(ORIGINAL_TRACKS + int(cal[(start + i) % cal.size()]))
+	return out
 
 
 ## AI AGGRESSION: CALM, NORMAL or HARD. The range each driver's aggression is

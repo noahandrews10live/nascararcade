@@ -1300,6 +1300,8 @@ var _tiles: Array = [] # [Rect2 in frame units, index]
 
 
 func _enter_mode_select() -> void:
+	league_round = {}
+	Game.league_length = -1
 	_set_state(State.MODE_SELECT)
 	synth.beep(1320.0, 0.08)
 	_clear_screen()
@@ -1725,6 +1727,8 @@ func _on_finished(car: Node3D, place: int) -> void:
 		Game.add_recent(Game.selected_track, place, race.cars.size())
 	if session == "race" and car == race.player and mode != "2p":
 		last_award = Game.award_race(place, race.cars.size(), race.laps, car.total_damage() < 0.08, goals.earned if goals and is_instance_valid(goals) else 0)
+		if not league_round.is_empty():
+			_submit_league(place, car)
 		cloud.push_profile()
 		_send_stats()
 	_set_state(State.FINISHED)
@@ -3800,6 +3804,9 @@ func _enter_options() -> void:
 func _on_menu_changed(id: String, idx: int) -> void:
 	synth.beep(880.0, 0.04)
 	match menu_kind:
+		"league_new":
+			if _new_league.has(id):
+				_new_league[id] = idx
 		"race_setup":
 			if id == "field":
 				Game.settings.field = idx - 1
@@ -3936,6 +3943,12 @@ func _on_menu_activated(id: String) -> void:
 	if id.begins_with("sheet"):
 		_on_sheet(id)
 		return
+	if id.begins_with("paint_"):
+		_on_paint_action(id)
+		return
+	if id.begins_with("lg_"):
+		_on_league_menu(id)
+		return
 	if id.begins_with("net_"):
 		_on_online_menu(id)
 		return
@@ -4026,6 +4039,10 @@ func _on_menu_activated(id: String) -> void:
 
 func _on_menu_cancelled() -> void:
 	match menu_kind:
+		"leagues":
+			_enter_online()
+		"league_new", "league":
+			_enter_leagues()
 		"preview":
 			_enter_career_hub()
 		"milestone":
@@ -4372,12 +4389,15 @@ func _enter_paint_shop() -> void:
 		{"id": "num", "label": "CAR NUMBER", "values": nums, "index": int(Game.custom.num) - 1},
 		{"id": "first", "label": "FIRST NAME", "values": Game.FIRST_NAMES, "index": Game.custom.first},
 		{"id": "last", "label": "LAST NAME", "values": Game.LAST_NAMES, "index": Game.custom.last},
-		{"id": "sponsor", "label": "SPONSOR", "values": Game.SPONSORS, "index": Game.custom.sponsor},
+		{"id": "sponsor", "label": "SPONSOR", "values": Game.SPONSORS, "index": Game.custom.sponsor, "hint": "OR TYPE YOUR OWN BELOW"},
+		{"id": "paint_sponsor", "label": "YOUR OWN SPONSOR: %s" % (String(Game.custom.get("sponsor_text", "")) if String(Game.custom.get("sponsor_text", "")) != "" else "(NONE)"), "hint": "TYPE A NAME FOR THE HOOD AND QUARTER PANELS (EMPTY: USE THE LIST)"},
 		{"id": "make", "label": "BODY", "values": CarBody.MAKES.map(func(m): return m.name), "index": Game.custom.make, "hint": "FOUR BODIES ON ONE CHASSIS: SAME SPEED, DIFFERENT LOOKS"},
 		{"id": "scheme", "label": "SCHEME", "values": range(CarBody.SCHEMES.size()).map(func(i): return CarBody.SCHEMES[i] if Game.scheme_unlocked(i) else "%s (%s)" % [CarBody.SCHEMES[i], Game.scheme_needs(i)]), "index": Game.custom.scheme, "hint": "HOW YOUR COLORS GO ON. RACE TO LEVEL UP AND UNLOCK MORE"},
 		{"id": "c1", "label": "BODY COLOR", "values": cols, "index": Game.custom.c1},
 		{"id": "c2", "label": "TRIM COLOR", "values": cols, "index": Game.custom.c2},
 		{"id": "cn", "label": "NUMBER COLOR", "values": cols, "index": Game.custom.cn},
+		{"id": "paint_copy", "label": "COPY PAINT CODE", "hint": "SHARE YOUR SCHEME: A CODE ON THE CLIPBOARD"},
+		{"id": "paint_paste", "label": "PASTE PAINT CODE", "hint": "WEAR A FRIEND'S SCHEME (OR YOUR LEAGUE'S)"},
 		{"id": "save", "label": "SAVE CAR", "hint": "YOUR CAR APPEARS IN CAR SELECT FOR EVERY MODE"},
 	]
 	_open_menu("paint", "PAINT SHOP", rows, 0)
@@ -4387,6 +4407,50 @@ func _enter_paint_shop() -> void:
 	menu.left_override = 30
 	menu.build("PAINT SHOP", rows, 0)
 	_paint_preview()
+
+
+func _on_paint_action(id: String) -> void:
+	match id:
+		"paint_sponsor":
+			ask_text("YOUR SPONSOR", 18, String(Game.custom.get("sponsor_text", "")), func(t: String):
+				Game.custom.sponsor_text = Game.clean_text(t, 18)
+				_enter_paint_shop())
+		"paint_copy":
+			DisplayServer.clipboard_set(Game.paint_code())
+			_sub("PAINT CODE COPIED", 2.0)
+		"paint_paste":
+			if Game.paint_from_code(DisplayServer.clipboard_get()):
+				_sub("PAINT LOADED: SAVE CAR TO KEEP IT", 2.5)
+				_enter_paint_shop()
+			else:
+				_sub("NO PAINT CODE ON THE CLIPBOARD", 2.0)
+
+
+## A line of text from the player (the on-screen keyboard on a phone): `done`
+## gets it when they press enter.
+var _text_edit: LineEdit
+var _text_done: Callable
+
+
+func ask_text(placeholder: String, max_len: int, now: String, done: Callable) -> void:
+	if _text_edit == null:
+		_text_edit = LineEdit.new()
+		_text_edit.position = Vector2(140, 380)
+		_text_edit.size = Vector2(360, 40)
+		_text_edit.alignment = HORIZONTAL_ALIGNMENT_CENTER
+		_text_edit.add_theme_font_size_override("font_size", 20)
+		_text_edit.virtual_keyboard_type = LineEdit.KEYBOARD_TYPE_DEFAULT
+		_text_edit.text_submitted.connect(func(t: String):
+			_text_edit.visible = false
+			if _text_done.is_valid():
+				_text_done.call(t))
+		ui_root.add_child(_text_edit)
+	_text_edit.max_length = max_len
+	_text_edit.placeholder_text = placeholder
+	_text_edit.text = now
+	_text_done = done
+	_text_edit.visible = true
+	_text_edit.grab_focus()
 
 
 func _paint_preview() -> void:
@@ -4712,6 +4776,151 @@ func _add_friend() -> void:
 	_friend_edit.grab_focus()
 
 
+# --- private leagues ----------------------------------------------------------------
+## LEAGUES (on the ONLINE screen): your leagues, CREATE A LEAGUE, JOIN WITH A
+## CODE. A league's hub shows its code to share, the rounds (one track each: open,
+## done with your result, or opening in a later week) and the points table.
+## Racing a round is a normal full-rules race against the AI at the league's
+## length; your finish goes up as the round's result (the best of your tries).
+var league_round := {} # this race is a league round: {id, name, round}
+var _leagues: Array = []
+var _league := {} # the league open in its hub (with its "table")
+var _new_league := {"lgn_rounds": 1, "lgn_length": 1, "lgn_weekly": 0}
+var _new_league_name := "MY LEAGUE"
+const LEAGUE_ROUNDS := [3, 6, 10, 18, 36]
+
+
+func _enter_leagues(refresh := true) -> void:
+	var rows: Array = []
+	for i in _leagues.size():
+		var lg: Dictionary = _leagues[i]
+		rows.append({"id": "lg_open:%d" % i, "label": String(lg.name), "hint": "CODE %s  -  ROUND %d OF %d OPEN" % [lg.code, int(lg.current) + 1, lg.rounds.size()]})
+	if _leagues.is_empty():
+		rows.append({"id": "lg_none", "label": "NO LEAGUES YET", "disabled": true})
+	rows.append({"id": "lg_create", "label": "CREATE A LEAGUE", "hint": "YOU GET A CODE TO SEND YOUR FRIENDS"})
+	rows.append({"id": "lg_join", "label": "JOIN WITH A CODE", "hint": "TYPE THE 6-CHARACTER LEAGUE CODE"})
+	rows.append({"id": "lg_back", "label": "BACK"})
+	_open_menu("leagues", "LEAGUES", rows, 0)
+	if refresh:
+		cloud.league_mine(func(ok: bool, data):
+			if ok:
+				_leagues = data.get("leagues", [])
+				if state == State.MENU and menu_kind == "leagues":
+					_enter_leagues(false)
+			elif state == State.MENU and menu_kind == "leagues":
+				_sub(String(data), 3.0))
+
+
+func _enter_new_league() -> void:
+	var rows := [
+		{"id": "lg_name", "label": "NAME: %s" % _new_league_name, "hint": "START TO TYPE A NAME"},
+		{"id": "lgn_rounds", "label": "ROUNDS", "values": LEAGUE_ROUNDS.map(func(n): return str(n)), "index": int(_new_league.lgn_rounds), "hint": "TRACKS FROM THE 2026 CUP CALENDAR, IN ORDER"},
+		{"id": "lgn_length", "label": "RACE LENGTH", "values": Game.LENGTHS.map(func(l): return l[0]), "index": int(_new_league.lgn_length)},
+		{"id": "lgn_weekly", "label": "SCHEDULE", "values": ["A ROUND A WEEK", "ALL ROUNDS OPEN NOW"], "index": int(_new_league.lgn_weekly)},
+		{"id": "lg_make", "label": "CREATE"},
+		{"id": "lg_list", "label": "BACK"},
+	]
+	_open_menu("league_new", "NEW LEAGUE", rows, 0)
+
+
+func _enter_league_hub(lg: Dictionary) -> void:
+	_league = lg
+	var rows: Array = [{"id": "lg_copy", "label": "CODE: %s" % lg.code, "hint": "SEND IT TO YOUR FRIENDS (START COPIES IT)"}]
+	var table: Array = lg.get("table", [])
+	var me_row: Dictionary = {}
+	for t in table:
+		if String(t.id) == cloud.id:
+			me_row = t
+	for r in lg.rounds.size():
+		var tr: int = int(lg.rounds[r])
+		var mine = me_row.get("rounds", {}).get(str(r), null) if me_row.size() > 0 else null
+		var status := ""
+		if r > int(lg.current):
+			status = "OPENS IN WEEK %d" % (r + 1)
+		elif mine != null:
+			status = "YOU: %s, %d PTS (RACE AGAIN TO BEAT IT)" % [Game.ordinal(int(mine.place)), int(mine.points)]
+		else:
+			status = "OPEN: RACE IT"
+		rows.append({"id": "lg_round:%d" % r, "label": "R%d  %s" % [r + 1, Game.tracks[tr].short], "hint": status, "disabled": r > int(lg.current)})
+	if not table.is_empty():
+		rows.append({"id": "lg_table", "label": "STANDINGS", "disabled": true})
+		for i in min(table.size(), 10):
+			var t: Dictionary = table[i]
+			rows.append({"id": "lg_row", "label": "%2d. %s  #%s   %d PTS" % [i + 1, String(t.name), String(t.num), int(t.points)], "disabled": true})
+	rows.append({"id": "lg_list", "label": "BACK"})
+	_open_menu("league", String(lg.name), rows, 1)
+	if not lg.has("table"):
+		cloud.league_table(String(lg.id), func(ok: bool, data):
+			if ok and state == State.MENU and menu_kind == "league" and String(_league.get("id", "")) == String(lg.id):
+				var with_table: Dictionary = data.get("league", lg)
+				with_table["table"] = data.get("table", [])
+				_enter_league_hub(with_table))
+
+
+func _on_league_menu(id: String) -> void:
+	if id.begins_with("lg_open:"):
+		_enter_league_hub(_leagues[int(id.substr(8))])
+		return
+	if id.begins_with("lg_round:"):
+		_race_league_round(_league, int(id.substr(9)))
+		return
+	match id:
+		"lg_list":
+			_enter_leagues()
+		"lg_back":
+			_enter_online()
+		"lg_create":
+			_enter_new_league()
+		"lg_name":
+			ask_text("LEAGUE NAME", 24, _new_league_name, func(t: String):
+				var n: String = Game.clean_text(t, 24)
+				_new_league_name = n if n != "" else "MY LEAGUE"
+				_enter_new_league())
+		"lg_make":
+			var n: int = LEAGUE_ROUNDS[int(_new_league.lgn_rounds)]
+			cloud.league_create(_new_league_name, Game.league_schedule(n), int(_new_league.lgn_length), int(_new_league.lgn_weekly) == 0, func(ok: bool, data):
+				if ok:
+					DisplayServer.clipboard_set(String(data.league.code))
+					_sub("LEAGUE MADE: CODE %s (COPIED)" % data.league.code, 5.0)
+					_leagues.append(data.league)
+					_enter_league_hub(data.league)
+				else:
+					_sub(String(data), 3.0))
+		"lg_join":
+			ask_text("LEAGUE CODE", 6, "", func(t: String):
+				cloud.league_join(t, func(ok: bool, data):
+					if ok:
+						_sub("JOINED %s" % data.league.name, 3.0)
+						_enter_league_hub(data.league)
+					else:
+						_sub(String(data), 3.0)))
+		"lg_copy":
+			DisplayServer.clipboard_set(String(_league.get("code", "")))
+			_sub("CODE COPIED", 2.0)
+
+
+## A league round: a full-rules race at the round's track and the league's length.
+func _race_league_round(lg: Dictionary, r: int) -> void:
+	league_round = {"id": String(lg.id), "name": String(lg.name), "round": r}
+	Game.league_length = int(lg.length)
+	mode = "race"
+	session = "race"
+	sessions = ["race"]
+	_use_track(int(lg.rounds[r]))
+	_enter_countdown()
+
+
+func _submit_league(place: int, car: Node3D) -> void:
+	var lr: Dictionary = league_round
+	league_round = {}
+	Game.league_length = -1
+	cloud.league_result(String(lr.id), int(lr.round), place, race.cars.size(), car.finish_time, car.best_lap, func(ok: bool, data):
+		if ok:
+			_sub("%s ROUND %d: %s, %d POINTS%s" % [lr.name, int(lr.round) + 1, Game.ordinal(place), int(data.get("points", 0)), "" if data.get("improved", true) else " (YOUR EARLIER RESULT WAS BETTER)"], 5.0)
+		else:
+			_sub("LEAGUE RESULT NOT SENT: %s" % String(data), 4.0))
+
+
 # --- online ---------------------------------------------------------------------
 
 var net: Node
@@ -4725,6 +4934,7 @@ var _addr_edit: LineEdit
 
 func _enter_online() -> void:
 	var rows := [
+		{"id": "lg_list", "label": "LEAGUES", "hint": "PRIVATE LEAGUES: A SCHEDULE OF ROUNDS AND A POINTS TABLE WITH YOUR FRIENDS"},
 		{"id": "net_room_host", "label": "HOST A RACE", "hint": "YOU GET A ROOM CODE TO SEND YOUR FRIENDS"},
 		{"id": "net_room_join", "label": "JOIN WITH A CODE", "hint": "TYPE THE 4-DIGIT CODE FROM THE HOST"},
 		{"id": "net_host", "label": "HOST ON THIS COMPUTER", "hint": "DESKTOP: OPENS PORT %d ON YOUR NETWORK" % Net.PORT},

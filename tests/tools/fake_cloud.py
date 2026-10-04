@@ -108,7 +108,77 @@ def act(body):
         code = "".join(secrets.choice("ABCDEFGHJKLMNPQRSTUVWXYZ23456789") for _ in range(8))
         transfers[code] = me["id"]
         return 200, {"ok": True, "code": code}
+    if a == "league_create":
+        rounds = [int(t) for t in body.get("rounds", []) if 0 <= int(t) < len(TRACK_M)][:36]
+        if not rounds:
+            return 400, {"error": "a league needs at least one round"}
+        code = "".join(secrets.choice("ABCDEFGHJKLMNPQRSTUVWXYZ23456789") for _ in range(6))
+        lid = str(uuid.uuid4())
+        leagues[lid] = {"id": lid, "code": code, "name": str(body.get("name", "MY LEAGUE"))[:24] or "MY LEAGUE", "owner_id": me["id"],
+                        "rounds": rounds, "length": max(0, min(int(body.get("length", 1)), 4)), "weekly": body.get("weekly", True) is not False,
+                        "created_at": time.time()}
+        league_members.add((lid, me["id"]))
+        return 200, {"ok": True, "league": league_out(leagues[lid])}
+    if a == "league_join":
+        lg = next((l for l in leagues.values() if l["code"] == str(body.get("code", "")).upper().strip()), None)
+        if not lg:
+            return 404, {"error": "no league with that code"}
+        league_members.add((lg["id"], me["id"]))
+        return 200, {"ok": True, "league": league_out(lg)}
+    if a == "league_mine":
+        return 200, {"ok": True, "leagues": [league_out(leagues[l]) for (l, p) in sorted(league_members) if p == me["id"]]}
+    if a == "league_result":
+        lg = leagues.get(str(body.get("league_id", "")))
+        if not lg:
+            return 404, {"error": "no such league"}
+        if (lg["id"], me["id"]) not in league_members:
+            return 403, {"error": "you're not in that league"}
+        rnd = int(body.get("round", -1))
+        if not (0 <= rnd < len(lg["rounds"])):
+            return 400, {"error": "no such round"}
+        if rnd > current_round(lg):
+            return 400, {"error": "that round isn't open yet"}
+        field = max(1, min(int(body.get("field", 1)), 43))
+        place = max(1, min(int(body.get("place", field)), field))
+        pts = LEAGUE_POINTS[place - 1] if place <= len(LEAGUE_POINTS) else 1
+        old = league_results.get((lg["id"], me["id"], rnd))
+        if old and old["points"] >= pts:
+            return 200, {"ok": True, "points": old["points"], "improved": False}
+        league_results[(lg["id"], me["id"], rnd)] = {"place": place, "field": field, "points": pts}
+        return 200, {"ok": True, "points": pts, "improved": True}
+    if a == "league_table":
+        lg = leagues.get(str(body.get("league_id", "")))
+        if not lg:
+            return 404, {"error": "no such league"}
+        if (lg["id"], me["id"]) not in league_members:
+            return 403, {"error": "you're not in that league"}
+        table = []
+        for (l, pid) in league_members:
+            if l != lg["id"]:
+                continue
+            mine = {r: v for (ll, p, r), v in league_results.items() if ll == l and p == pid}
+            table.append({"id": pid, "name": players[pid]["name"], "num": players[pid]["num"],
+                          "points": sum(v["points"] for v in mine.values()),
+                          "rounds": {str(r): {"place": v["place"], "points": v["points"]} for r, v in mine.items()}})
+        table.sort(key=lambda t: -t["points"])
+        return 200, {"ok": True, "league": league_out(lg), "table": table}
     return 400, {"error": "unknown action"}
+
+
+LEAGUE_POINTS = [40, 35, 34, 33, 32, 31, 30, 29, 28, 27, 26, 25, 24, 23, 22, 21, 20, 19, 18, 17, 16, 15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1]
+leagues, league_members, league_results = {}, set(), {}
+
+
+def current_round(lg):
+    if not lg["weekly"]:
+        return len(lg["rounds"]) - 1
+    weeks = int((time.time() - lg["created_at"]) // (7 * 24 * 3600))
+    return max(0, min(weeks, len(lg["rounds"]) - 1))
+
+
+def league_out(lg):
+    return {"id": lg["id"], "code": lg["code"], "name": lg["name"], "rounds": lg["rounds"], "length": lg["length"],
+            "weekly": lg["weekly"], "current": current_round(lg), "owner": lg["owner_id"]}
 
 
 def query(table, q):
