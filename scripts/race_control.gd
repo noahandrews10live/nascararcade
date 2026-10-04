@@ -76,6 +76,7 @@ var stage_break := false
 var _light_open := true
 var _calls := {} # car -> "4", "2", "F", "W", "S" (slicks) or "" (stay out)
 var _adjust := {} # car -> wedge change asked for
+var _adjust_bar := {} # car -> track bar change asked for (half a step a time)
 var _cause: Node3D = null
 var player_pending := false
 var final_lap_caution := false
@@ -167,6 +168,7 @@ func tick(delta: float) -> void:
 			_spotter(delta)
 		return
 	_update_pace_car(delta)
+	_line_rules()
 	match flag:
 		Flag.GREEN, Flag.WHITE:
 			_green_tick(delta)
@@ -390,6 +392,7 @@ func throw_caution(reason: String, who: Node3D, where := "") -> void:
 		_cause = who
 		_calls.clear()
 		_adjust.clear()
+		_adjust_bar.clear()
 		player_pending = false
 		_freeze = race.order.filter(func(c): return not c.towed and not c.finished)
 	elif stage_break:
@@ -677,6 +680,65 @@ func _yellow_pass_watch() -> void:
 				message.emit("PASSING UNDER CAUTION  -  PASS-THROUGH PENALTY", "flag")
 
 
+## The lines on the track (your car, when you're driving it):
+##   - the commitment line across the apron at pit entry: below it there, you're
+##     coming in. Cross it and stay out: a pass-through;
+##   - the yellow line at the superspeedways (the inside edge of the racing
+##     surface): pass a car with your wheels below it and give the spot back, or
+##     it's a pass-through.
+var _line_prev_s := -1.0
+var _below_ahead := {} # car -> it was ahead while you were below the line
+var _yl_owed: Node3D = null
+var _yl_until := 0.0
+const YELLOW_LINE_GRACE := 6.0
+
+
+func _line_rules() -> void:
+	var p: Node3D = race.player
+	if p == null or not _is_human(p) or p.ai or p.out or p.finished:
+		_line_prev_s = -1.0
+		_below_ahead.clear()
+		_yl_owed = null
+		return
+	var L: float = track.length
+	var ss: float = p.s()
+	# The commitment line.
+	var cs: float = fposmod(track.pit_in_s() - track.PIT_LANE_EXT + 10.0, L)
+	if _line_prev_s >= 0.0 and pits_enabled:
+		var crossed: bool = fposmod(cs - _line_prev_s, L) < fposmod(ss - _line_prev_s, L) and fposmod(ss - _line_prev_s, L) < 50.0
+		if crossed and p.d < track.inner_edge() - 0.3 and p.pit_state == Pit.NONE and not p.want_pit and p.penalty == "":
+			p.penalty = "PT"
+			p.want_pit = true
+			message.emit("BELOW THE COMMITMENT LINE AND STAYED OUT  -  PASS-THROUGH", "flag")
+	_line_prev_s = ss
+	# The yellow line.
+	var drafting: bool = float(track.cfg.draft) > 0.8
+	var below: bool = p.d < track.inner_edge() - 0.3 and p.pit_state == Pit.NONE and not track.in_pit_zone(ss)
+	if not drafting or flag == Flag.YELLOW or flag == Flag.CHECKERED:
+		_below_ahead.clear()
+		_yl_owed = null
+		return
+	for c in race.cars:
+		if c == p or c.out or c.pit_state != Pit.NONE:
+			_below_ahead.erase(c)
+			continue
+		var ahead: bool = c.dist > p.dist
+		if below and _below_ahead.get(c, false) and not ahead and _yl_owed == null and abs(c.dist - p.dist) < 15.0:
+			_yl_owed = c
+			_yl_until = race.time + YELLOW_LINE_GRACE
+			message_for(p, "SPOTTER: YOU PASSED THE %s BELOW THE YELLOW LINE - GIVE IT BACK" % c.team.num, "spotter")
+		_below_ahead[c] = ahead
+	if _yl_owed:
+		if not is_instance_valid(_yl_owed) or _yl_owed.out or _yl_owed.dist > p.dist:
+			_yl_owed = null
+		elif race.time > _yl_until:
+			_yl_owed = null
+			if p.penalty == "":
+				p.penalty = "PT"
+				p.want_pit = true
+				message.emit("PASSED BELOW THE YELLOW LINE  -  PASS-THROUGH", "flag")
+
+
 func _free_pass() -> void:
 	var lead := leader()
 	for c in race.order:
@@ -814,6 +876,10 @@ func _pit_drive(c: Node3D) -> Array:
 			if (to_entry < track.PIT_LANE_EXT - 10.0 or fposmod(ss - pin, L) < 60.0) and c.d < track.inner_edge():
 				# Onto the pit entry lane: pit road driving is automatic from here.
 				c.pit_state = Pit.LANE
+				if flag == Flag.YELLOW and not pit_open and quick_phase == "":
+					# Pit road wasn't open yet: restart from the tail.
+					c.set_meta("tail", true)
+					message_for(c, "PITTED BEFORE PIT ROAD OPENED  -  TO THE TAIL OF THE FIELD", "flag")
 				message_for(c, "ON PIT ROAD", "pit")
 			# Slow early, drop to the apron, then onto the pit entry lane.
 			var target: float = max(pit_speed, sqrt(pit_speed * pit_speed + 2.0 * 6.0 * max(to_entry - 60.0, 0.0)))
@@ -1067,7 +1133,7 @@ func player_info(who: Node3D = null) -> Dictionary:
 
 
 ## The player's answer: the stop to make ("" stays out) and a wedge change.
-func resolve_player(call: String, wedge_change: float) -> void:
+func resolve_player(call: String, wedge_change: float, bar_change := 0.0) -> void:
 	if follower:
 		player_pending = false
 		remote_answer.emit(call, wedge_change) # to the host
@@ -1077,6 +1143,8 @@ func resolve_player(call: String, wedge_change: float) -> void:
 	_calls[race.player] = call
 	if wedge_change != 0.0:
 		_adjust[race.player] = wedge_change
+	if bar_change != 0.0:
+		_adjust_bar[race.player] = bar_change
 	player_pending = false
 	if _waiting.is_empty():
 		_quick_apply()
@@ -1213,6 +1281,12 @@ func _compute_order() -> Array:
 		out.append(lucky)
 	out.append_array(lapped)
 	out.append_array(waved)
+	# Penalised to the tail: the back of the line.
+	var tails: Array = out.filter(func(c): return c.get_meta("tail", false))
+	for c in tails:
+		out.erase(c)
+		out.append(c)
+		c.remove_meta("tail")
 	return out
 
 
@@ -1243,6 +1317,8 @@ func _quick_apply() -> void:
 			pitted += 1
 		if _adjust.has(c):
 			c.wedge = clamp(c.wedge + float(_adjust[c]), -900.0, 900.0)
+		if _adjust_bar.has(c):
+			c.track_bar = clamp(c.track_bar + float(_adjust_bar[c]), -1.5, 1.5)
 	# Line up double file, the leader QUICK_RESTART_BEFORE short of the line.
 	var base: float = ceil((lead.dist + 250.0 + QUICK_RESTART_BEFORE) / L) * L - QUICK_RESTART_BEFORE
 	if overtime:

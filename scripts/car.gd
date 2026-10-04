@@ -256,6 +256,16 @@ var psi_r := 1.0
 var k_arb_f := 35000.0
 var k_arb_r := 6000.0
 var wedge := 0.0 # cross weight, N (+ = more on LF/RR: tighter)
+# The garage's advanced page: camber (x the standard), shocks (damping x), and the
+# track bar (+1 = raised: the rear rolls more, looser off the corners).
+var camber_scale := 1.0
+var damp_scale := 1.0
+var track_bar := 0.0
+# The tread's temperature across each tyre: inside minus outside (camber and how
+# it's loaded) and the middle against the edges (the air in it), C. Built up over
+# a run like the real thing; the crew reads them when you come in.
+var tread_io := PackedFloat32Array([0, 0, 0, 0])
+var tread_crown := PackedFloat32Array([0, 0, 0, 0])
 var _nw := PackedFloat32Array([0, 0, 0, 0]) # tyre loads
 var _defl := PackedFloat32Array([0, 0, 0, 0])
 var _cap := PackedFloat32Array([0, 0, 0, 0])
@@ -398,6 +408,12 @@ const TYRE_WEAR_PER_KM := 0.0012
 const TYRE_WEAR_PER_J := 0.8e-8
 const TYRE_SCALE_MAX := 3.0
 func _update_tyres_after(delta: float, travelled: float) -> void:
+	for i in 4:
+		# Over-inflated, the tread crowns and the middle runs hot; under-inflated,
+		# the edges carry it. (Warm tyres only: a cold one reads flat across.)
+		var side_psi: float = psi_l if i % 2 == 0 else psi_r
+		var crown_t: float = ((cold_psi * side_psi - 1.0) * 140.0 + (tyre_psi[i] / 25.0 - 1.0) * 12.0) * clamp((tyre_temp[i] - 50.0) / 40.0, 0.0, 1.0)
+		tread_crown[i] += (clamp(crown_t, -25.0, 25.0) - tread_crown[i]) * min(delta * 0.1, 1.0)
 	var amb: float = track.track_temp()
 	var cool: float = 0.004 + 0.0004 * abs(v)
 	var total := 0.0
@@ -579,6 +595,16 @@ static func _tyre_x(kappa: float) -> float:
 ## One axle of the wheel-speed model over a step `h`: the wheels' surface speed
 ## `vw`, the car's speed `u`, the torque demand `demand` (as a force at the tyre),
 ## the axle's grip `cap` and rotating mass `m`. Returns [new vw, tyre force, slip].
+## The tread temperatures across tyre `i` as a pyrometer reads them, C:
+## [inside, middle, outside] (inside: toward the car's centre).
+func tread_temps(i: int) -> Array:
+	var t: float = tyre_temp[i]
+	var edges: float = t - tread_crown[i] / 3.0
+	var mid: float = t + tread_crown[i] * 2.0 / 3.0
+	var io: float = tread_io[i] + tread_bias[i] * 3.0
+	return [edges + io * 0.5, mid, edges - io * 0.5]
+
+
 func _axle(vw: float, u: float, demand: float, cap: float, m: float, h: float) -> Array:
 	var den: float = max(abs(u), 3.0)
 	var kap: float = (vw - u) / den
@@ -915,7 +941,7 @@ func _integrate(h: float) -> void:
 	for i in 4:
 		var defl: float = -(chassis_z + WX[i] * chassis_pitch + WY[i] * chassis_roll) + _road[i]
 		var rate: float = -(chassis_vz + WX[i] * pitch_rate + WY[i] * roll_rate) + _road_rate[i]
-		var f: float = _f_static[i] + (k_front if i < 2 else k_rear) * defl + C_DAMP * rate
+		var f: float = _f_static[i] + (k_front if i < 2 else k_rear) * defl + C_DAMP * damp_scale * rate
 		if defl > bump_gap:
 			f += K_BUMP * (defl - bump_gap)
 		_defl[i] = defl
@@ -941,10 +967,19 @@ func _integrate(h: float) -> void:
 	var road_setup: bool = track.turns_both_ways()
 	for i in 4:
 		var right_side: bool = WY[i] > 0.0
-		var nc: float = (0.035 if road_setup else (0.05 if right_side else -0.04)) # static negative camber
+		var nc0: float = (0.035 if road_setup else (0.05 if right_side else -0.04)) # static negative camber, standard
+		var nc: float = nc0 * camber_scale
 		nc += (-0.6 * lean) if right_side else (0.6 * lean)
-		var err: float = nc - 0.02
-		_cam_grip[i] = clamp(1.0 - 6.0 * err * err, 0.9, 1.0)
+		# The standard settings are where each tyre works best (the tyre people set
+		# them so); more or less than that, it rides on an edge. (0.99 at standard:
+		# the grip the cars were tuned to.)
+		var err: float = nc0 * (camber_scale - 1.0)
+		_cam_grip[i] = clamp(0.9904 - 6.0 * err * err, 0.9, 1.0)
+		# The tread: too much camber (either way) runs the inside hot, too little
+		# the outside. Weighted by how hard the tyre is working.
+		var work: float = clamp(_nw[i] / NOMINAL_LOAD, 0.0, 1.5) * clamp(abs(u) / 40.0, 0.0, 1.0)
+		var io_t: float = clamp(err * sign(nc0) * 650.0, -25.0, 25.0) * work
+		tread_io[i] += (io_t - tread_io[i]) * min(h * 0.08, 1.0)
 
 	# --- tyre grip per corner (load sensitivity, temperature, wear, surface)
 	var surf := 1.0
@@ -956,7 +991,7 @@ func _integrate(h: float) -> void:
 	var cap := _cap
 	for i in 4:
 		var ratio: float = max(_nw[i] / NOMINAL_LOAD, 0.3)
-		cap[i] = mu * surf * _tyre_factor[i] * pow(ratio, -_load_sens()) * _nw[i] * (grip_front if i < 2 else grip_rear) * _cam_grip[i]
+		cap[i] = mu * surf * _tyre_factor[i] * pow(ratio, -_load_sens()) * _nw[i] * (grip_front if i < 2 else grip_rear * (1.0 - track_bar * (0.006 + 0.012 * throttle))) * _cam_grip[i]
 	var cap_f: float = cap[0] + cap[1]
 	var cap_r: float = cap[2] + cap[3]
 
@@ -1181,6 +1216,14 @@ func _surface_under(w: Vector3, s_hint: float) -> Array:
 
 func _integrate_tumble(h: float) -> void:
 	_tumble_time += h
+	# (A bad state, from a car dropped into another one, is caught here rather
+	# than spread to the track and every car near it.)
+	if not (t_vel.is_finite() and t_w.is_finite() and t_pos.is_finite() and t_basis.x.is_finite() and t_basis.y.is_finite()):
+		t_vel = Vector3.ZERO
+		t_w = Vector3.ZERO
+		t_basis = Basis()
+		if not t_pos.is_finite():
+			t_pos = track.surface_point(fposmod(dist, track.length), clamp(d, track.inner_edge(), track.outer_edge())) + Vector3.UP * 0.6 if is_finite(dist) and is_finite(d) else Vector3(0, 1, 0)
 	var force := Vector3(0.0, -G * MASS, 0.0)
 	var torque := Vector3.ZERO
 	var spd: float = t_vel.length()
@@ -1274,7 +1317,13 @@ func _integrate_tumble(h: float) -> void:
 	wl += Vector3((tl.x - gyro.x) / IY, (tl.y - gyro.y) / IZ, (tl.z - gyro.z) / IX) * h
 	wl *= 1.0 - 0.3 * h # air and structural damping
 	t_w = t_basis * wl
+	if not t_w.is_finite():
+		t_w = Vector3.ZERO
 	var wlen: float = t_w.length()
+	if wlen > 60.0:
+		# (no car spins faster than this: a runaway number from a bad contact)
+		t_w = t_w / wlen * 60.0
+		wlen = 60.0
 	if wlen > 0.0001:
 		t_basis = t_basis.rotated(t_w / wlen, wlen * h).orthonormalized()
 	_sync_from_tumble()

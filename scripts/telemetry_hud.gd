@@ -35,12 +35,9 @@ func _draw() -> void:
 	for i in 4:
 		var cx: float = x0 + 8.0 + (i % 2) * 100.0
 		var cy: float = y0 + 24.0 + (i / 2) * 78.0
-		var t: float = car.tyre_temp[i]
-		var b: float = car.tread_bias[i] * 9.0
-		# Inside edge is toward the car's centre line.
-		var inner: float = t - b
-		var outer: float = t + b
-		var cells := [outer, t, inner] if i % 2 == 0 else [inner, t, outer]
+		# Inside edge is toward the car's centre line (car.tread_temps).
+		var tt: Array = car.tread_temps(i)
+		var cells := [tt[2], tt[1], tt[0]] if i % 2 == 0 else [tt[0], tt[1], tt[2]]
 		for k in 3:
 			draw_rect(Rect2(cx + k * 30.0, cy, 28, 14), _tcol(cells[k]))
 			draw_string(f, Vector2(cx + k * 30.0 + 2, cy + 11), "%d" % int(cells[k] * 1.8 + 32.0), HORIZONTAL_ALIGNMENT_LEFT, -1, 9, Color(0, 0, 0))

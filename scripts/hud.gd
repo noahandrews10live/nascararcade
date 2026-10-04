@@ -20,6 +20,9 @@ var top := 0.0
 ## The TV ticker is showing: it carries the flag and the running order, so the
 ## flag banner and the top-5 board step aside.
 var ticker_on := false
+## Room the rear-view mirror takes at the top centre (mirror.gd sets it): the flag
+## banner, goals ticker and crew calls sit below it.
+var mirror_room := 0.0
 
 var l_time_cap: Label
 var l_time: Label
@@ -141,14 +144,14 @@ func _layout() -> void:
 		var band := top_band()
 		var cw: float = clamp(band.y - band.x, 200.0, 460.0)
 		l_crew.size = Vector2(cw, 0)
-		l_crew.position = Vector2(max((band.x + band.y - cw) * 0.5, band.x), 58 + top)
+		l_crew.position = Vector2(max((band.x + band.y - cw) * 0.5, band.x), 58 + top + mirror_room)
 	if l_auto:
 		l_auto.size = Vector2(W - 80.0, 0)
 		l_auto.position = Vector2(40, H * 0.22)
 	if l_goal:
 		var gb := top_band()
 		l_goal.size = Vector2(max(gb.y - gb.x, 160.0), 20)
-		l_goal.position = Vector2(gb.x, 32 + top)
+		l_goal.position = Vector2(gb.x, 32 + top + mirror_room)
 
 
 func _place(l: Label, p: Vector2, corner: int) -> void:
@@ -590,7 +593,7 @@ func top_band() -> Vector2:
 func _banner_rect() -> Rect2:
 	var b := top_band()
 	var bw: float = min(240.0, b.y - b.x)
-	return Rect2((b.x + b.y) * 0.5 - bw * 0.5, 4.0 + top, bw, 24.0)
+	return Rect2((b.x + b.y) * 0.5 - bw * 0.5, 4.0 + top + mirror_room, bw, 24.0)
 
 
 var high_contrast: bool:

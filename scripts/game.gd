@@ -863,12 +863,12 @@ var settings := {
 	# field: -1 = AUTO (see field_size), else an index into FIELDS.
 	"length": 1, "difficulty": 1, "field": -1, "auto_field": 0, "cautions": 1, "damage": 1, "wear": 1, "weather": 0,
 	"assists": 2, "manual": 0, "weekend": 1, "touch_tilt": true, "tilt_sens": 1, "res_mode": 0, "commentary": 1, "catchup": 0,
-	"auto_gas": 0, "tutorial_done": 0, "share_stats": 1, "haptics": 1, "battery": 1, "draft_cue": 1, "tv_graphics": 1, "rewinds": 1, "pit_view": 1, "pit_drive": 1, "caution_drive": 1,
+	"auto_gas": 0, "tutorial_done": 0, "share_stats": 1, "haptics": 1, "battery": 1, "draft_cue": 1, "tv_graphics": 1, "rewinds": 1, "pit_view": 1, "pit_drive": 1, "caution_drive": 1, "mirror": 1,
 	"big_text": 0, "map_contrast": 0, "hand": 0, # accessibility: larger text, high-contrast map, left-handed controls
 }
 ## Garage setup (applied to the player's car): -3..3 balance (tight..loose),
 ## tyre pressure 0 low / 1 std / 2 high, gearing 0 short / 1 std / 2 long.
-var setup := {"balance": 0, "pressure": 1, "gearing": 1, "springs_f": 1, "springs_r": 1, "bar_f": 1, "bump": 1, "stagger": 1, "psi_l": 1, "psi_r": 1, "bias": 2}
+var setup := {"balance": 0, "pressure": 1, "gearing": 1, "springs_f": 1, "springs_r": 1, "bar_f": 1, "bump": 1, "stagger": 1, "psi_l": 1, "psi_r": 1, "bias": 2, "camber": 1, "shocks": 1, "track_bar": 1}
 ## Your garage setup for each track you've tuned (track index -> setup), saved
 ## with the settings and put back when you go to that track.
 var track_setups := {}
@@ -1170,6 +1170,10 @@ func apply_setup(c: Node3D) -> void:
 	c.psi_r = [0.92, 1.0, 1.08][int(setup.psi_r)]
 	c.brake_bias = [0.54, 0.56, 0.58, 0.60, 0.62][int(setup.bias)]
 	c.gear_scale = [1.08, 1.0, 0.93][int(setup.gearing)]
+	# The advanced page: camber, shocks, track bar.
+	c.camber_scale = [0.6, 1.0, 1.4][int(setup.get("camber", 1))]
+	c.damp_scale = [0.75, 1.0, 1.3][int(setup.get("shocks", 1))]
+	c.track_bar = float(int(setup.get("track_bar", 1)) - 1)
 
 
 const SETUPS_DIR := "user://setups"
@@ -1768,6 +1772,7 @@ func _setup_input() -> void:
 		"pit_option": [KEY_O, "btn:%d" % JOY_BUTTON_DPAD_UP],
 		"save_fuel": [KEY_V, "btn:%d" % JOY_BUTTON_DPAD_DOWN],
 		"push": [KEY_G, "btn:%d" % JOY_BUTTON_RIGHT_STICK],
+		"tyre_report": [KEY_Y],
 		"shift_up": [KEY_E, "btn:%d" % JOY_BUTTON_RIGHT_SHOULDER],
 		"shift_down": [KEY_Q, "btn:%d" % JOY_BUTTON_LEFT_SHOULDER],
 		"pause": [KEY_ESCAPE, KEY_P, "btn:%d" % JOY_BUTTON_BACK],

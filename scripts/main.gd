@@ -7,6 +7,7 @@ const Race := preload("res://scripts/race.gd")
 const Car := preload("res://scripts/car.gd")
 const Weather := preload("res://scripts/weather.gd")
 const TelemetryHud := preload("res://scripts/telemetry_hud.gd")
+const TyreReport := preload("res://scripts/tyre_report.gd")
 const TrackEditor := preload("res://scripts/track_editor.gd")
 const Net := preload("res://scripts/net.gd")
 const Wheel := preload("res://scripts/wheel.gd")
@@ -263,6 +264,12 @@ func _ready() -> void:
 	telemetry = TelemetryHud.new()
 	telemetry.visible = false
 	hud_layer.add_child(telemetry)
+	mirror = load("res://scripts/mirror.gd").new()
+	add_child(mirror)
+	mirror.setup(cam.get_world_3d(), hud)
+	tyre_panel = TyreReport.new()
+	tyre_panel.visible = false
+	hud_layer.add_child(tyre_panel)
 	hud.visible = false
 
 	ui_layer = CanvasLayer.new()
@@ -297,7 +304,7 @@ func _ready() -> void:
 	pause_status.size = Vector2(640, 24)
 	pause_status.position = Vector2(0, 136)
 	pause_frame.add_child(pause_status)
-	pause_keys = Game.make_label("ESC  RESUME    Q  QUIT    BACKSPACE  REWIND    F8  REPORT", 16, Color.WHITE, 5)
+	pause_keys = Game.make_label("ESC  RESUME    Q  QUIT    BACKSPACE  REWIND    Y  TIRE REPORT    F8  REPORT", 16, Color.WHITE, 5)
 	pause_keys.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	pause_keys.size = Vector2(640, 30)
 	pause_keys.position = Vector2(0, 250)
@@ -1630,6 +1637,10 @@ func _enter_results() -> void:
 func _on_lap(car: Node3D, laps_done: int, lap_time: float) -> void:
 	if car != race.player or state != State.RACE:
 		return
+	# The crew reads the tyres every lap; in practice they show you every few.
+	_last_tyre_report = TyreReport.read(car)
+	if session == "practice" and laps_done > 0 and laps_done % PRACTICE_REPORT_EVERY == 0:
+		tyre_panel.show_report(_last_tyre_report, 7.0)
 	if Game.submit_record(Game.selected_track, "lap", lap_time):
 		ghost.save_best()
 		# Your best lap here, and its ghost, to the leaderboards.
@@ -1757,6 +1768,8 @@ func _unhandled_input(event: InputEvent) -> void:
 		_photo_orbit = Vector3(0.6, 0.25, 9.0)
 		_enter_photo()
 		return
+	if event.is_action_pressed("tyre_report") and state in [State.RACE, State.FINISHED]:
+		show_tyre_report()
 	if event.is_action_pressed("telemetry") and state in [State.RACE, State.COUNTDOWN, State.FINISHED]:
 		telemetry.visible = not telemetry.visible
 		telemetry.car = race.player
@@ -2284,6 +2297,12 @@ func _player_input() -> void:
 		return
 	if Input.is_action_just_pressed("push"):
 		call_push()
+	# In the box: the crew reads the tyres coming in.
+	var serviced: bool = p.pit_state == 3
+	if serviced and not _was_serviced:
+		_last_tyre_report = TyreReport.read(p)
+		tyre_panel.show_report(_last_tyre_report, 7.0)
+	_was_serviced = serviced
 	var ctl: Node = race.control
 	if ctl:
 		if Input.is_action_just_pressed("pit"):
@@ -2486,7 +2505,7 @@ func _on_pit_call(info: Dictionary) -> void:
 		# One tap for the usual answer.
 		{"id": "advice", "label": "TAKE THE CREW CHIEF'S CALL: %s" % String(info.names[adv_i]), "hint": "ONE TAP.  RESTART ABOUT %s" % Game.ordinal(adv_est) if adv_est > 0 else "ONE TAP"},
 		{"id": "plan", "label": "PIT CALL", "values": names, "index": adv_i},
-		{"id": "chassis", "label": "CHASSIS", "values": ["NO CHANGE", "TIGHTEN (ROUND OF WEDGE IN)", "LOOSEN (ROUND OF WEDGE OUT)"], "index": 0,
+		{"id": "chassis", "label": "CHASSIS", "values": ["NO CHANGE", "TIGHTEN (ROUND OF WEDGE IN)", "LOOSEN (ROUND OF WEDGE OUT)", "TRACK BAR UP (LOOSER OFF THE CORNERS)", "TRACK BAR DOWN (TIGHTER OFF THE CORNERS)"], "index": 0,
 			"hint": "TIGHT: THE FRONT PUSHES UP THE TRACK.  LOOSE: THE REAR WANTS TO COME AROUND"},
 		{"id": "go", "label": "CONFIRM", "hint": "START TO SEND IT"},
 	] + ([{"id": "rewind", "label": "REWIND 5 SECONDS (%s LEFT)" % (str(rewind.left) if rewind.left < 50 else "ANY"), "hint": "GO BACK TO BEFORE IT HAPPENED"}] if rewind.available() and (rewind.offer_t > 0.0 or race.control._cause == race.player) else []), 1)
@@ -2530,14 +2549,16 @@ func _close_pit_menu() -> void:
 	if pit_menu == null or not is_instance_valid(pit_menu):
 		return
 	var call: String = _pit_info.options[pit_menu.value("plan")]
-	var wedge: float = [0.0, 120.0, -120.0][pit_menu.value("chassis")]
+	var ch: int = pit_menu.value("chassis")
+	var wedge: float = [0.0, 120.0, -120.0, 0.0, 0.0][ch]
+	var bar: float = [0.0, 0.0, 0.0, 0.5, -0.5][ch]
 	pit_menu.queue_free()
 	pit_menu = null
 	paused = false
 	hud.visible = true
 	synth.beep(1320.0, 0.08)
 	if race and race.control:
-		race.control.resolve_player(call, wedge)
+		race.control.resolve_player(call, wedge, bar)
 		# A quick caution's stops are made at once: show yours at the box.
 		if call != "" and race.control.quick and int(Game.settings.get("pit_view", 1)) == 1 and race.player.has_meta("stop"):
 			pit_show.start_show(race.player)
@@ -2571,6 +2592,11 @@ func _near_pit_entry(p: Node3D) -> bool:
 ## Radio: the crew chief speaks his calls (the OS / browser voice). The spotter
 ## and the TV booth are on screen only.
 var telemetry: Control
+var tyre_panel: Control # the tire report (tyre_report.gd)
+var mirror: Node # the rear-view mirror (mirror.gd)
+var _last_tyre_report := {} # read at the end of your last lap
+var _was_serviced := false
+const PRACTICE_REPORT_EVERY := 3 # laps
 var _voices: PackedStringArray = []
 
 
@@ -3124,6 +3150,8 @@ func _process(delta: float) -> void:
 	Game.pt("frame.interpolate", t0)
 	t0 = Time.get_ticks_usec()
 	_update_camera(delta)
+	if mirror:
+		mirror.update(race.player, state in [State.RACE, State.COUNTDOWN] and split_cams.is_empty() and not showtime.replay_active and not (pit_show and pit_show.showing))
 	_fit_camera_aspect()
 	_update_motion_blur()
 	Game.pt("frame.camera", t0)
@@ -3393,6 +3421,19 @@ func _restart_cue(text: String) -> void:
 
 ## Options -> PIT ROAD: YOU DRIVE (your pedals on pit road: brake to the limit,
 ## stop in the stall, hold the limit out) or AUTO. AUTO GAS on a phone means AUTO.
+## The tire report: the last lap's reading (Y, or TIRE REPORT when paused);
+## again to put it away.
+func show_tyre_report() -> void:
+	if race == null or race.player == null:
+		return
+	if tyre_panel.visible:
+		tyre_panel.show_t = 0.01
+		return
+	if _last_tyre_report.is_empty():
+		_last_tyre_report = TyreReport.read(race.player)
+	tyre_panel.show_report(_last_tyre_report, 9.0)
+
+
 ## Options -> CAUTION DRIVING: YOU DRIVE (the default) or AUTO (the car follows
 ## the pace car itself).
 func caution_drive_manual() -> bool:
@@ -3599,13 +3640,28 @@ func _enter_garage(return_to: String) -> void:
 		{"id": "psi_r", "label": "RIGHT PRESSURES", "values": psi, "index": int(st.psi_r), "hint": "THE RIGHT SIDES DO THE WORK ON AN OVAL"},
 		{"id": "bias", "label": "BRAKE BIAS", "values": ["54% F", "56% F", "58% F", "60% F", "62% F"], "index": int(st.bias), "hint": "MORE FRONT: STABLE UNDER BRAKES, CAN LOCK THE FRONTS"},
 		{"id": "gearing", "label": "GEARING", "values": ["SHORT", "STANDARD", "LONG"], "index": int(st.gearing), "hint": "SHORT: QUICKER OFF THE CORNERS.  LONG: MORE TOP SPEED"},
+		{"id": "sheet_adv", "label": "ADVANCED: SHOCKS, CAMBER, TRACK BAR", "hint": "THE FINE TUNING. RUN A FEW LAPS, READ THE TIRE TEMPS (PAUSE -> TIRE REPORT), ADJUST"},
 		{"id": "sheets", "label": "SETUP SHEETS", "hint": "SAVE, LOAD OR SHARE SETUPS"},
 		{"id": "back", "label": "DONE"},
 	]
+	if _last_tyre_report.size() > 0:
+		rows.insert(rows.size() - 2, {"id": "sheet_tyres", "label": "LAST RUN'S TIRE TEMPS", "hint": String(_last_tyre_report.advice[0])})
 	_open_menu("garage", "GARAGE", rows, rows.size() - 1)
 	menu.row_h = 25
 	menu.top = 78
 	menu.build("GARAGE", rows, rows.size() - 1)
+
+
+## The garage's advanced page: shocks, camber and the track bar.
+func _enter_garage_advanced() -> void:
+	var st: Dictionary = Game.setup
+	var rows := [
+		{"id": "shocks", "label": "SHOCKS", "values": ["SOFT", "STANDARD", "STIFF"], "index": int(st.get("shocks", 1)), "hint": "SOFT: SOAKS UP BUMPS, MORE GRIP OVER ROUGH TRACK.  STIFF: QUICKER TO REACT, SKATES OVER BUMPS"},
+		{"id": "camber", "label": "CAMBER", "values": ["LESS", "STANDARD", "MORE"], "index": int(st.get("camber", 1)), "hint": "READ IT OFF THE TIRE TEMPS: INSIDE HOT = TOO MUCH, OUTSIDE HOT = NOT ENOUGH"},
+		{"id": "track_bar", "label": "TRACK BAR", "values": ["LOW", "STANDARD", "HIGH"], "index": int(st.get("track_bar", 1)), "hint": "HIGH: THE REAR ROLLS MORE, LOOSER OFF THE CORNERS.  LOW: TIGHTER OFF"},
+		{"id": "sheet_back", "label": "BACK TO THE GARAGE"},
+	]
+	_open_menu("garage", "GARAGE  -  ADVANCED", rows, rows.size() - 1)
 
 
 func _enter_setup_sheets() -> void:
@@ -3635,6 +3691,11 @@ func _on_sheet(id: String) -> void:
 			_sub("SETUP LOADED" if Game.setup_from_code(DisplayServer.clipboard_get()) else "NO SETUP CODE ON THE CLIPBOARD", 2.0)
 		"sheet_back":
 			_enter_garage(menu_return)
+		"sheet_adv":
+			_enter_garage_advanced()
+		"sheet_tyres":
+			var lines: Array = _last_tyre_report.get("advice", [])
+			_sub("  /  ".join(lines), 6.0)
 		_:
 			var sheets: Dictionary = Game.setup_sheets(Game.selected_track)
 			var key := id.substr(6)
@@ -3702,6 +3763,7 @@ func _enter_options() -> void:
 		{"id": "pit_view", "label": "MY PIT STOPS", "values": ["JUST THE RESULT", "SHOW THEM"], "index": int(Game.settings.get("pit_view", 1)), "hint": "SHOW THEM: THE PIT-STOP CAMERA AT YOUR BOX, THE CREW AT WORK, AND YOUR GETAWAY"},
 		{"id": "rewinds", "label": "REWIND", "values": ["OFF", "3 PER RACE", "UNLIMITED"], "index": int(Game.settings.get("rewinds", 1)), "hint": "GO BACK 5 SECONDS AFTER A MISTAKE (BACKSPACE, OR THE BUTTON).  NOT ONLINE OR IN THE DAILY CHALLENGE"},
 		{"id": "tv_graphics", "label": "TV GRAPHICS", "values": ["SIMPLE", "BROADCAST"], "index": int(Game.settings.get("tv_graphics", 1)), "hint": "BROADCAST: THE RUNNING ORDER TICKER ACROSS THE TOP, STAGE RESULTS, LIKE THE RACE ON TV"},
+		{"id": "mirror", "label": "MIRROR", "values": ["OFF", "ON"], "index": int(Game.settings.get("mirror", 1)), "hint": "A REAR-VIEW MIRROR AT THE TOP OF THE SCREEN: SEE THE PUSH COMING, AND WHO TO BLOCK"},
 		{"id": "draft_cue", "label": "DRAFT SOUNDS", "values": ["OFF", "ON"], "index": int(Game.settings.get("draft_cue", 1)), "hint": "A TICK WHEN YOU CATCH THE DRAFT, A DOUBLE TICK WHEN IT'S TIME TO PULL OUT AND PASS"},
 		{"id": "haptics", "label": "VIBRATION", "values": ["OFF", "ON"], "index": int(Game.settings.get("haptics", 1)), "hint": "PHONES: A BUZZ ON HITS AND LOCKED WHEELS"},
 		{"id": "share_stats", "label": "SHARE STATS", "values": ["OFF", "ON"], "index": int(Game.settings.get("share_stats", 1)), "hint": "SENDS YOUR FRAME RATE AND DEVICE TYPE AFTER A RACE (NOTHING PERSONAL) TO HELP TUNE THE GAME"},
@@ -3823,7 +3885,7 @@ func _on_menu_changed(id: String, idx: int) -> void:
 			elif id == "map_contrast" or id == "hand":
 				Game.settings[id] = idx
 				Game.save_settings()
-			elif id == "auto_gas" or id == "pit_drive" or id == "caution_drive" or id == "share_stats" or id == "haptics" or id == "draft_cue" or id == "tv_graphics" or id == "rewinds" or id == "pit_view":
+			elif id == "auto_gas" or id == "pit_drive" or id == "caution_drive" or id == "mirror" or id == "share_stats" or id == "haptics" or id == "draft_cue" or id == "tv_graphics" or id == "rewinds" or id == "pit_view":
 				Game.settings[id] = idx
 				Game.save_settings()
 			elif id == "vsync":
