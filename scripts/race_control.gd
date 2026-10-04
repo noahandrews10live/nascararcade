@@ -469,6 +469,7 @@ func _update_pace_car(delta: float) -> void:
 func _caution_tick(delta: float) -> void:
 	if final_lap_caution:
 		return
+	_yellow_pass_watch()
 	# Count laps by the pace car crossing the line.
 	# Wrecked cars get towed off.
 	for c in race.cars:
@@ -604,7 +605,7 @@ func _go_green() -> void:
 		if c == lead_c:
 			c.launch_hold = 0.0
 		elif _is_human(c):
-			c.launch_hold = 99.0
+			c.launch_hold = 0.0 if player_drives else 99.0
 		else:
 			c.launch_hold = randf_range(0.12, 0.3) + 0.35 * (1.0 - c.ai_racecraft) + randf() * 0.15 * (1.0 - c.ai_consistency)
 	flag = Flag.GREEN
@@ -621,6 +622,59 @@ func _go_green() -> void:
 	if lead.lap() == race.laps - 1:
 		flag = Flag.WHITE
 		flag_changed.emit("WHITE")
+
+
+## CAUTION DRIVING: YOU DRIVE (main sets player_drives): the player drives the
+## caution laps. The pace the field is running (what the player's limiter holds
+## them to), and passing under yellow: give the spot back or it's a pass-through.
+var player_drives := false
+const PASS_GRACE := 8.0 # seconds to give a spot back
+const PASS_WATCH_AFTER := 8.0 # the field settles after the yellow first
+var _was_ahead := {} # car -> it was ahead of the player last tick
+var _owed_to: Node3D = null
+var _owed_until := 0.0
+var _watch_phase := ""
+
+
+func caution_cap(c: Node3D) -> float:
+	var pv: float = pace_car.v
+	var coast: float = max(pv * 1.7, 95.0 - 2.5 * caution_elapsed)
+	return min(pv * 1.7, coast)
+
+
+func _yellow_pass_watch() -> void:
+	var p: Node3D = race.player
+	if not player_drives or p == null or not _is_human(p) or p.pit_state != Pit.NONE or p.out:
+		_was_ahead.clear()
+		_owed_to = null
+		return
+	if quick_phase != _watch_phase or caution_elapsed < PASS_WATCH_AFTER:
+		# (just lined up, or the field still slowing: start watching afresh)
+		_watch_phase = quick_phase
+		_was_ahead.clear()
+		_owed_to = null
+		return
+	for c in race.cars:
+		if c == p or c.out or c.towed or c.finished or c.pit_state != Pit.NONE or c.spinning:
+			_was_ahead.erase(c)
+			continue
+		var ahead: bool = c.dist > p.dist
+		if _was_ahead.get(c, ahead) and not ahead and _owed_to == null:
+			_owed_to = c
+			_owed_until = race.time + PASS_GRACE
+			message_for(p, "SPOTTER: YOU PASSED THE %s UNDER CAUTION - GIVE IT BACK" % c.team.num, "spotter")
+		_was_ahead[c] = ahead
+	if _owed_to:
+		if not is_instance_valid(_owed_to) or _owed_to.pit_state != Pit.NONE or _owed_to.out or _owed_to.dist > p.dist:
+			if is_instance_valid(_owed_to) and _owed_to.dist > p.dist:
+				message_for(p, "SPOTTER: OK, YOU'RE BACK WHERE YOU BELONG", "spotter")
+			_owed_to = null
+		elif race.time > _owed_until:
+			_owed_to = null
+			if p.penalty == "":
+				p.penalty = "PT"
+				p.want_pit = true
+				message.emit("PASSING UNDER CAUTION  -  PASS-THROUGH PENALTY", "flag")
 
 
 func _free_pass() -> void:

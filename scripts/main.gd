@@ -2308,7 +2308,10 @@ func _player_input() -> void:
 		# PIT ROAD: YOU DRIVE the pedals on pit road are yours (it still steers).
 		var to_pits: bool = p.pit_state != 0 or (p.want_pit and _near_pit_entry(p))
 		p.manual_pedals = to_pits and pit_drive_manual()
-		var auto: bool = ctl.flag == ctl.Flag.YELLOW or to_pits or p.launch_hold > 0.0
+		var drive_yellow: bool = caution_drive_manual()
+		ctl.player_drives = drive_yellow
+		var yellow: bool = ctl.flag == ctl.Flag.YELLOW and not ctl.final_lap_caution
+		var auto: bool = (yellow and not drive_yellow) or (ctl.final_lap_caution and ctl.flag == ctl.Flag.YELLOW) or to_pits or p.launch_hold > 0.0
 		p.ai = auto
 		# Say so whenever the car is driving itself (and why, and until when).
 		if not auto:
@@ -2321,6 +2324,8 @@ func _player_input() -> void:
 			hud.auto_reason = "CAUTION: THE CAR FOLLOWS THE PACE CAR - YOURS AGAIN AT THE GREEN"
 		else:
 			hud.auto_reason = "GREEN! HIT THE GAS - IT'S YOURS"
+		if yellow and not auto:
+			hud.auto_reason = "CAUTION: HOLD YOUR SPOT BEHIND THE PACE CAR  -  %d MPH LIMIT" % int(ctl.caution_cap(p) * 2.23694)
 		if p.manual_pedals:
 			p.throttle = Input.get_action_strength("accelerate")
 			p.brake = Input.get_action_strength("brake")
@@ -2337,6 +2342,8 @@ func _player_input() -> void:
 		p.brake = max(p.brake, wr.brake)
 		p.steer_in = wr.steer
 		wheel.update(p, get_physics_process_delta_time())
+	if ctl and ctl.flag == ctl.Flag.YELLOW and ctl.player_drives and p.pit_state == 0:
+		_caution_limiter(p, ctl)
 	# AUTO GAS: the car holds the speed it can take through the corner ahead (the
 	# way the AI does, with a little margin); you steer. The brake pedal still
 	# brakes, and the gas pedal can push harder.
@@ -3343,7 +3350,7 @@ func _restart_input(p: Node3D, ctl: Node) -> void:
 		var pressed: bool = gas_down and not _restart_gas_held
 		# (On a phone the gas is half the screen: a touch before the green is
 		# ignored, never a jump.)
-		var forgiving: bool = Game.touch_active
+		var forgiving: bool = Game.touch_active or ctl.player_drives # (driving the caution: the gas is in use; the limiter stops a jump)
 		if leading:
 			if auto_gas and ctl.restart_to_zone < -ctl.RESTART_ZONE * 0.5:
 				pressed = true
@@ -3357,7 +3364,10 @@ func _restart_input(p: Node3D, ctl: Node) -> void:
 			if pressed and not auto_gas and not forgiving:
 				ctl.jumped_restart(p)
 				_restart_gas_held = true
-			_restart_cue("WAIT FOR THE GREEN - THEN THE GAS" if forgiving or auto_gas or not _restart_gas_held else "LIFT OFF THE GAS")
+			if ctl.player_drives:
+				_restart_cue("HOLD YOUR SPOT - GO AT THE GREEN")
+			else:
+				_restart_cue("WAIT FOR THE GREEN - THEN THE GAS" if forgiving or auto_gas or not _restart_gas_held else "LIFT OFF THE GAS")
 		return
 	if p.launch_hold > 0.0:
 		# Green: the gas launches you.
@@ -3383,6 +3393,34 @@ func _restart_cue(text: String) -> void:
 
 ## Options -> PIT ROAD: YOU DRIVE (your pedals on pit road: brake to the limit,
 ## stop in the stall, hold the limit out) or AUTO. AUTO GAS on a phone means AUTO.
+## Options -> CAUTION DRIVING: YOU DRIVE (the default) or AUTO (the car follows
+## the pace car itself).
+func caution_drive_manual() -> bool:
+	return int(Game.settings.get("caution_drive", 1)) == 1
+
+
+## Driving the caution laps yourself: a limiter holds you to the pace the field is
+## running, and keeps your gap to the car (or pace car) in front, so the line
+## can't be run into. You steer, and choose how close to run.
+func _caution_limiter(p: Node3D, ctl: Node) -> void:
+	var cap: float = ctl.caution_cap(p)
+	var nbl: Array = p.nb
+	var others: Array = []
+	for q in range(0, nbl.size(), 2):
+		others.append([nbl[q], nbl[q + 1]])
+	if ctl.pace_car and ctl.pace_car.visible:
+		others.append([ctl.pace_car, race._gap(p, ctl.pace_car)])
+	for oq in others:
+		var o: Node3D = oq[0]
+		var g: float = oq[1]
+		if g > 0.0 and g < 45.0 and abs(o.d - p.d) < 2.6 and o.pit_state == 0:
+			cap = min(cap, max(o.v + (g - 10.0) * 0.6, 0.0))
+	if p.v > cap:
+		p.throttle = min(p.throttle, 0.0 if p.v > cap + 0.5 else 0.3)
+	if p.v > cap + 3.0:
+		p.brake = max(p.brake, clamp((p.v - cap - 3.0) / 6.0, 0.1, 0.7))
+
+
 func pit_drive_manual() -> bool:
 	if int(Game.settings.get("pit_drive", 1)) != 1:
 		return false
@@ -3667,6 +3705,7 @@ func _enter_options() -> void:
 		{"id": "draft_cue", "label": "DRAFT SOUNDS", "values": ["OFF", "ON"], "index": int(Game.settings.get("draft_cue", 1)), "hint": "A TICK WHEN YOU CATCH THE DRAFT, A DOUBLE TICK WHEN IT'S TIME TO PULL OUT AND PASS"},
 		{"id": "haptics", "label": "VIBRATION", "values": ["OFF", "ON"], "index": int(Game.settings.get("haptics", 1)), "hint": "PHONES: A BUZZ ON HITS AND LOCKED WHEELS"},
 		{"id": "share_stats", "label": "SHARE STATS", "values": ["OFF", "ON"], "index": int(Game.settings.get("share_stats", 1)), "hint": "SENDS YOUR FRAME RATE AND DEVICE TYPE AFTER A RACE (NOTHING PERSONAL) TO HELP TUNE THE GAME"},
+		{"id": "caution_drive", "label": "CAUTION DRIVING", "values": ["AUTO", "YOU DRIVE"], "index": int(Game.settings.get("caution_drive", 1)), "hint": "YOU DRIVE: YOU DRIVE THE CAUTION LAPS (A LIMITER HOLDS THE PACE, IT KEEPS YOUR GAP). PASSING UNDER YELLOW: GIVE IT BACK OR IT'S A PASS-THROUGH"},
 		{"id": "pit_drive", "label": "PIT ROAD", "values": ["AUTO", "YOU DRIVE"], "index": int(Game.settings.get("pit_drive", 1)), "hint": "YOU DRIVE: YOUR PEDALS ON PIT ROAD (IT STEERS): BRAKE TO THE LIMIT BY THE LINE, STOP IN YOUR STALL, HOLD THE LIMIT OUT. SPEEDING IS A PASS-THROUGH"},
 		{"id": "auto_gas", "label": "PEDALS", "values": ["MANUAL GAS + BRAKE", "AUTO GAS, YOU BRAKE"], "index": int(Game.settings.get("auto_gas", 0)), "hint": "MANUAL: HOLD ANYWHERE ON THE RIGHT HALF OF THE SCREEN FOR GAS. AUTO: THE CAR TAKES EACH CORNER AT A SAFE SPEED, YOU STEER. THE BRAKE IS BESIDE THE SPEEDOMETER EITHER WAY"},
 		{"id": "tilt_sens", "label": "TILT STEERING", "values": ["GENTLE", "NORMAL", "QUICK", "VERY QUICK"], "index": int(Game.settings.get("tilt_sens", 1)), "hint": "PHONES: HOW FAR YOU TILT FOR FULL LOCK (18 / 12 / 9 / 6 DEGREES)"},
@@ -3784,7 +3823,7 @@ func _on_menu_changed(id: String, idx: int) -> void:
 			elif id == "map_contrast" or id == "hand":
 				Game.settings[id] = idx
 				Game.save_settings()
-			elif id == "auto_gas" or id == "pit_drive" or id == "share_stats" or id == "haptics" or id == "draft_cue" or id == "tv_graphics" or id == "rewinds" or id == "pit_view":
+			elif id == "auto_gas" or id == "pit_drive" or id == "caution_drive" or id == "share_stats" or id == "haptics" or id == "draft_cue" or id == "tv_graphics" or id == "rewinds" or id == "pit_view":
 				Game.settings[id] = idx
 				Game.save_settings()
 			elif id == "vsync":

@@ -55,6 +55,18 @@ func _human(p: Node3D) -> void:
 	p.autopilot_forced = false
 
 
+## Put your car at the front of the field (same lap), so you lead the restart.
+func _to_front(p: Node3D) -> void:
+	main.race._update_order()
+	var lead: Node3D = main.race.order[0]
+	if lead != p:
+		p.dist = lead.dist + 30.0
+		p.d = lead.d
+		p.v = lead.v
+		p.sync_visual()
+	main.race._update_order()
+
+
 func _robot() -> void:
 	main.autopilot = true
 
@@ -71,6 +83,7 @@ func _run() -> void:
 	game.settings.cautions = 1
 	game.settings.pit_view = 0
 	game.settings.auto_gas = 0
+	game.settings.caution_drive = 0 # (AUTO: the car follows the pace car; caution_drive_test covers YOU DRIVE)
 	game.tracks[1].full_laps = 600
 	main.mode = "race"
 	main.session = "race"
@@ -164,8 +177,7 @@ func _run() -> void:
 
 	# 3. Leading the restart: the gas before the zone is a jump, even for the
 	# leader (served like any other)...
-	race.give_lap(p) # (a lap up: you'll lead the field to the green)
-	race._update_order()
+	_to_front(p)
 	_check(await _to_window(ctl, true), "a restart with you in the lead")
 	_check(race.order[0] == p, "you lead it")
 	_human(p)
@@ -183,9 +195,7 @@ func _run() -> void:
 	await _frames(60 * 10)
 
 	# ... and in the zone, your gas throws the green.
-	race.give_lap(p)
-	race.give_lap(p) # (well clear in front again)
-	race._update_order()
+	_to_front(p)
 	_check(await _to_window(ctl, true), "another restart with you in the lead")
 	_human(p)
 	n = 0
