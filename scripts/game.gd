@@ -253,6 +253,11 @@ static func clean_text(t: String, n: int) -> String:
 	return out.strip_edges().substr(0, n)
 
 
+## (car_body.gd, loaded when needed: it loads this script itself.)
+static func _body() -> Script:
+	return load("res://scripts/car_body.gd")
+
+
 ## The paint as a short code to share ("PT1:..."), and back.
 func paint_code() -> String:
 	return "PT1:" + Marshalls.utf8_to_base64(JSON.stringify(custom))
@@ -266,7 +271,7 @@ func paint_from_code(code: String) -> bool:
 	if not (d is Dictionary):
 		return false
 	var lim := {"num": [1, 99], "first": [0, FIRST_NAMES.size() - 1], "last": [0, LAST_NAMES.size() - 1], "sponsor": [0, SPONSORS.size() - 1],
-		"c1": [0, PALETTE.size() - 1], "c2": [0, PALETTE.size() - 1], "cn": [0, PALETTE.size() - 1], "make": [0, CarBody.MAKES.size() - 1], "scheme": [0, CarBody.SCHEMES.size() - 1]}
+		"c1": [0, PALETTE.size() - 1], "c2": [0, PALETTE.size() - 1], "cn": [0, PALETTE.size() - 1], "make": [0, _body().MAKES.size() - 1], "scheme": [0, _body().SCHEMES.size() - 1]}
 	for k in lim:
 		if d.has(k):
 			custom[k] = clampi(int(d[k]), lim[k][0], lim[k][1])

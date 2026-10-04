@@ -66,7 +66,7 @@ run_one() {
 			python3 tests/tools/fake_cloud.py $port > "$OUT/$tag.server.txt" 2>&1 &
 			local spid=$!
 			sleep 1
-			env "${env[@]}" ST_CLOUD=http://127.0.0.1:$port timeout 900 "$GODOT" --headless --fixed-fps 60 -s "tests/$name.gd" > "$log" 2>&1 || code=$?
+			env "${env[@]}" ST_CLOUD=http://127.0.0.1:$port timeout 900 "$GODOT" --headless --fixed-fps 60 -s "tests/$name.gd" 2>&1 | head -c 20000000 > "$log"; code=${PIPESTATUS[0]}
 			kill $spid 2>/dev/null
 			;;
 		render)

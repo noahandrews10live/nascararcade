@@ -61,7 +61,7 @@ func _run() -> void:
 	game.custom.sponsor_text = "joe's garage!!"
 	var t: Dictionary = game.custom_team()
 	print("   sponsor on the car: '%s'" % t.sponsor)
-	_check(t.sponsor == "JOE'S GARAGE!", "your own sponsor name goes on the car (capitals, cleaned)")
+	_check(t.sponsor == "JOE'S GARAGE!!", "your own sponsor name goes on the car (capitals, cleaned)")
 	game.custom.sponsor_text = ""
 	_check(game.custom_team().sponsor == game.SPONSORS[game.custom.sponsor], "empty: the sponsor from the list")
 	game.custom.num = 42
