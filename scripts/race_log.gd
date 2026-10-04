@@ -40,6 +40,8 @@ var balance_n := 0
 var pit_stops: Array = [] # [{lap, before, after}]
 var cautions := 0
 var led_laps := 0
+var order_by_lap: Array = [] # the whole field's running order (car numbers) as the leader finished each lap
+var car_cols := {} # car number -> colour (for the lap chart)
 
 var _sample_t := 0.0
 var _pos := 0
@@ -218,6 +220,15 @@ func _event(kind: String, text: String, extra := {}) -> void:
 
 
 func _on_lap(car: Node3D, laps_done: int, lap_time: float) -> void:
+	if laps_done > order_by_lap.size() and laps_done >= 1:
+		# The leader at the line: the order, for the lap chart.
+		var row: Array = []
+		for c in race.order:
+			row.append(String(c.team.num))
+			if not car_cols.has(String(c.team.num)):
+				car_cols[String(c.team.num)] = c.team.c1
+		while order_by_lap.size() < laps_done:
+			order_by_lap.append(row)
 	if car != me:
 		return
 	var lead: Node3D = race.order[0]
@@ -308,4 +319,5 @@ func summary() -> Dictionary:
 		"peak_temp": peak_temp, "peak_carcass": peak_carcass,
 		"balance": balance_sum / max(balance_n, 1), "pit_stops": pit_stops, "cautions": cautions, "led": led_laps,
 		"green_laps": green,
+		"order_by_lap": order_by_lap, "car_cols": car_cols, "me": String(me.team.num) if me else "",
 	}

@@ -180,7 +180,12 @@ func _run() -> void:
 	main.debrief.turn(1)
 	await _frames(3)
 	await _shot("debrief_3")
-	_check(main.debrief.page == 2 and main.debrief.tips.size() >= 1, "the coach page has advice (%d tips)" % main.debrief.tips.size())
+	var lc: Array = sm.get("order_by_lap", [])
+	_check(main.debrief.page == 2 and lc.size() >= 2 and lc[-1].size() == main.race.cars.size(), "the lap chart: the whole field's order, every lap (%d laps)" % lc.size())
+	main.debrief.turn(1)
+	await _frames(3)
+	await _shot("debrief_4")
+	_check(main.debrief.page == 3 and main.debrief.tips.size() >= 1, "the coach page has advice (%d tips)" % main.debrief.tips.size())
 	# APPLY: a setup change, remembered for this track only.
 	var bal0: int = int(game.setup.balance)
 	main._on_debrief_action({"kind": "setup", "key": "balance", "delta": 1, "label": "TEST"})

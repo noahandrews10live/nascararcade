@@ -1773,6 +1773,7 @@ func _setup_input() -> void:
 		"save_fuel": [KEY_V, "btn:%d" % JOY_BUTTON_DPAD_DOWN],
 		"push": [KEY_G, "btn:%d" % JOY_BUTTON_RIGHT_STICK],
 		"tyre_report": [KEY_Y],
+		"black_box": [KEY_B],
 		"shift_up": [KEY_E, "btn:%d" % JOY_BUTTON_RIGHT_SHOULDER],
 		"shift_down": [KEY_Q, "btn:%d" % JOY_BUTTON_LEFT_SHOULDER],
 		"pause": [KEY_ESCAPE, KEY_P, "btn:%d" % JOY_BUTTON_BACK],

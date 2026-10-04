@@ -270,6 +270,10 @@ func _ready() -> void:
 	tyre_panel = TyreReport.new()
 	tyre_panel.visible = false
 	hud_layer.add_child(tyre_panel)
+	black_box = load("res://scripts/black_box.gd").new()
+	black_box.main = self
+	black_box.visible = false
+	hud_layer.add_child(black_box)
 	hud.visible = false
 
 	ui_layer = CanvasLayer.new()
@@ -304,7 +308,7 @@ func _ready() -> void:
 	pause_status.size = Vector2(640, 24)
 	pause_status.position = Vector2(0, 136)
 	pause_frame.add_child(pause_status)
-	pause_keys = Game.make_label("ESC  RESUME    Q  QUIT    BACKSPACE  REWIND    Y  TIRE REPORT    F8  REPORT", 16, Color.WHITE, 5)
+	pause_keys = Game.make_label("ESC  RESUME    Q  QUIT    BACKSPACE  REWIND    Y  TIRES    B  TIMING    F8  REPORT", 16, Color.WHITE, 5)
 	pause_keys.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	pause_keys.size = Vector2(640, 30)
 	pause_keys.position = Vector2(0, 250)
@@ -1538,6 +1542,7 @@ func _enter_countdown() -> void:
 	lap_bonus = round(ref * 1.35 * slack)
 	hud.race = race
 	telemetry.car = race.player
+	black_box.begin(race.player)
 	hud.track = track
 	hud.time_left = time_left
 	hud.show_timer = mode == "arcade"
@@ -1770,6 +1775,8 @@ func _unhandled_input(event: InputEvent) -> void:
 		return
 	if event.is_action_pressed("tyre_report") and state in [State.RACE, State.FINISHED]:
 		show_tyre_report()
+	if event.is_action_pressed("black_box") and state in [State.RACE, State.COUNTDOWN, State.FINISHED]:
+		black_box.toggle()
 	if event.is_action_pressed("telemetry") and state in [State.RACE, State.COUNTDOWN, State.FINISHED]:
 		telemetry.visible = not telemetry.visible
 		telemetry.car = race.player
@@ -2084,6 +2091,8 @@ func _physics_process(delta: float) -> void:
 			t0 = Time.get_ticks_usec()
 			if race_log:
 				race_log.tick(delta)
+			if black_box:
+				black_box.tick(race.time)
 			Game.pt("race_log", t0)
 			t0 = Time.get_ticks_usec()
 			if crew_watch:
@@ -2594,6 +2603,7 @@ func _near_pit_entry(p: Node3D) -> bool:
 var telemetry: Control
 var tyre_panel: Control # the tire report (tyre_report.gd)
 var mirror: Node # the rear-view mirror (mirror.gd)
+var black_box: Control # the timing screen (black_box.gd)
 var _last_tyre_report := {} # read at the end of your last lap
 var _was_serviced := false
 const PRACTICE_REPORT_EVERY := 3 # laps

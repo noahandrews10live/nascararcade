@@ -158,7 +158,7 @@ func _layout() -> void:
 		var racing_pause: bool = main.race != null and main.state in [main.State.COUNTDOWN, main.State.RACE, main.State.FINISHED] and main.split_cams.is_empty()
 		if racing_pause:
 			var rules: bool = main.race.control != null and main.race.player != null
-			var n3 := 5 if rules else 3
+			var n3 := 6 if rules else 4
 			var w4 := (w * 2.0 + 20.0 * k - 8.0 * k * (n3 - 1)) / n3
 			_buttons.append([Rect2(x3, y3, w4, h * 0.7), "CAMERA", "camera", "tap"])
 			_buttons.append([Rect2(x3 + w4 + 8.0 * k, y3, w4, h * 0.7), "SAVE CLIP", "_clip", "tap"])
@@ -166,7 +166,8 @@ func _layout() -> void:
 				var pit_on: bool = main.race.player.want_pit
 				_buttons.append([Rect2(x3 + (w4 + 8.0 * k) * 2.0, y3, w4, h * 0.7), "PIT: CANCEL" if pit_on else "PIT THIS LAP", "_pit", "tap"])
 				_buttons.append([Rect2(x3 + (w4 + 8.0 * k) * 3.0, y3, w4, h * 0.7), "SAVE FUEL: ON" if main.race.player.saving else "SAVE FUEL: OFF", "_save", "tap"])
-			_buttons.append([Rect2(x3 + (w4 + 8.0 * k) * (n3 - 1), y3, w4, h * 0.7), "TIRE REPORT", "_tyres", "tap"])
+			_buttons.append([Rect2(x3 + (w4 + 8.0 * k) * (n3 - 2), y3, w4, h * 0.7), "TIRES", "_tyres", "tap"])
+			_buttons.append([Rect2(x3 + (w4 + 8.0 * k) * (n3 - 1), y3, w4, h * 0.7), "TIMING", "_timing", "tap"])
 			y3 += h * 0.7 + 10.0 * k
 		if main.rewind and main.rewind.available() and main.state == main.State.RACE:
 			_buttons.append([Rect2(x3, y3, w * 2.0 + 20.0 * k, h * 0.7), "REWIND 5 SECONDS (%s LEFT)" % (str(main.rewind.left) if main.rewind.left < 50 else "ANY"), "_rewind", "tap"])
@@ -306,6 +307,12 @@ func _clip() -> void:
 func _save() -> void:
 	if main:
 		main.toggle_save()
+
+
+func _timing() -> void:
+	if main and main.black_box:
+		_tap("pause")
+		main.black_box.toggle()
 
 
 func _tyres() -> void:

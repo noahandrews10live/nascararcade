@@ -16,7 +16,7 @@ signal action(a: Dictionary) # an APPLY button
 signal done
 
 const W := 640.0
-const PAGES := ["THE RACE", "PACE & CAR", "KEY MOMENTS & COACH"]
+const PAGES := ["THE RACE", "PACE & CAR", "LAP CHART", "KEY MOMENTS & COACH"]
 const GOLD := Color(1.0, 0.85, 0.1)
 const CYAN := Color(0.5, 0.9, 1.0)
 const GOOD := Color(0.35, 1.0, 0.45)
@@ -238,6 +238,8 @@ func _build() -> void:
 		1:
 			_page_pace()
 		2:
+			_page_lap_chart()
+		3:
 			_page_moments()
 	# Navigation.
 	if page > 0:
@@ -374,6 +376,16 @@ func _longest_run() -> Array:
 	return best
 
 
+## The lap chart: every lap, where the top finishers (and you) ran.
+func _page_lap_chart() -> void:
+	var chart := LapChart.new()
+	chart.position = Vector2(28, 72)
+	chart.size = Vector2(584, 330)
+	chart.setup(s)
+	add_child(chart)
+	_lab("THE RUNNING ORDER AT THE LINE, LAP BY LAP: THE TOP 8 AND YOU (GOLD)", 11, DIM, Vector2(28, 406))
+
+
 func _page_moments() -> void:
 	_lab("KEY MOMENTS", 13, CYAN, Vector2(28, 72))
 	var y := 92.0
@@ -472,3 +484,56 @@ class DebriefChart extends Control:
 				draw_string(Game.arcade_font, Vector2(x - 4, yy - 6), "P", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(0.5, 0.9, 1.0))
 			elif e.kind in ["wall", "spin", "tyre", "out"]:
 				draw_string(Game.arcade_font, Vector2(x - 4, yy + 14), "X", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(1.0, 0.4, 0.3))
+
+
+class LapChart extends Control:
+	var rows: Array = []
+	var cols := {}
+	var me := ""
+	var show: Array = []
+
+	func setup(sm: Dictionary) -> void:
+		rows = sm.get("order_by_lap", [])
+		cols = sm.get("car_cols", {})
+		me = String(sm.get("me", ""))
+		show = []
+		if not rows.is_empty():
+			var last: Array = rows[-1]
+			for i in min(8, last.size()):
+				show.append(last[i])
+			if me != "" and not show.has(me):
+				show.append(me)
+		mouse_filter = Control.MOUSE_FILTER_IGNORE
+
+	func _draw() -> void:
+		var f := Game.arcade_font
+		draw_rect(Rect2(Vector2.ZERO, size), Color(0.05, 0.07, 0.12, 0.9))
+		if rows.size() < 2:
+			draw_string(f, Vector2(12, 24), "A LAP CHART NEEDS A FEW LAPS", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(0.7, 0.75, 0.82))
+			return
+		var field: int = 1
+		for r in rows:
+			field = max(field, r.size())
+		var plot := Rect2(34, 10, size.x - 80, size.y - 34)
+		var px := func(lap_i: int) -> float: return plot.position.x + plot.size.x * lap_i / float(rows.size() - 1)
+		var py := func(pos: int) -> float: return plot.position.y + plot.size.y * (pos - 1) / float(max(field - 1, 1))
+		# Grid: positions every 5, laps every so often.
+		for pos in range(1, field + 1, 5):
+			var y: float = py.call(pos)
+			draw_line(Vector2(plot.position.x, y), Vector2(plot.end.x, y), Color(1, 1, 1, 0.07))
+			draw_string(f, Vector2(4, y + 4), "P%d" % pos, HORIZONTAL_ALIGNMENT_LEFT, -1, 9, Color(0.6, 0.65, 0.72))
+		var step: int = max(1, int(ceil(rows.size() / 10.0)))
+		for li in range(0, rows.size(), step):
+			draw_string(f, Vector2(px.call(li) - 6, plot.end.y + 14), str(li + 1), HORIZONTAL_ALIGNMENT_LEFT, -1, 9, Color(0.6, 0.65, 0.72))
+		for num in show:
+			var pts := PackedVector2Array()
+			for li in rows.size():
+				var at: int = rows[li].find(num)
+				if at >= 0:
+					pts.append(Vector2(px.call(li), py.call(at + 1)))
+			if pts.size() < 2:
+				continue
+			var mine: bool = num == me
+			var c: Color = Color(1.0, 0.85, 0.1) if mine else Color(cols.get(num, Color.WHITE)).lightened(0.25)
+			draw_polyline(pts, c, 3.0 if mine else 1.5, true)
+			draw_string(f, pts[-1] + Vector2(5, 4), "#" + num, HORIZONTAL_ALIGNMENT_LEFT, -1, 10, c)
