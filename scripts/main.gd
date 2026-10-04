@@ -3615,7 +3615,8 @@ func _enter_race_setup(return_to := "") -> void:
 	var rows := [
 		{"id": "length", "label": "RACE LENGTH", "values": lengths, "index": Game.settings.length, "hint": "PERCENT OF A REAL CUP RACE DISTANCE"},
 		{"id": "difficulty", "label": "DIFFICULTY", "values": diffs, "index": Game.settings.difficulty, "hint": "HOW FAST AND SHARP THE OTHER DRIVERS ARE"},
-		{"id": "field", "label": "FIELD SIZE", "values": ["AUTO  %d CARS" % Game.field_size() if int(Game.settings.field) < 0 else "AUTO"] + Game.FIELDS.map(func(f): return "%d CARS" % f), "index": int(Game.settings.field) + 1, "hint": "AUTO: AS MANY AS THIS DEVICE RUNS SMOOTHLY"},
+		{"id": "ai_aggr", "label": "AI AGGRESSION", "values": Game.AGGRESSION.map(func(a): return a[0]), "index": int(Game.settings.get("ai_aggr", 1)), "hint": "CALM: THEY GIVE YOU ROOM.  HARD: THEY FORCE PASSES, BLOCK AND BUMP"},
+		{"id": "field", "label": "FIELD SIZE", "values": ["AUTO  %d CARS" % Game.field_size() if int(Game.settings.field) < 0 else "AUTO"] + Game.FIELDS.map(func(f): return "%d CARS" % f), "index": int(Game.settings.field) + 1, "hint": "AUTO: AS MANY AS THIS DEVICE RUNS SMOOTHLY.  40 CARS IS FOR A FAST COMPUTER"},
 		{"id": "weekend", "label": "WEEKEND", "values": Game.WEEKENDS, "index": Game.settings.weekend, "hint": "QUALIFY TO SET YOUR STARTING SPOT"},
 		{"id": "catchup", "label": "CATCH-UP", "values": ["OFF", "ON"], "index": int(Game.settings.get("catchup", 0)), "hint": "ON: THE FIELD STAYS CLOSE TO YOU, AHEAD OR BEHIND"},
 		{"id": "cautions", "label": "CAUTIONS", "values": ["OFF", "QUICK", "FULL"], "index": Game.settings.cautions, "hint": "QUICK: ABOUT 15 S FROM YELLOW TO GREEN. FULL: REAL CAUTION LAPS BEHIND THE PACE CAR"},

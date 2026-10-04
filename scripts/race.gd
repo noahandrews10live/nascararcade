@@ -159,7 +159,10 @@ func setup(trk: Node3D, player_team: int, lap_count: int, size := 25, grid: Arra
 		c.ai_racecraft = clamp(rng.randf_range(0.3, 0.8) + talent * 0.2, 0.2, 1.0)
 		if arcade_setup:
 			c.ai_consistency = 0.97 # the arcade game is against the clock: no pile-ups ahead
-		c.ai_aggression = rng.randf_range(0.2, 0.9)
+		var ag: Array = Game.ai_aggression_range() if not arcade_setup else [0.2, 0.9]
+		c.ai_aggression = rng.randf_range(ag[0], ag[1])
+		# (A hard field forces passes sooner; a calm one rides longer.)
+		c.ai_patience = clamp(c.ai_patience * (1.0 - (ag[0] - 0.2)), 0.1, 1.0)
 		c.set_meta("grid", p)
 		c.set_meta("idx", cars.size())
 		c.tyre_failed.connect(_on_tyre_failed)

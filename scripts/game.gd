@@ -825,8 +825,10 @@ const LENGTHS := [["SPRINT", 0.05], ["SHORT", 0.1], ["MEDIUM", 0.25], ["LONG", 0
 const DIFFICULTIES := [["ROOKIE", 0.955], ["VETERAN", 0.985], ["LEGEND", 1.0]]
 ## The most cars in any race (every mode: the field sizes, AUTO, challenges,
 ## online). Keeps a race smooth on phones.
-const MAX_CARS := 25
-const FIELDS := [20, 25]
+const MAX_CARS := 40
+## A phone or a browser: no more than this, even on AUTO (40 is for computers).
+const MAX_CARS_MOBILE := 25
+const FIELDS := [20, 25, 40]
 ## Field size "AUTO" (settings.field = -1): as many cars as this device runs
 ## smoothly. Worked out from how the last race ran: the script time per frame
 ## against a model of it (a fixed part plus a part per car, in ms on the
@@ -861,7 +863,7 @@ const PERF_BUDGET_MS := 9.0
 const WEEKENDS := ["RACE ONLY", "QUALIFY + RACE", "PRACTICE + QUALIFY + RACE"]
 var settings := {
 	# field: -1 = AUTO (see field_size), else an index into FIELDS.
-	"length": 1, "difficulty": 1, "field": -1, "auto_field": 0, "cautions": 1, "damage": 1, "wear": 1, "weather": 0,
+	"length": 1, "difficulty": 1, "ai_aggr": 1, "field": -1, "auto_field": 0, "cautions": 1, "damage": 1, "wear": 1, "weather": 0,
 	"assists": 2, "manual": 0, "weekend": 1, "touch_tilt": true, "tilt_sens": 1, "res_mode": 0, "commentary": 1, "catchup": 0,
 	"auto_gas": 0, "tutorial_done": 0, "share_stats": 1, "haptics": 1, "battery": 1, "draft_cue": 1, "tv_graphics": 1, "rewinds": 1, "pit_view": 1, "pit_drive": 1, "caution_drive": 1, "mirror": 1,
 	"big_text": 0, "map_contrast": 0, "hand": 0, # accessibility: larger text, high-contrast map, left-handed controls
@@ -1077,14 +1079,15 @@ func field_size() -> int:
 	if f >= 0:
 		return FIELDS[clampi(f, 0, FIELDS.size() - 1)]
 	var a := int(settings.get("auto_field", 0))
-	return mini(a, MAX_CARS) if a > 0 else first_field_guess()
+	var cap: int = MAX_CARS_MOBILE if (OS.has_feature("web") or touch_device() or OS.has_feature("mobile")) else MAX_CARS
+	return mini(a, cap) if a > 0 else first_field_guess()
 
 
 ## Before any race has been timed: careful in a browser on a phone.
 func first_field_guess() -> int:
 	if OS.has_feature("web"):
 		return 20 if touch_device() else 25
-	return MAX_CARS
+	return MAX_CARS_MOBILE # (AUTO moves up to a full 40 once a race shows there's room)
 
 
 ## What the field size on AUTO should be after a race with `cars` cars that took
@@ -1147,6 +1150,16 @@ func save_settings() -> void:
 func race_laps(track_idx: int) -> int:
 	var full: int = tracks[track_idx].get("full_laps", 200)
 	return max(5, int(round(full * float(LENGTHS[settings.length][1]))))
+
+
+## AI AGGRESSION: CALM, NORMAL or HARD. The range each driver's aggression is
+## drawn from (and how long they'll sit behind before forcing a pass).
+const AGGRESSION := [["CALM", 0.1, 0.5], ["NORMAL", 0.2, 0.9], ["HARD", 0.55, 1.0]]
+
+
+func ai_aggression_range() -> Array:
+	var a: Array = AGGRESSION[clampi(int(settings.get("ai_aggr", 1)), 0, AGGRESSION.size() - 1)]
+	return [a[1], a[2]]
 
 
 func ai_skill_scale() -> float:
