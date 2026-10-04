@@ -308,7 +308,7 @@ func _ready() -> void:
 	pause_status.size = Vector2(640, 24)
 	pause_status.position = Vector2(0, 136)
 	pause_frame.add_child(pause_status)
-	pause_keys = Game.make_label("ESC  RESUME    Q  QUIT    BACKSPACE  REWIND    Y  TIRES    B  TIMING    F8  REPORT", 16, Color.WHITE, 5)
+	pause_keys = Game.make_label("ESC RESUME   Q QUIT   BKSP REWIND   Y TIRES   B TIMING   F8 REPORT", 16, Color.WHITE, 5)
 	pause_keys.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	pause_keys.size = Vector2(640, 30)
 	pause_keys.position = Vector2(0, 250)
