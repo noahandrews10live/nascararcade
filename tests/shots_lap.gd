@@ -40,6 +40,6 @@ func _run() -> void:
 		await RenderingServer.frame_post_draw
 		var p: Node3D = main.race.player
 		var name := "lap_t%d_%02d" % [tidx, k]
-		root.get_texture().get_image().save_png(out.path_join(name + ".png"))
+		root.get_node("Game").screen_image(root).save_png(out.path_join(name + ".png"))
 		print("saved %s  s=%.0f d=%.1f" % [name, p.s(), p.d])
 	quit(0)

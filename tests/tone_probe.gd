@@ -67,10 +67,7 @@ func _run() -> void:
 	for i in 30:
 		await process_frame
 	await RenderingServer.frame_post_draw
-	var img := root.get_texture().get_image()
-	if root.use_hdr_2d:
-		img.convert(Image.FORMAT_RGBA8) # (linear floating point in HDR 2D)
-		img.linear_to_srgb()
+	var img := root.get_node("Game").screen_image(root)
 	var vals := []
 	var sz := img.get_size()
 	for k in LEVELS.size():

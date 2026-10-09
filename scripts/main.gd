@@ -5418,11 +5418,7 @@ func _photo_input(event: InputEvent) -> void:
 ## What's on screen, as an ordinary 8-bit sRGB picture (in HDR 2D the screen is
 ## linear floating point).
 func screen_image() -> Image:
-	var img: Image = get_viewport().get_texture().get_image()
-	if img and get_viewport().use_hdr_2d:
-		img.convert(Image.FORMAT_RGBA8)
-		img.linear_to_srgb()
-	return img
+	return Game.screen_image(get_viewport())
 
 
 func _take_photo() -> void:

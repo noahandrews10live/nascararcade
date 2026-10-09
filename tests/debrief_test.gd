@@ -50,7 +50,7 @@ func _shot(name: String) -> void:
 	if dir == "":
 		return
 	await RenderingServer.frame_post_draw
-	root.get_texture().get_image().save_png(dir.path_join(name + ".png"))
+	root.get_node("Game").screen_image(root).save_png(dir.path_join(name + ".png"))
 
 
 func _coach_cases() -> void:

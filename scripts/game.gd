@@ -1481,6 +1481,16 @@ func toggle_graphics() -> void:
 
 # --- materials -------------------------------------------------------------------
 
+## What a viewport shows, as an ordinary 8-bit sRGB picture (drawn in HDR 2D it
+## is linear floating point: the phone apps on HIGH and ULTRA).
+func screen_image(vp: Viewport) -> Image:
+	var img: Image = vp.get_texture().get_image()
+	if img and vp.use_hdr_2d:
+		img.convert(Image.FORMAT_RGBA8)
+		img.linear_to_srgb()
+	return img
+
+
 ## Creates a material of a given kind; style() gives it the retro or modern look.
 func make_mat(kind: String, color := Color.WHITE) -> StandardMaterial3D:
 	var m := StandardMaterial3D.new()

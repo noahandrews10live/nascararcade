@@ -48,6 +48,6 @@ func _run() -> void:
 			await process_frame
 		if out != "":
 			await RenderingServer.frame_post_draw
-			root.get_texture().get_image().save_png(out.path_join("damage_%d.png" % k))
+			root.get_node("Game").screen_image(root).save_png(out.path_join("damage_%d.png" % k))
 			print("saved damage_", k)
 	quit(0)

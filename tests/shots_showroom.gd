@@ -57,6 +57,6 @@ func _run() -> void:
 		for i in 6:
 			await process_frame
 		await RenderingServer.frame_post_draw
-		root.get_texture().get_image().save_png(out.path_join("show%s_%s.png" % [OS.get_environment("MAKE"), k]))
+		root.get_node("Game").screen_image(root).save_png(out.path_join("show%s_%s.png" % [OS.get_environment("MAKE"), k]))
 		print("saved ", k)
 	quit(0)

@@ -130,7 +130,7 @@ func _screen(name: String) -> void:
 		_check(covers.is_empty(), "%s: touch buttons don't cover any text %s" % [name, str(covers)])
 	if out != "":
 		await RenderingServer.frame_post_draw
-		root.get_texture().get_image().save_png(out.path_join("%s_%s.png" % [device, name]))
+		root.get_node("Game").screen_image(root).save_png(out.path_join("%s_%s.png" % [device, name]))
 
 
 func _run() -> void:

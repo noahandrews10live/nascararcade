@@ -45,6 +45,6 @@ func _run() -> void:
 		await process_frame
 	if out != "":
 		await RenderingServer.frame_post_draw
-		root.get_texture().get_image().save_png(out.path_join("people.png"))
+		root.get_node("Game").screen_image(root).save_png(out.path_join("people.png"))
 		print("saved people")
 	quit(0)

@@ -35,10 +35,10 @@ func _run() -> void:
 	for k in 3:
 		await _frames(90)
 		await RenderingServer.frame_post_draw
-		root.get_texture().get_image().save_png(out.path_join("broadcast_%d.png" % k))
+		root.get_node("Game").screen_image(root).save_png(out.path_join("broadcast_%d.png" % k))
 		print("saved ", k)
 	main.race.control._end_stage()
 	await _frames(20)
 	await RenderingServer.frame_post_draw
-	root.get_texture().get_image().save_png(out.path_join("broadcast_stage.png"))
+	root.get_node("Game").screen_image(root).save_png(out.path_join("broadcast_stage.png"))
 	quit()

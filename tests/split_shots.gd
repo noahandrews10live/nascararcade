@@ -27,7 +27,7 @@ func _run() -> void:
 		for i in 900:
 			await physics_frame
 		await RenderingServer.frame_post_draw
-		root.get_texture().get_image().save_png(out.path_join("split.png"))
+		root.get_node("Game").screen_image(root).save_png(out.path_join("split.png"))
 		print("saved split")
 		game.settings = saved
 		quit()

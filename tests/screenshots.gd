@@ -19,7 +19,7 @@ func _frames(n: int) -> void:
 
 func _shot(name: String) -> void:
 	await RenderingServer.frame_post_draw
-	var img := root.get_texture().get_image()
+	var img := root.get_node("Game").screen_image(root)
 	img.save_png(out.path_join(name + ".png"))
 	print("saved ", name)
 

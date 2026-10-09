@@ -41,6 +41,6 @@ func _run() -> void:
 			await _frames(150)
 			await RenderingServer.frame_post_draw
 			var name := "tv_t%d_c%s_%02d" % [tidx, cs, k]
-			root.get_texture().get_image().save_png(out.path_join(name + ".png"))
+			root.get_node("Game").screen_image(root).save_png(out.path_join(name + ".png"))
 			print("saved ", name)
 	quit(0)
