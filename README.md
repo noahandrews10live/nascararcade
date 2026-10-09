@@ -593,7 +593,11 @@ debug build signed with the project's debug key (`native/android/debug.keystore`
 so later builds install over it. To build it yourself:
 ```sh
 sh native/android/setup.sh          # a stand-in apksigner, SDK folder and keystore
-godot --headless --export-debug Android build/android/SpeedwayThunder.apk
+godot --rendering-driver vulkan --export-debug Android build/android/SpeedwayThunder.apk
+# (Not --headless: the shader baker compiles the game's shaders into the app at
+# export, and needs a GPU (a software one works: xvfb-run with Mesa's lavapipe).
+# Headless, it skips them and the phone compiles them during the first race.
+# The same goes for the iOS export on a Mac: export from the editor.)
 ```
 The setup doesn't need the Android SDK: `apksigner` is replaced by
 `native/android/ApkSignerCli.java` on Google's `apksig` library (APK signature
