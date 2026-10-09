@@ -1691,26 +1691,21 @@ func worn_paint_texture() -> Texture2D:
 		return _tex["worn_paint"]
 	var noise := FastNoiseLite.new()
 	noise.noise_type = FastNoiseLite.TYPE_SIMPLEX_SMOOTH
-	noise.frequency = 0.02
+	noise.frequency = 0.04
 	noise.fractal_octaves = 4
 	noise.fractal_gain = 0.7
 	noise.seed = 5
-	var ramp := Gradient.new()
-	ramp.set_color(0, Color(0.42, 0.42, 0.42))
-	ramp.set_offset(0, 0.0)
-	ramp.set_color(1, Color(1, 1, 1))
-	ramp.set_offset(1, 1.0)
-	ramp.add_point(0.18, Color(0.42, 0.42, 0.42))
-	ramp.add_point(0.24, Color(0.7, 0.7, 0.7))
-	ramp.add_point(0.42, Color(0.78, 0.78, 0.78))
-	ramp.add_point(0.6, Color(1, 1, 1))
-	var t := NoiseTexture2D.new()
-	t.width = 256
-	t.height = 256
-	t.seamless = true
-	t.noise = noise
-	t.color_ramp = ramp
-	t.generate_mipmaps = true
+	# (Built here, not as a NoiseTexture2D: that one fills itself in on a worker
+	# thread, and a race that ends meanwhile can crash the engine on the way out.)
+	var img: Image = noise.get_seamless_image(128, 128, false, false, 0.1, true)
+	img.convert(Image.FORMAT_RGB8)
+	for y in 128:
+		for x in 128:
+			var n: float = img.get_pixel(x, y).r
+			var v: float = 0.42 if n < 0.2 else lerp(0.7, 1.0, smoothstep(0.24, 0.6, n))
+			img.set_pixel(x, y, Color(v, v, v))
+	img.generate_mipmaps()
+	var t := ImageTexture.create_from_image(img)
 	_tex["worn_paint"] = t
 	return t
 
