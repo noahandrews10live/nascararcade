@@ -1538,7 +1538,7 @@ static func _fan_card_mesh() -> Mesh:
 		var b := Vector3(q[1], q[4], z)
 		var cc := Vector3(q[3], q[5], z)
 		var d := Vector3(q[2], q[5], z)
-		for v in [a, cc, b, a, d, cc]:
+		for v in [a, b, cc, a, cc, d]: # (clockwise seen from the track: the front)
 			st.add_vertex(v)
 	_fan_meshes["far"] = st.commit()
 	return _fan_meshes.far
