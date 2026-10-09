@@ -1440,6 +1440,7 @@ func _build_crowd() -> void:
 		Color(0.2, 0.28, 0.5), Color(0.45, 0.55, 0.7), Color(0.6, 0.15, 0.12), Color(0.85, 0.7, 0.2), Color(0.25, 0.4, 0.25), Color(0.75, 0.35, 0.12)]
 	var xforms: Array[Transform3D] = []
 	var cols: Array[Color] = []
+	var sec_s := PackedFloat32Array() # where along the track each fan sits
 	var seg := length / n
 	var spacing := 0.7
 	for i in n:
@@ -1463,37 +1464,87 @@ func _build_crowd() -> void:
 				var b := Basis.looking_at(facing, Vector3.UP).scaled(Vector3.ONE * rng.randf_range(0.9, 1.1))
 				xforms.append(Transform3D(b, p))
 				cols.append(shirts[rng.randi() % shirts.size()])
+				sec_s.append(s + t * seg)
 	if xforms.is_empty():
 		return
-	var mm := MultiMesh.new()
-	mm.transform_format = MultiMesh.TRANSFORM_3D
-	mm.use_colors = true
-	mm.mesh = _fan_mesh()
-	mm.instance_count = xforms.size()
-	for k in xforms.size():
-		mm.set_instance_transform(k, xforms[k])
-		mm.set_instance_color(k, cols[k])
-	var mmi := MultiMeshInstance3D.new()
-	mmi.name = "Crowd"
-	mmi.multimesh = mm
 	crowd_mat = ShaderMaterial.new()
 	crowd_mat.shader = load("res://shaders/crowd.gdshader")
 	crowd_mat.set_shader_parameter("modern", 1.0 if Game.modern else 0.0)
-	mmi.material_override = crowd_mat
-	mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	mmi.add_to_group("modern_only")
-	mmi.visible = Game.modern
-	add_child(mmi)
+	# One MultiMesh per 40 m of stand, so the stands out of shot aren't drawn at
+	# all; each in two versions: shaped fans up close, flat cut-outs (a quarter of
+	# the triangles) beyond 45 m.
+	var sections := {}
+	for k in xforms.size():
+		var key := int(floor(sec_s[k] / 40.0))
+		if not sections.has(key):
+			sections[key] = []
+		sections[key].append(k)
+	for key in sections:
+		var ids: Array = sections[key]
+		for far in [false, true]:
+			var mm := MultiMesh.new()
+			mm.transform_format = MultiMesh.TRANSFORM_3D
+			mm.use_colors = true
+			mm.mesh = _fan_card_mesh() if far else _fan_mesh()
+			mm.instance_count = ids.size()
+			for j in ids.size():
+				mm.set_instance_transform(j, xforms[ids[j]])
+				mm.set_instance_color(j, cols[ids[j]])
+			var mmi := MultiMeshInstance3D.new()
+			mmi.name = "Crowd%d%s" % [key, "Far" if far else ""]
+			mmi.multimesh = mm
+			mmi.material_override = crowd_mat
+			mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+			mmi.visibility_range_begin = 45.0 if far else 0.0
+			mmi.visibility_range_end = 0.0 if far else 50.0
+			mmi.add_to_group("modern_only")
+			mmi.add_to_group("crowd")
+			mmi.visible = Game.modern
+			add_child(mmi)
 
 
-## One seated fan: torso and head (the instance colour is the shirt).
+## One seated fan, up close: torso, arms (they swing up when the crowd's on its
+## feet), head and hair or a cap. Vertex alpha tags the part (crowd.gdshader).
 static func _fan_mesh() -> Mesh:
+	if _fan_meshes.has("near"):
+		return _fan_meshes.near
 	var st := SurfaceTool.new()
 	st.begin(Mesh.PRIMITIVE_TRIANGLES)
-	_box_st(st, Vector3(0, 0.45, 0), Vector3(0.44, 0.6, 0.28), Color(1, 1, 1))
-	_box_st(st, Vector3(0, 0.9, 0), Vector3(0.2, 0.24, 0.22), Color(0.9, 0.75, 0.6))
+	_box_st(st, Vector3(0, 0.42, 0), Vector3(0.4, 0.56, 0.26), Color(1, 1, 1, 1.0)) # torso
+	for sx in [-1.0, 1.0]:
+		_box_st(st, Vector3(sx * 0.255, 0.43, -0.01), Vector3(0.1, 0.46, 0.12), Color(1, 1, 1, 0.75)) # arm
+	_box_st(st, Vector3(0, 0.84, 0), Vector3(0.19, 0.23, 0.21), Color(1, 1, 1, 0.5)) # head
+	_box_st(st, Vector3(0, 0.975, 0.01), Vector3(0.21, 0.06, 0.23), Color(1, 1, 1, 0.0)) # hair / cap
+	_box_st(st, Vector3(0, 0.955, -0.15), Vector3(0.17, 0.02, 0.09), Color(1, 1, 1, 0.0)) # peak
 	st.generate_normals()
-	return st.commit()
+	_fan_meshes["near"] = st.commit()
+	return _fan_meshes.near
+
+
+## The same fan far away: a flat cut-out facing the track (8 triangles).
+static func _fan_card_mesh() -> Mesh:
+	if _fan_meshes.has("far"):
+		return _fan_meshes.far
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	st.set_normal(Vector3(0, 0, -1))
+	# (x0, x1 at the bottom; x0, x1 at the top; y0, y1; part)
+	for q in [[-0.19, 0.19, -0.25, 0.25, 0.14, 0.7, 1.0], [-0.31, -0.19, -0.31, -0.2, 0.2, 0.66, 0.75], [0.19, 0.31, 0.2, 0.31, 0.2, 0.66, 0.75],
+			[-0.095, 0.095, -0.095, 0.095, 0.72, 0.95, 0.5], [-0.105, 0.105, -0.105, 0.105, 0.95, 1.0, 0.0]]:
+		var c := Color(1, 1, 1, q[6])
+		st.set_color(c)
+		var z := -0.13
+		var a := Vector3(q[0], q[4], z)
+		var b := Vector3(q[1], q[4], z)
+		var cc := Vector3(q[3], q[5], z)
+		var d := Vector3(q[2], q[5], z)
+		for v in [a, cc, b, a, d, cc]:
+			st.add_vertex(v)
+	_fan_meshes["far"] = st.commit()
+	return _fan_meshes.far
+
+
+static var _fan_meshes := {}
 
 
 static func _box_st(st: SurfaceTool, c: Vector3, size: Vector3, col: Color) -> void:
@@ -1696,13 +1747,14 @@ static func _motorhome_mesh() -> Mesh:
 
 ## Reflection probes along the grandstands and pit road, so cars reflect the stands
 ## and the world around them rather than only the sky (desktop HIGH and up; the
-## phone apps from MEDIUM).
+## phone apps always; browsers from MEDIUM, at most 3 as each is drawn once at
+## the start and a mesh blends at most 2 there). Box-projected: the box is the
+## corridor between the stands and the infield, so the stands show in the paint
+## where they really are, not as if infinitely far away.
 func _build_probes() -> void:
-	if not (Game.forward_plus or Game.mobile_renderer):
-		return
 	var stand_len := front_length()
 	stand_len = clamp(stand_len * 0.9, 200.0, 900.0)
-	var count := clampi(int(stand_len / 150.0), 2, 6)
+	var count := clampi(int(stand_len / 150.0), 2, 6 if (Game.forward_plus or Game.mobile_renderer) else 3)
 	for k in count:
 		var s := (float(k) / (count - 1) - 0.5) * stand_len
 		var i := int(posmod(int(s / (length / n)), n))
@@ -1710,7 +1762,7 @@ func _build_probes() -> void:
 		probe.name = "Probe%d" % k
 		probe.update_mode = ReflectionProbe.UPDATE_ONCE
 		probe.size = Vector3(stand_len / count + 40.0, 30.0, width + 40.0)
-		probe.box_projection = false
+		probe.box_projection = true
 		probe.intensity = 0.9
 		probe.max_distance = 400.0
 		probe.ambient_mode = ReflectionProbe.AMBIENT_DISABLED

@@ -56,11 +56,57 @@ audio. The project has no imported assets.
     with light-tower beams at night, and FSR 2 upscaling with temporal anti-aliasing;
   - **built for the renderer it ships on.** The iPhone/iPad and Android apps run Godot's
     Mobile renderer (Metal on iOS, Vulkan on Android, falling back to OpenGL on phones
-    without Vulkan): reflection probes along the grandstands from MEDIUM, glow, sun
-    shadows kept to the distance where they read, and MSAA, which tiled phone GPUs
-    resolve almost for free. Nothing that reads the screen back (heat haze, motion
-    blur) or that Mobile doesn't have (SSAO, SSR, volumetric fog) is switched on.
-    Browsers run the Compatibility renderer (desktop browsers get SSAO on HIGH and up);
+    without Vulkan): reflection probes along the grandstands at every level, glow on
+    HIGH and up (and at night), sun shadows kept to the distance where they read, and
+    MSAA, which tiled phone GPUs resolve almost for free. Nothing that reads the screen
+    back (heat haze, motion blur) or that Mobile doesn't have (SSAO, SSR, volumetric fog)
+    is switched on. Browsers run the Compatibility renderer (desktop browsers get SSAO on
+    HIGH and up; reflection probes from MEDIUM);
+  - **the same picture on every renderer.** `tests/tone_probe.gd` measures the tone curve
+    each renderer actually draws (patches of known brightness, read back). Two fixes
+    came out of it: the phone renderer ignores the AgX white point unless it draws in
+    HDR 2D, so sunlit paint and sky clipped to white early. HIGH and ULTRA now draw in
+    HDR 2D and match the desktop curve; LOW and MEDIUM expose a little lower. And the
+    browser renderer's colour-adjustment pass made it draw into an 8-bit buffer before
+    tone mapping, which clipped every highlight (its brightest white was 206 of 255, a
+    dull grey); it's off there now. Desktop and phone screens dither (debanding), and the
+    browser's sky dithers itself;
+  - **paint that doesn't sparkle.** A gloss clear coat on a car far down the straight is a
+    highlight smaller than a pixel, which flickers on and off; MSAA can't fix that. The
+    body's own shader (`shaders/car_paint.gdshader`) widens the highlight just enough to
+    cover the pixel where the surface curves faster than a pixel can show (specular
+    anti-aliasing, after Kaplanyan and Tokuyoshi), on the paint and on the clear coat,
+    on every renderer;
+  - **cars that have raced.** Lap by lap the paint picks up road dirt and brake dust low
+    down (much faster in the wet and off the track), rubber flicked onto the sides behind
+    each wheel, and a film of bugs on the nose. The tyres carry GOODYEAR in white on the
+    sidewalls;
+  - **reflections in the right place.** The reflection probes are box-projected: the
+    stands show in the paint where they are, not as if infinitely far away. The browser
+    build has them too now (up to three, from MEDIUM);
+  - **asphalt with a history.** Over the surface, fixed for each track and seamless at the
+    line: sun-faded and fresher stretches, tar-sealed paving joints and cracks, patched
+    sections with sealed edges, dust and grit along the edges where no tyre cleans it,
+    and painted lines scuffed grey with chips of asphalt showing through. Thin lines fade
+    out instead of shimmering when they're smaller than a pixel. Today's rubber and
+    marbles go on top;
+  - **a crowd that's people.** Fans up close have arms (they go up with the action and
+    in the wave), heads and hair or caps; skin, hair and caps vary fan by fan, separate
+    from the shirt. Beyond 45 m each fan is a flat cut-out with a seventh of the
+    triangles, and the stands are drawn in 40 m sections, so the ones out of shot cost
+    nothing;
+  - **rain that looks like rain.** Standing water collects in puddles, more on the low side
+    of the banking; drops ring the water while it rains; shadows go soft and faint under
+    the cloud and colours a little muted. On ULTRA (desktop and the phone apps) the water
+    shows a true mirror image of the cars and stands: a second camera, mirrored below the
+    track, draws the world at half size;
+  - **phones that stay cool.** On Android the game reads the phone's own forecast of how
+    close it is to throttling (thermal headroom) every few seconds in a race; as it heats
+    up the 3D resolution steps down (to 60% at most) before any effect goes, and comes
+    back when it's cool. On iPhones and iPads whose GPU supports it, HIGH and ULTRA draw the 3D
+    at 77% and Apple's MetalFX upscaler rebuilds it (Options → MetalFX upscaling), the
+    time saved going into longer shadows. The phone apps' shaders are compiled at export
+    (shader baker), so the first race doesn't stutter while they compile;
   - **calibrated materials.** Roughness is the biggest realism control, so every surface
     has its own: asphalt and concrete have roughness maps made from their photographs
     (polished stone tops and smooth formwork catch the light, the binder and pits don't;
@@ -710,6 +756,7 @@ Each test also runs on its own, headless (`godot --headless --fixed-fps 60 --pat
 | `tests/black_box_test.gd` | The black box: B opens it, three sectors timed that add up to the lap, best sectors kept (whole sectors only), the gaps and fuel |
 | `tests/big_field_test.gd` | A 40-car field: every car its own pit box, a minute of racing; AI AGGRESSION calm / normal / hard |
 | `tests/league_test.gd` | Paint (your own sponsor, paint codes) and leagues against the stand-in server: create, join by code, race a round, the result and the points table, a weekly league's schedule, the LEAGUES screens |
+| `tests/gfx_realism_test.gd` | The realism pass: the body paint shader on every car (specular anti-aliasing, wear building up as it drives), box-projected probes, the crowd in near/far sections, the asphalt's history and worn lines, heat stepping the resolution down and back on Android, MetalFX only on iOS, the wet film and its mirror camera (reflected below the surface, picture flipped), the browser renderer without the clipping adjustment pass |
 | `tests/caution_test.gd` | Quick cautions: the pit call screen, AI pit calls, the restart order, about 15 s yellow to green |
 | `tests/race_mode_test.gd` | Single Race through the real game flow |
 | `tests/weekend_test.gd` | Practice → qualifying → race, plus a season round |

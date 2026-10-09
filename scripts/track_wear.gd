@@ -166,16 +166,23 @@ func _build_overlay() -> void:
 			var c: Vector3 = track._pt(i2, d1) + Vector3.UP * 0.018
 			var dd: Vector3 = track._pt(i2, d0) + Vector3.UP * 0.018
 			var quad := [[a, Vector2(u0, v0)], [b, Vector2(u1, v0)], [c, Vector2(u1, v1)], [a, Vector2(u0, v0)], [c, Vector2(u1, v1)], [dd, Vector2(u0, v1)]]
+			# Lit like the (banked) surface under it, not as if flat.
+			var nrm: Vector3 = (b - a).cross(dd - a).normalized()
+			if nrm.y < 0.0:
+				nrm = -nrm
 			for q in quad:
 				st.set_uv(q[1])
 				st.set_uv2(Vector2(q[0].x, q[0].z) * 0.5)
-				st.set_normal(Vector3.UP)
+				st.set_normal(nrm)
 				st.add_vertex(q[0])
 	_mesh = MeshInstance3D.new()
 	_mesh.mesh = st.commit()
 	_mat = ShaderMaterial.new()
 	_mat.shader = load("res://shaders/track_wear.gdshader")
 	_mat.set_shader_parameter("wear", _tex)
+	_mat.set_shader_parameter("track_len", float(track.length))
+	_mat.set_shader_parameter("track_width", float(track.width))
+	_mat.set_shader_parameter("seed", float(hash(String(track.cfg.get("name", ""))) % 1000))
 	_mesh.material_override = _mat
 	_mesh.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	add_child(_mesh)

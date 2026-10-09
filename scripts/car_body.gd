@@ -449,6 +449,12 @@ static func build(root: Node3D, team: Dictionary, wheels_parent: Node3D) -> Dict
 		mi.visibility_range_end = 30.0 if level == 0 else 0.0
 		root.add_child(mi)
 		lods.append({"data": data, "mi": mi, "mats": mats, "cols": cols})
+	# The modern body's paint: the livery under a clear coat, with specular
+	# anti-aliasing and race wear (shaders/car_paint.gdshader). The standard
+	# material stays as the mesh's own, for anything that reads it.
+	var paint_fx := paint_shader(lods[0].mi.mesh.get_aabb())
+	for l in lods:
+		l.mi.set_surface_override_material(0, paint_fx)
 
 	# Trim, wheel wells, lights and the cage inside: the same for every car of a make.
 	var key := "make%d" % mk
@@ -599,6 +605,7 @@ static func build(root: Node3D, team: Dictionary, wheels_parent: Node3D) -> Dict
 			_instance(modern, _shared["wheel_" + side], rim_mat)
 			_instance(modern, _shared["chrome_" + side], chrome).visibility_range_end = 70.0
 			_instance(modern, _shared["lug_" + side], lug_mat).visibility_range_end = 50.0
+			_instance(modern, _shared["letters_" + side], _letters_mat()).visibility_range_end = 25.0
 			var disc := _instance(modern, _shared.disc, glow_mat)
 			disc.rotation.z = PI * 0.5
 			disc.visibility_range_end = 45.0
@@ -630,7 +637,29 @@ static func build(root: Node3D, team: Dictionary, wheels_parent: Node3D) -> Dict
 			root.add_child(f)
 			flames.append(f)
 	_mk = -1
-	return {"tail": tail_mat, "glow": glow_mat, "flames": flames, "lods": lods, "wheels": wheels, "holders": holders, "interior": interior, "paint": paint, "make": mk, "loose": loose}
+	return {"tail": tail_mat, "glow": glow_mat, "flames": flames, "lods": lods, "wheels": wheels, "holders": holders, "interior": interior, "paint": paint, "paint_fx": paint_fx, "make": mk, "loose": loose}
+
+
+## A car's body paint (one per car: its wear is its own).
+static func paint_shader(aabb: AABB) -> ShaderMaterial:
+	if not _shared.has("paint_shader"):
+		_shared["paint_shader"] = load("res://shaders/car_paint.gdshader")
+	var m := ShaderMaterial.new()
+	m.shader = _shared.paint_shader
+	m.set_shader_parameter("body_min", aabb.position)
+	m.set_shader_parameter("body_max", aabb.end)
+	m.set_shader_parameter("wheel_z", Vector2(-float(AXLES[1]), -float(AXLES[0])))
+	return m
+
+
+## Sets the body's wear (each 0..1): road dirt, tyre rubber, bugs on the nose.
+static func set_wear(info: Dictionary, grime: float, rubber: float, bugs: float) -> void:
+	var m: ShaderMaterial = info.get("paint_fx")
+	if m == null:
+		return
+	m.set_shader_parameter("grime", grime)
+	m.set_shader_parameter("rubber", rubber)
+	m.set_shader_parameter("bugs", bugs)
 
 
 ## Pushes the body in where it's been hit. `damage` is the car's per-side damage.
@@ -925,6 +954,67 @@ static func _build_wheel(side: String) -> void:
 	nut.rings = 0
 	st.append_from(nut, 0, Transform3D(Basis.from_euler(Vector3(0, 0, -o * PI * 0.5)), Vector3(o * 0.132, 0, 0)))
 	_shared["lug_" + side] = st.commit()
+	_shared["letters_" + side] = _letters_ring(o)
+
+
+## The tyre maker's name round the outer sidewall, twice (a thin ring just
+## proud of the rubber, the letters cut out of a texture).
+static func _letters_ring(o: float) -> ArrayMesh:
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var segs := 48
+	var r_in := 0.272
+	var r_out := 0.314
+	var x := o * 0.1695
+	st.set_normal(Vector3(o, 0, 0))
+	for k in segs:
+		var a0 := TAU * k / segs
+		var a1 := TAU * (k + 1) / segs
+		var u0 := 2.0 * k / segs
+		var u1 := 2.0 * (k + 1) / segs
+		var q := [[Vector3(x, r_out * cos(a0), r_out * sin(a0)), Vector2(u0, 0)], [Vector3(x, r_in * cos(a0), r_in * sin(a0)), Vector2(u0, 1)],
+			[Vector3(x, r_out * cos(a1), r_out * sin(a1)), Vector2(u1, 0)], [Vector3(x, r_in * cos(a1), r_in * sin(a1)), Vector2(u1, 1)]]
+		var tri := [q[0], q[1], q[2], q[1], q[3], q[2]] if o < 0.0 else [q[0], q[2], q[1], q[1], q[2], q[3]]
+		for v in tri:
+			st.set_uv(v[1])
+			st.add_vertex(v[0])
+	return st.commit()
+
+
+## "GOODYEAR" in white block capitals on clear (a 5x7 pixel font, 3x scale).
+const _GLYPHS := {
+	"G": [".###.", "#...#", "#....", "#.###", "#...#", "#...#", ".###."],
+	"O": [".###.", "#...#", "#...#", "#...#", "#...#", "#...#", ".###."],
+	"D": ["####.", "#...#", "#...#", "#...#", "#...#", "#...#", "####."],
+	"Y": ["#...#", "#...#", ".#.#.", "..#..", "..#..", "..#..", "..#.."],
+	"E": ["#####", "#....", "#....", "####.", "#....", "#....", "#####"],
+	"A": [".###.", "#...#", "#...#", "#####", "#...#", "#...#", "#...#"],
+	"R": ["####.", "#...#", "#...#", "####.", "#.#..", "#..#.", "#...#"],
+}
+
+
+static func _letters_mat() -> StandardMaterial3D:
+	if _shared.has("letters_mat"):
+		return _shared.letters_mat
+	var img := Image.create_empty(256, 32, false, Image.FORMAT_RGBA8)
+	img.fill(Color(1, 1, 1, 0))
+	var word := "GOODYEAR"
+	var x0 := (256 - word.length() * 21) / 2
+	for li in word.length():
+		var g: Array = _GLYPHS[word[li]]
+		for gy in 7:
+			for gx in 5:
+				if g[gy][gx] == "#":
+					img.fill_rect(Rect2i(x0 + li * 21 + gx * 3, 5 + gy * 3, 3, 3), Color(0.92, 0.92, 0.9, 1))
+	img.generate_mipmaps()
+	var m := StandardMaterial3D.new()
+	m.albedo_texture = ImageTexture.create_from_image(img)
+	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA_SCISSOR
+	m.alpha_scissor_threshold = 0.5
+	m.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
+	m.roughness = 0.6
+	_shared["letters_mat"] = m
+	return m
 
 
 ## A surface of revolution about the X axis: `pts` are (radius, axial), axial

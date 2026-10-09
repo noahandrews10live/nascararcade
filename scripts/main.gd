@@ -411,6 +411,11 @@ func _use_track(idx: int) -> void:
 	_apply_graphics()
 
 
+## The grade over the tone curve (desktop and the phone apps).
+const GRADE_SATURATION := 1.06
+const GRADE_CONTRAST := 1.04
+
+
 ## Applies the 1999 or modern look to the renderer, environment and window.
 func _apply_graphics() -> void:
 	var modern := Game.modern
@@ -427,6 +432,10 @@ func _apply_graphics() -> void:
 		vp.screen_space_aa = Viewport.SCREEN_SPACE_AA_DISABLED
 	vp.scaling_3d_mode = Viewport.SCALING_3D_MODE_BILINEAR
 	vp.scaling_3d_scale = 1.0
+	# Debanding (Forward+, and the phone renderer's 3D since 4.6): skies and
+	# glossy paint fade smoothly instead of in steps. The browser renderer has
+	# none; its sky dithers itself.
+	vp.use_debanding = modern and (Game.forward_plus or Game.mobile_renderer)
 	if not OS.has_feature("web"):
 		DisplayServer.window_set_vsync_mode(DisplayServer.VSYNC_ENABLED if Game.vsync else DisplayServer.VSYNC_DISABLED)
 	scan_rect.visible = Game.scanlines and not modern
@@ -447,6 +456,7 @@ func _apply_graphics() -> void:
 		sm.set_shader_parameter("energy", 1.0)
 		sm.set_shader_parameter("cloud_cover", float(cfg.get("clouds", 0.42)))
 		sm.set_shader_parameter("cloud_seed", float(hash(cfg.name) % 100))
+		sm.set_shader_parameter("dither", 0.0 if (Game.forward_plus or Game.mobile_renderer) else 0.025)
 		_set_sky_photo(sm, "night" if night else ("dusk" if float(cfg.sun_elev) < 16.0 else "day"))
 		sky.sky_material = sm
 	else:
@@ -492,8 +502,8 @@ func _apply_graphics() -> void:
 		env.volumetric_fog_albedo = Color(0.8, 0.8, 0.85)
 		env.volumetric_fog_length = 220.0
 		env.adjustment_enabled = true
-		env.adjustment_saturation = 1.08
-		env.adjustment_contrast = 1.04
+		env.adjustment_saturation = GRADE_SATURATION
+		env.adjustment_contrast = GRADE_CONTRAST
 		sun.light_energy = 0.15 if night else (1.4 if cfg.sun_elev > 20.0 else 1.1)
 		sun.light_color = Color(0.7, 0.78, 1.0) if night else Color(1.0, 0.97, 0.92)
 		sun.shadow_enabled = true
@@ -511,6 +521,11 @@ func _apply_graphics() -> void:
 			env.ambient_light_energy *= 0.5
 			env.tonemap_exposure *= 0.85
 			sun.light_energy *= 1.1
+			# No colour-adjustment pass here: it makes this renderer draw into an
+			# 8-bit buffer before tone mapping, which clipped every highlight at 1.0
+			# (the brightest white came out 206 of 255, a dull grey; measured with
+			# tests/tone_probe.gd). Without it the curve runs to full white.
+			env.adjustment_enabled = false
 		_apply_quality(night)
 	else:
 		env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
@@ -611,6 +626,12 @@ func apply_time_and_weather(w: Node) -> void:
 	if _base_fog == 0.0:
 		_base_fog = env.fog_density
 	env.fog_density = _base_fog * (1.0 + 3.0 * w.rain)
+	if Game.modern:
+		# Under cloud the light comes from the whole sky: shadows soft and faint,
+		# colours a little muted (as TV pictures of a wet race look).
+		sun.shadow_opacity = lerp(1.0, 0.35, w.rain)
+		if env.adjustment_enabled:
+			env.adjustment_saturation = GRADE_SATURATION * (1.0 - 0.22 * max(w.rain, wet_avg * 0.5))
 	if atmosphere and Game.modern:
 		atmosphere.configure(true, Game.forward_plus, Game.quality_level(), dark, w.hour, max(w.rain, wet_avg * 0.5))
 	# Light towers come on when it gets dark.
@@ -683,8 +704,23 @@ func _apply_quality(night: bool) -> void:
 		# Forward+ only), and MSAA, which tiled phone GPUs resolve almost for free.
 		vp.scaling_3d_mode = Viewport.SCALING_3D_MODE_BILINEAR
 		_web_scale = 1.0
-		_fit_web_resolution(true)
 		vp.msaa_3d = [Viewport.MSAA_2X, Viewport.MSAA_DISABLED, Viewport.MSAA_2X, Viewport.MSAA_4X, Viewport.MSAA_4X][q]
+		# The tone curve: this renderer ignores the AgX white point (6.0) and uses
+		# 2.0 unless the picture is drawn in HDR 2D, so sunlit paint and sky clipped
+		# to white well before the desktop's (tests/tone_probe.gd). HIGH and ULTRA
+		# draw in HDR 2D (twice the colour bandwidth) and match the desktop curve;
+		# LOW and MEDIUM keep the cheaper buffer and expose 12% lower, so less clips.
+		vp.use_hdr_2d = q >= 3
+		if q < 3:
+			env.tonemap_exposure *= 0.88
+		if metalfx_active():
+			# iPhone / iPad on HIGH and ULTRA: draw the 3D at 77% and let Apple's
+			# temporal upscaler rebuild full resolution (it anti-aliases too, so
+			# no MSAA); the time saved goes into longer shadows.
+			vp.scaling_3d_mode = Viewport.SCALING_3D_MODE_METALFX_TEMPORAL
+			vp.msaa_3d = Viewport.MSAA_DISABLED
+			_web_scale = METALFX_SCALE
+		_fit_web_resolution(true)
 	else:
 		# Compatibility renderer (browser): plain upscaling and FXAA.
 		vp.scaling_3d_mode = Viewport.SCALING_3D_MODE_BILINEAR
@@ -700,7 +736,7 @@ func _apply_quality(night: bool) -> void:
 	if fp:
 		sun.directional_shadow_max_distance = [150.0, 150.0, 200.0, 320.0, 420.0][q]
 	elif mob:
-		sun.directional_shadow_max_distance = [110.0, 80.0, 110.0, 160.0, 220.0][q]
+		sun.directional_shadow_max_distance = [110.0, 80.0, 110.0, 160.0, 220.0][q] * (1.25 if metalfx_active() else 1.0)
 	else:
 		sun.directional_shadow_max_distance = [0.0, 0.0, 120.0, 180.0, 240.0][q]
 	RenderingServer.directional_soft_shadow_filter_set_quality(
@@ -712,9 +748,88 @@ func _apply_quality(night: bool) -> void:
 			RenderingServer.ENV_SSAO_QUALITY_LOW if q <= 2 else RenderingServer.ENV_SSAO_QUALITY_MEDIUM, q <= 2, 0.5, 2, 50.0, 300.0)
 	env.ssr_enabled = fp and q >= 4
 	env.volumetric_fog_enabled = fp and night and q >= 3
-	env.glow_enabled = fp or mob or q >= 3
-	get_tree().call_group("probe", "set_visible", (fp and q >= 3) or (mob and q >= 2))
+	# Glow: on phones it costs an extra pass that breaks the GPU's on-chip tiling,
+	# so LOW and MEDIUM skip it by day (at night the lights need it).
+	env.glow_enabled = fp or (mob and (q >= 3 or night)) or (not mob and q >= 3)
+	# Reflection probes: the stands and the world in the paint (the studios' first
+	# priority). Phones keep them even on LOW; browsers from MEDIUM.
+	get_tree().call_group("probe", "set_visible", (fp and q >= 3) or mob or (not fp and not mob and q >= 2))
 	get_tree().call_group("haze", "set_visible", fp and q >= 3)
+
+
+## Heat (Android): the phone's own forecast of how close it is to throttling
+## (PowerManager thermal headroom, Android 11+; the thermal status from Android
+## 10), read every 5 seconds in a race. A phone that throttles drops its clocks
+## and every frame gets slower, so the game backs off first: the 3D resolution
+## steps down (to 60% at most), and only if it keeps heating does AUTO quality
+## drop a level. Resolution comes back after 30 cool seconds.
+var thermal_cap := 1.0 # the 3D resolution's ceiling while the phone is hot
+var _thermal_pm = null
+var _thermal_t := 0.0
+var _thermal_cool := 0.0
+
+
+func _thermal_check(delta: float) -> void:
+	if OS.get_name() != "Android" or not Game.mobile_renderer or state != State.RACE or paused:
+		return
+	_thermal_t -= delta
+	if _thermal_t > 0.0:
+		return
+	_thermal_t = 5.0
+	var api := int(OS.get_version().split(".")[0]) if OS.get_version() != "" else 0
+	if _thermal_pm == null:
+		if api < 10 or not Engine.has_singleton("AndroidRuntime"):
+			_thermal_t = INF
+			return
+		var ctx = Engine.get_singleton("AndroidRuntime").getApplicationContext()
+		_thermal_pm = ctx.getSystemService("power") if ctx != null else null
+		if _thermal_pm == null:
+			_thermal_t = INF
+			return
+	var head := NAN
+	if api >= 11:
+		var h = _thermal_pm.getThermalHeadroom(10)
+		if h != null:
+			head = float(h)
+	var st = _thermal_pm.getCurrentThermalStatus()
+	apply_thermal(head, int(st) if st != null else 0)
+
+
+## One reading: `head` 0 (cool) .. 1 (throttling now), NAN if unknown;
+## `status` Android's THERMAL_STATUS_* (0 none, 1 light, 2 moderate, 3 severe...).
+func apply_thermal(head: float, status: int) -> void:
+	var known := not is_nan(head)
+	var hot := (known and head >= 0.85) or status >= 2
+	var very := (known and head >= 0.95) or status >= 3
+	var cool := (not known or head < 0.7) and status <= 1
+	var before := thermal_cap
+	if hot:
+		thermal_cap = max(thermal_cap - 0.1, 0.6)
+		_thermal_cool = 0.0
+	elif cool:
+		_thermal_cool += 5.0
+		if _thermal_cool >= 30.0:
+			thermal_cap = min(thermal_cap + 0.1, 1.0)
+			_thermal_cool = 0.0
+	if very and thermal_cap <= 0.6 + 1e-3 and Game.quality == 0 and Game.auto_quality > 1:
+		Game.auto_quality -= 1
+		_apply_graphics()
+	if not is_equal_approx(before, thermal_cap):
+		_fit_web_resolution(true)
+
+
+## MetalFX temporal upscaling: iPhones and iPads on Metal whose GPU reports it,
+## HIGH and ULTRA, unless turned off in Options.
+const METALFX_SCALE := 0.77
+
+
+func metalfx_active() -> bool:
+	if not Game.mobile_renderer or OS.get_name() != "iOS" or int(Game.settings.get("metalfx", 1)) == 0:
+		return false
+	if Game.quality_level() < 3:
+		return false
+	var rd := RenderingServer.get_rendering_device()
+	return rd != null and rd.has_feature(RenderingDevice.SUPPORTS_METALFX_TEMPORAL)
 
 
 ## Browsers (phones above all): the canvas is the screen's full native size (on an
@@ -766,6 +881,9 @@ func _fit_web_resolution(force := false) -> void:
 	var mobile: bool = Game.touch_device()
 	if not mobile and mode == 0:
 		scale = min(scale, _web_scale) # desktop browsers follow the quality preset
+	if metalfx_active() and mode <= 1:
+		scale = min(scale, METALFX_SCALE) # the upscaler rebuilds the rest
+	scale = min(scale, thermal_cap)
 	get_viewport().scaling_3d_scale = clamp(scale, 0.35, 1.0)
 
 
@@ -2796,7 +2914,7 @@ func open_report() -> void:
 		pause_layer.visible = false
 		touch.visible = false
 		await RenderingServer.frame_post_draw
-		img = get_viewport().get_texture().get_image()
+		img = screen_image()
 	pause_layer.visible = pl_vis or in_race
 	touch.visible = t_vis
 	if img and not img.is_empty() and img.get_width() > 480:
@@ -3186,6 +3304,7 @@ func _process(delta: float) -> void:
 		atmosphere.update(delta, fc.speed() if fc and is_instance_valid(fc) else 0.0, cockpit != null and is_instance_valid(cockpit) and cockpit.visible, racing)
 	Game.pt("frame.rain+atmosphere", t0)
 	_auto_quality(delta)
+	_thermal_check(delta)
 	_sim_governor()
 	if OS.has_feature("web") and Game.modern:
 		_dynamic_resolution(delta)
@@ -3768,6 +3887,7 @@ func _enter_options() -> void:
 		{"id": "gfx", "label": "GRAPHICS", "values": ["1999", "MODERN"] if Game.modern_supported else ["1999"], "index": 1 if Game.modern else 0, "hint": "MODERN: REALISTIC LIGHTING AND DETAIL.  1999: THE ORIGINAL ARCADE LOOK"},
 		{"id": "quality", "label": "QUALITY (MODERN)", "values": Game.QUALITY_NAMES, "index": Game.quality, "hint": "AUTO LOWERS DETAIL WHEN FRAMES RUN LATE"},
 		{"id": "res_mode", "label": "RESOLUTION", "values": RES_MODES, "index": int(Game.settings.get("res_mode", 0)), "hint": _display_hint()},
+		{"id": "metalfx", "label": "METALFX UPSCALING", "values": ["OFF", "ON"], "index": int(Game.settings.get("metalfx", 1)), "hint": "IPHONE / IPAD, HIGH AND ULTRA: DRAWS THE 3D AT 77% AND APPLE'S UPSCALER REBUILDS IT SHARP. OFF IF YOU SEE SMEARING BEHIND CARS"},
 		{"id": "smooth", "label": "MOTION SMOOTHING", "values": ["OFF", "ON"], "index": 1 if Game.smoothing else 0, "hint": "SMOOTH MOTION ON 120/144 HZ SCREENS (ADDS UNDER 1 FRAME OF DELAY)"},
 		{"id": "blur", "label": "MOTION BLUR", "values": ["OFF", "LOW", "HIGH"], "index": Game.motion_blur, "hint": "DESKTOP MODERN LOOK ONLY"},
 		{"id": "wheel_setup", "label": "WHEEL SETUP", "hint": "STEERING WHEEL, PEDALS AND FORCE FEEDBACK"},
@@ -3795,6 +3915,8 @@ func _enter_options() -> void:
 		{"id": "reset", "label": "RESET LAP RECORDS"},
 		{"id": "back", "label": "DONE"},
 	]
+	if OS.get_name() != "iOS":
+		rows = rows.filter(func(r): return r.id != "metalfx")
 	_open_menu("options", "OPTIONS", rows, rows.size() - 1)
 	var sp: Control = load("res://scripts/steer_preview.gd").new()
 	sp.main = self
@@ -3874,6 +3996,10 @@ func _on_menu_changed(id: String, idx: int) -> void:
 				Game.save_settings()
 			elif id == "radio":
 				Game.radio_voice = idx == 1
+				Game.save_settings()
+			elif id == "metalfx":
+				Game.settings["metalfx"] = idx
+				_apply_graphics()
 				Game.save_settings()
 			elif id == "res_mode":
 				Game.settings["res_mode"] = idx
@@ -5289,9 +5415,19 @@ func _photo_input(event: InputEvent) -> void:
 		_take_photo()
 
 
+## What's on screen, as an ordinary 8-bit sRGB picture (in HDR 2D the screen is
+## linear floating point).
+func screen_image() -> Image:
+	var img: Image = get_viewport().get_texture().get_image()
+	if img and get_viewport().use_hdr_2d:
+		img.convert(Image.FORMAT_RGBA8)
+		img.linear_to_srgb()
+	return img
+
+
 func _take_photo() -> void:
 	await RenderingServer.frame_post_draw
-	var img: Image = get_viewport().get_texture().get_image()
+	var img: Image = screen_image()
 	if img == null:
 		return
 	var fname := "speedway_%s.png" % Time.get_datetime_string_from_system().replace(":", "-")

@@ -867,6 +867,8 @@ func present_car(car: Node3D) -> void:
 	main.orbit = 0.6 + PI - 1.3 # turns into its best angle as the paint goes on
 	if car and car._body.has("paint"):
 		(car._body.paint as StandardMaterial3D).albedo_color = Color(0.3, 0.31, 0.33)
+		if car._body.has("paint_fx"):
+			car._body.paint_fx.set_shader_parameter("tint", Color(0.3, 0.31, 0.33))
 
 
 func _update_showroom(delta: float) -> void:
@@ -876,6 +878,8 @@ func _update_showroom(delta: float) -> void:
 	if car and is_instance_valid(car) and car._body.has("paint"):
 		var k: float = clamp((_paint_t - 0.15) / 0.7, 0.0, 1.0)
 		(car._body.paint as StandardMaterial3D).albedo_color = Color(0.3, 0.31, 0.33).lerp(Color.WHITE, k * k * (3.0 - 2.0 * k))
+		if car._body.has("paint_fx"):
+			car._body.paint_fx.set_shader_parameter("tint", Color(0.3, 0.31, 0.33).lerp(Color.WHITE, k * k * (3.0 - 2.0 * k)))
 	if showroom and is_instance_valid(showroom):
 		showroom.visible = main.state in [main.State.CAR_SELECT, main.State.MENU, main.State.MODE_SELECT] and car != null and is_instance_valid(car)
 

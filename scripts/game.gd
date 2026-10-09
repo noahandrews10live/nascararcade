@@ -1531,7 +1531,9 @@ func style(m: StandardMaterial3D) -> void:
 	m.uv1_triplanar = false
 	m.uv1_world_triplanar = false
 	m.emission_enabled = false
-	m.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS_ANISOTROPIC
+	# Anisotropic filtering where it shows: the ground, seen at a glancing angle
+	# (asphalt runs out to the horizon). Everything else plain mipmaps, cheaper.
+	m.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS_ANISOTROPIC if kind in ["asphalt", "grass", "concrete", "ground", "line"] else BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
 	match kind:
 		"paint":
 			if modern:
@@ -1590,6 +1592,13 @@ func style(m: StandardMaterial3D) -> void:
 				m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 			if modern:
 				m.roughness = {"asphalt": 0.82, "grass": 0.95, "concrete": 0.7, "line": 0.55, "scenery": 0.8}[kind]
+				if kind == "line":
+					# Painted lines wear: grey where tyres cross them, the asphalt
+					# showing through in specks.
+					m.uv1_triplanar = true
+					m.uv1_world_triplanar = true
+					m.uv1_scale = Vector3.ONE * 0.25
+					m.albedo_texture = worn_paint_texture()
 				if kind in ["asphalt", "grass", "concrete"]:
 					m.uv1_triplanar = true
 					m.uv1_world_triplanar = true
@@ -1665,6 +1674,37 @@ func style(m: StandardMaterial3D) -> void:
 
 
 ## Chain-link fence pattern: two sets of diagonal wires on a transparent background.
+## Worn road paint, tiling every 4 m: mostly full strength, with scuffed grey
+## blotches and chips where the asphalt shows through (multiplies the line colour).
+func worn_paint_texture() -> Texture2D:
+	if _tex.has("worn_paint"):
+		return _tex["worn_paint"]
+	var noise := FastNoiseLite.new()
+	noise.noise_type = FastNoiseLite.TYPE_SIMPLEX_SMOOTH
+	noise.frequency = 0.02
+	noise.fractal_octaves = 4
+	noise.fractal_gain = 0.7
+	noise.seed = 5
+	var ramp := Gradient.new()
+	ramp.set_color(0, Color(0.42, 0.42, 0.42))
+	ramp.set_offset(0, 0.0)
+	ramp.set_color(1, Color(1, 1, 1))
+	ramp.set_offset(1, 1.0)
+	ramp.add_point(0.18, Color(0.42, 0.42, 0.42))
+	ramp.add_point(0.24, Color(0.7, 0.7, 0.7))
+	ramp.add_point(0.42, Color(0.78, 0.78, 0.78))
+	ramp.add_point(0.6, Color(1, 1, 1))
+	var t := NoiseTexture2D.new()
+	t.width = 256
+	t.height = 256
+	t.seamless = true
+	t.noise = noise
+	t.color_ramp = ramp
+	t.generate_mipmaps = true
+	_tex["worn_paint"] = t
+	return t
+
+
 func chain_link_texture() -> Texture2D:
 	if _tex.has("chain"):
 		return _tex["chain"]

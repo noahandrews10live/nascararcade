@@ -1552,9 +1552,31 @@ static func _contact_material() -> StandardMaterial3D:
 	return _contact_mat
 
 
+## Wear on the paint (0..1 each), built up by the distance driven: road dirt
+## (much faster in the wet and on the grass), rubber flicked off the tyres, bugs
+## on the nose at speed. Shown by the body's paint shader.
+var paint_grime := 0.0
+var paint_rubber := 0.0
+var paint_bugs := 0.0
+var _paint_shown := Vector3(-1, -1, -1)
+
+
+func _update_paint_wear(delta: float) -> void:
+	var km: float = abs(v) * delta * 0.001
+	paint_grime = min(paint_grime + km * (0.012 + 0.07 * _wet) + (0.04 * delta if on_grass and abs(v) > 3.0 else 0.0), 0.9)
+	paint_rubber = min(paint_rubber + km * 0.014, 1.0)
+	if abs(v) > 30.0:
+		paint_bugs = min(paint_bugs + km * 0.008, 0.8)
+	var now := Vector3(paint_grime, paint_rubber, paint_bugs)
+	if (now - _paint_shown).length() > 0.01:
+		_paint_shown = now
+		CarBody.set_wear(_body, paint_grime, paint_rubber, paint_bugs)
+
+
 func _update_visual(delta: float) -> void:
 	if track == null:
 		return
+	_update_paint_wear(delta)
 	if _contact:
 		_contact.visible = Game.modern and not tumbling and not towed
 	var tr: Transform3D

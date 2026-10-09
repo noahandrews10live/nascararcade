@@ -20,6 +20,9 @@ uniform float env_mix : hint_range(0.0, 1.0) = 0.0;
 uniform float env_scale = 1.0;
 uniform float env_sun_u = 0.5; // where the photo's sun is across the panorama
 uniform float env_clamp = 12.0; // the photo's sun would double our sun's highlight
+// The browser renderer draws into 8 bits a channel with no debanding of its own:
+// a little noise (about one step) breaks the smooth gradient's bands.
+uniform float dither = 0.0;
 
 float hash(vec2 p) {
 	p = fract(p * vec2(123.34, 456.21));
@@ -92,6 +95,10 @@ void sky() {
 		vec3 photo = min(texture(env_map, uv).rgb * env_scale, vec3(env_clamp));
 		float above = smoothstep(-0.03, 0.06, h);
 		col = mix(col, mix(col, photo, above), env_mix);
+	}
+	if (dither > 0.0 && !AT_CUBEMAP_PASS) {
+		float nz = fract(sin(dot(FRAGCOORD.xy, vec2(12.9898, 78.233))) * 43758.5453);
+		col *= 1.0 + (nz - 0.5) * dither;
 	}
 	COLOR = col * energy;
 }
